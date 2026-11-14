@@ -19,3 +19,4 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - R5. `src/content/copy.ts` is written by the lead in Task 1 with every fixed string from the plan. Lanes import from it and never edit it; strings a lane owns (verdict titles, near-miss lines, commentary) live in that lane's module.
 - R6. `src/game/rng.ts` is owned by Lane G (Wave 1); Task 4 uses it and does not recreate it.
 - R7. Yahoo Finance history download works when the script sends an honest client name in the User-Agent header (it returns 429 with none). No browser impersonation.
+- R8. Near miss "Bought back N days after the peak" (spec 8.2) is read as "Bought back N days after the bottom" (buy 1 to 10 trading days after the lowest close), the mirror of the sale line. Cost if wrong: one string and one condition.
