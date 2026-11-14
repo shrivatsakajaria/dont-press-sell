@@ -29,3 +29,5 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - R16. An ordinary fall step holds at most 700 ms, so slow-motion days (800 ms) always feel slower; runs with short falls finish sooner than 45 s.
 - R17. 1929 and 2000 get a 50-second fall (spec allows up to about 60 s in total).
 - R19 (provisional, for SK). Anonymised headlines that an expert can place on their own at 75% or more, or at 50% or more early in the fall, are rewritten to be less specific. The expert tester still names every run from all its lines together (95 to 99%); this goes to SK at checkpoint 3 with options.
+- R20 (SK). Slow motion stays on the biggest falls and rises, plus three seeded decoy slow days (at least one rise and one fall) so slow motion is not a reliable signal.
+- R21 (SK). Second-source price check: Stooq blocks downloads, even in SK's own browser ("access denied"). SK chose option B: rely on the other four checks (integrity, independent recount, 44 famous days against published figures, look-alike). Price files merged on that basis. The open flag about price check 1 above is resolved by this.
