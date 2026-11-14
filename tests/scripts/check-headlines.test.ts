@@ -142,6 +142,13 @@ describe('checkHeadlines', () => {
   });
 });
 
+describe('sentence-start words', () => {
+  it('"Overnight" opening both lines is not a name', () => {
+    const rows = mutate(0, { real: 'Overnight, Lehman files for bankruptcy', anon: 'Overnight, a big bank goes bust' });
+    expect(has(checkHeadlines(rows, run), /Overnight/)).toBe(false);
+  });
+});
+
 describe('toHeadlines', () => {
   it('maps dates to day indexes', () => {
     const hs = toHeadlines(good(), run);

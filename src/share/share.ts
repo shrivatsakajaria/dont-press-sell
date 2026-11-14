@@ -1,3 +1,4 @@
+import { CARD_ALT, CLOSE, COPY_FAILED, COPY_LINK, LINK_COPIED, PRESS_TO_SAVE, SHARE_DIALOG } from '../content/copy';
 // Sharing with a fallback for in-app browsers where the share sheet or file saving fails.
 
 /** Minimal model for sharing; the card lane extends it. */
@@ -78,7 +79,7 @@ function showFallback(m: CardModel): void {
   overlay.setAttribute(FALLBACK_ATTR, '');
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  overlay.setAttribute('aria-label', 'Save or copy your result');
+  overlay.setAttribute('aria-label', SHARE_DIALOG);
   overlay.style.cssText =
     'position:fixed;inset:0;z-index:1000;background:#f3e2d0;color:#1c1a17;display:flex;flex-direction:column;' +
     "align-items:center;gap:16px;padding:24px;overflow:auto;font-family:'Libre Franklin',system-ui,sans-serif;font-weight:500;";
@@ -89,7 +90,7 @@ function showFallback(m: CardModel): void {
       objectUrl = URL.createObjectURL(m.image);
       const img = document.createElement('img');
       img.src = objectUrl;
-      img.alt = 'Your result card';
+      img.alt = CARD_ALT;
       img.style.cssText = 'max-width:100%;max-height:60dvh;object-fit:contain;border:1px solid #1c1a17;';
       overlay.appendChild(img);
     } catch {
@@ -99,7 +100,7 @@ function showFallback(m: CardModel): void {
 
   if (objectUrl) {
     const hint = document.createElement('p');
-    hint.textContent = 'Press and hold to save';
+    hint.textContent = PRESS_TO_SAVE;
     hint.style.cssText = 'margin:0;font-size:16px;font-weight:700;text-align:center;';
     overlay.appendChild(hint);
   }
@@ -109,17 +110,17 @@ function showFallback(m: CardModel): void {
 
   const copy = document.createElement('button');
   copy.type = 'button';
-  copy.textContent = 'Copy link';
+  copy.textContent = COPY_LINK;
   copy.style.cssText = btnCss + 'background:#1c1a17;color:#f3e2d0;';
   copy.addEventListener('click', () => {
     void copyText(m.url).then((ok) => {
-      copy.textContent = ok ? 'Link copied' : 'Copy failed';
+      copy.textContent = ok ? LINK_COPIED : COPY_FAILED;
     });
   });
 
   const close = document.createElement('button');
   close.type = 'button';
-  close.textContent = 'Close';
+  close.textContent = CLOSE;
   close.style.cssText = btnCss + 'background:transparent;color:#1c1a17;';
 
   const onKey = (e: KeyboardEvent) => {

@@ -1,7 +1,6 @@
 // The balance chart (spec 9): one 2.5px ink line growing left to right, a dotted
 // start line, a filled dot for today. No grid, no axis, no price scale, no dates.
 // While in cash a dashed line shows the market carrying on without the player.
-import { dollars } from '../content/copy';
 import type { Trade } from '../engine/types';
 import { MARKET_DASH, type Paper } from './paper';
 
@@ -46,8 +45,8 @@ const WORST_FILL = '#96102a';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const LABEL_FONT = "'Libre Franklin', Arial, sans-serif";
 
-export const STARTED_AT = (n: number) => `Started at ${dollars(n)}`;
-export const THE_MARKET = 'The market';
+export { STARTED_AT, THE_MARKET, SOLD } from '../content/copy';
+import { STARTED_AT, THE_MARKET, SOLD } from '../content/copy';
 
 export function chartGeometry(m: ChartModel, w: number, h: number): ChartGeometry {
   const pts = m.points.length ? m.points : [{ dayIndex: 0, balance: m.start, ghost: null }];
@@ -169,7 +168,6 @@ interface Spot { x: number; y: number; anchor: 'start' | 'end' }
 
 /** Rough width of a 12px Libre Franklin label. */
 const CHAR_W = 6.5;
-export const SOLD = 'Sold';
 
 function boxOf(s: Spot, text: string): Box {
   const wd = text.length * CHAR_W;

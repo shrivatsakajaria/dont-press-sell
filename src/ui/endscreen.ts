@@ -15,7 +15,6 @@ import {
   nextMysteryLine,
   PLAY_BORROWED,
   perfectLine,
-  potLine,
   REMATCH,
   TAP_TO_REVEAL,
   WINS_IN_A_ROW,
@@ -27,33 +26,13 @@ import { announce } from './a11y';
 import { endChart } from './endchart';
 import { paperFor } from './paper';
 
-// Fixed strings this screen owns. For the lead to move into src/content/copy.ts.
-export const LATE_EDITION = 'Late edition';
-export const SCORE_TO_BEAT = 'Score to beat';
-export const YOUR_CHALLENGER = 'Your challenger';
-export const SOMEONE_WHO_DID_NOTHING = 'Someone who did nothing';
-export const PERFECT_TIMING = 'Perfect timing';
-export const YOU = 'You';
-export const DAILY_CRASH = 'Daily crash';
-export const PICK_A_CRASH = 'Pick a crash';
-export const YOUR_COLLECTION = 'Your collection';
-export const soundLabel = (on: boolean) => (on ? 'Sound on' : 'Sound off');
-export const vibrationLabel = (on: boolean) => (on ? 'Vibration on' : 'Vibration off');
-/** Caption under the chart, keyed to its "Sold" and "Bought" marks. */
-export const tradeNewsLabel = (side: 'sell' | 'buy') => (side === 'sell' ? 'Sold:' : 'Bought:');
-export const doubleStakeLine = (lead: number, final: number) =>
-  `Keep your ${dollars(lead)} win, or take all ${dollars(final)} into another mystery game. Finish behind and the run is over.`;
-export const potResultLine = (pot: number, tonight: number) => {
-  const t = Math.round(tonight);
-  if (t === 0) return `${potLine(pot)}.`;
-  return `${potLine(pot)}. ${t > 0 ? 'Up' : 'Down'} ${dollars(t)} tonight.`;
-};
-export const challengerLine = (you: number, them: number) => {
-  const d = Math.round(you) - Math.round(them);
-  if (d > 0) return `You beat your challenger by ${dollars(d)}`;
-  if (d < 0) return `Your challenger beat you by ${dollars(d)}`;
-  return 'You and your challenger finished level';
-};
+// Strings this screen shows live in src/content/copy.ts; re-exported for existing importers.
+export {
+  LATE_EDITION, SCORE_TO_BEAT, YOUR_CHALLENGER, SOMEONE_WHO_DID_NOTHING, PERFECT_TIMING, YOU, DAILY_CRASH, PICK_A_CRASH, YOUR_COLLECTION, soundLabel, vibrationLabel, tradeNewsLabel, doubleStakeLine, potResultLine, challengerLine,
+} from '../content/copy';
+import {
+  LATE_EDITION, SCORE_TO_BEAT, YOUR_CHALLENGER, SOMEONE_WHO_DID_NOTHING, PERFECT_TIMING, YOU, DAILY_CRASH, PICK_A_CRASH, YOUR_COLLECTION, soundLabel, vibrationLabel, tradeNewsLabel, doubleStakeLine, potResultLine, challengerLine,
+} from '../content/copy';
 
 export const REVEAL_AFTER_MS = 4000;
 export const COUNT_MS = 1500;

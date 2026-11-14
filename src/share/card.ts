@@ -1,7 +1,11 @@
 // The shareable result card: 1080 x 1350 (4:5), the result front page (spec 10, mock-ups 4 and 6).
 // A blind card hides the crash and shows no dated headline; a practice card names it.
 
-import { CARD_GUESS, FOOTER_RESULT, MASTHEAD, dollars, leadLine, perfectLine } from '../content/copy';
+import {
+  BEAT_ME, BOUGHT, CARD_GUESS, FOOTER_RESULT, LATE_EDITION, MASTHEAD, MYSTERY_LABEL, PERFECT_TIMING, SOLD, SOMEONE_WHO_DID_NOTHING, YOU,
+  dailyLabel, dollars, leadLine, perfectLine, practiceFolio, practiceGo, shareAhead, shareAheadPractice, shareBehind, shareBehindPractice,
+  survivedLine,
+} from '../content/copy';
 import type { Trade } from '../engine/types';
 import { paperFor } from '../ui/paper';
 
@@ -63,14 +67,10 @@ function ordinal(n: number): string {
 export function shareLine(m: ResultCardModel): string {
   const ahead = m.lead >= 0;
   if (m.practice) {
-    const go = `on my ${ordinal(Math.max(2, m.practice.attempt))} go at ${m.practice.crashName}`;
-    return ahead
-      ? `I beat the market by ${dollars(m.lead)} ${go}. Beat me.`
-      : `I finished ${dollars(m.lead)} behind someone who did nothing ${go}. Beat me.`;
+    const go = practiceGo(ordinal(Math.max(2, m.practice.attempt)), m.practice.crashName);
+    return ahead ? shareAheadPractice(m.lead, go) : shareBehindPractice(m.lead, go);
   }
-  return ahead
-    ? `I beat the market by ${dollars(m.lead)} in a crash I could not see coming. Beat me.`
-    : `I finished ${dollars(m.lead)} behind someone who did nothing. Beat me.`;
+  return ahead ? shareAhead(m.lead) : shareBehind(m.lead);
 }
 
 const DATED = /\b(1[89]\d\d|20\d\d)\b|\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i;
@@ -83,24 +83,24 @@ function undatedHeadline(m: ResultCardModel): string {
 /** Every string the card prints, in one pure place so it can be tested without a canvas. */
 export function cardLines(m: ResultCardModel): CardLines {
   const practice = m.practice;
-  const run = m.dailyNumber !== undefined ? `Daily crash ${m.dailyNumber}` : 'Mystery crash';
+  const run = m.dailyNumber !== undefined ? dailyLabel(m.dailyNumber) : MYSTERY_LABEL;
   return {
     masthead: MASTHEAD,
-    folioLeft: practice ? `Rematch, ${practice.crashName}` : run,
-    folioRight: practice ? 'Late edition' : CARD_GUESS,
+    folioLeft: practice ? practiceFolio(practice.crashName) : run,
+    folioRight: practice ? LATE_EDITION : CARD_GUESS,
     headline: practice ? m.headline : undatedHeadline(m),
     verdictTitle: m.verdictTitle,
     verdictLine: m.verdictLine,
     rows: [
-      ['You', dollars(m.you)],
-      ['Someone who did nothing', dollars(m.holder)],
-      ['Perfect timing', dollars(m.perfect)],
+      [YOU, dollars(m.you)],
+      [SOMEONE_WHO_DID_NOTHING, dollars(m.holder)],
+      [PERFECT_TIMING, dollars(m.perfect)],
     ],
     lead: leadLine(m.lead),
     leadBehind: m.lead < 0,
     perfect: perfectLine(m.perfect, m.you),
-    streak: !practice && m.streak !== undefined && m.streak >= 2 ? `Survived ${m.streak} crashes in a row` : null,
-    beatMe: 'Beat me',
+    streak: !practice && m.streak !== undefined && m.streak >= 2 ? survivedLine(m.streak) : null,
+    beatMe: BEAT_ME,
     url: m.url,
     footer: FOOTER_RESULT,
     shareLine: shareLine(m),
@@ -258,7 +258,7 @@ function drawChart(ctx: Ctx, m: ResultCardModel, x: number, y: number, w: number
     const idx = marks.findIndex((k) => k.side === side);
     if (idx < 0) continue;
     const k = marks[idx];
-    const word = side === 'sell' ? 'Sold' : 'Bought';
+    const word = side === 'sell' ? SOLD : BOUGHT;
     const tw = ctx.measureText(word).width;
     const th = 28;
     let best: { box: Box; score: number } | null = null;

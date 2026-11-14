@@ -32,7 +32,7 @@ export const JARGON: { label: string; re: RegExp }[] = [
  * included, is treated as a name and must not appear in `anon`.
  */
 export const ALLOW = [
-  'A', 'An', 'The', 'Over', 'After', 'Before', 'Shares', 'Stocks', 'Markets', 'Banks',
+  'A', 'An', 'The', 'Over', 'Overnight', 'After', 'Before', 'Shares', 'Stocks', 'Markets', 'Banks',
   'Investors', 'Officials', 'Traders', 'Prices', 'Rates', 'Government', 'Congress',
   'Shops', 'Stores', 'Companies', 'People', 'Workers', 'Another', 'More', 'Some', 'Many',
   'Most', 'No', 'New', 'In', 'On', 'At', 'As', 'By', 'For', 'From', 'Into', 'With',

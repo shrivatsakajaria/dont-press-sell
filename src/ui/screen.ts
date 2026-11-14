@@ -14,33 +14,13 @@ import { drawChart, type ChartModel, type ChartPoint } from './chart';
 import { createRoll } from './digits';
 import { paperFor, type Paper } from './paper';
 
-// --- Strings this screen owns (to move into copy.ts later; listed in the lane report).
-export const STATUS_DEFAULT = 'Price: your nerve';
-export const STATUS_SLOW = 'Time slowed';
-export const STATUS_CASH = 'You are in cash';
-export const STATUS_FORWARD = 'Fast forward';
-export const STATUS_PAUSED = 'Paused';
-export const MYSTERY_LABEL = 'Mystery crash';
-export const PAUSE = 'Pause';
-export const RESUME = 'Resume';
-export const SOUND_ON = 'Sound on';
-export const SOUND_OFF = 'Sound off';
-export const IN_CASH = 'in cash';
-export const LEVEL = 'level';
-export const dayLabel = (n: number) => `Day ${n}`;
-export const yearLabel = (n: number) => `Year ${n}`;
-export const youHadLine = (n: number) => `You had ${dollars(n)} yesterday`;
-export const regretMadeLine = (n: number) => `Holding today would have made you ${dollars(n)}`;
-export const regretCostLine = (n: number) => `Holding today would have cost you ${dollars(n)}`;
-export const upLabel = (n: number) => `up ${dollars(n)}`;
-export const downLabel = (n: number) => `down ${dollars(n)}`;
-/** Placeholders until the real headlines and commentary arrive (Tasks 7 and 10). */
-export const placeholderHeadline = (day: number) => `Headline for day ${day}`;
-export const placeholderStandfirst = (day: number) => `Commentary for day ${day}`;
-export const chartLabel = (days: number, bal: number, start: number) =>
-  `Chart of your balance over ${days} ${days === 1 ? 'day' : 'days'}: ${dollars(bal)} against the ${dollars(start)} you started with`;
-export const soldAnnouncement = (n: number) => `Sold for ${dollars(n)}`;
-export const boughtAnnouncement = (n: number) => `Bought back with ${dollars(n)}`;
+// Strings this screen shows live in src/content/copy.ts; re-exported for existing importers.
+export {
+  STATUS_DEFAULT, STATUS_SLOW, STATUS_CASH, STATUS_FORWARD, STATUS_PAUSED, MYSTERY_LABEL, PAUSE, RESUME, SOUND_ON, SOUND_OFF, IN_CASH, LEVEL, dayLabel, yearLabel, youHadLine, regretMadeLine, regretCostLine, upLabel, downLabel, placeholderHeadline, placeholderStandfirst, chartLabel, soldAnnouncement, boughtAnnouncement,
+} from '../content/copy';
+import {
+  STATUS_DEFAULT, STATUS_SLOW, STATUS_CASH, STATUS_FORWARD, STATUS_PAUSED, PAUSE, RESUME, SOUND_ON, SOUND_OFF, IN_CASH, LEVEL, dayLabel, yearLabel, youHadLine, regretMadeLine, regretCostLine, upLabel, downLabel, placeholderHeadline, placeholderStandfirst, chartLabel, soldAnnouncement, boughtAnnouncement,
+} from '../content/copy';
 
 /** How long the opening line stays up, and the first-sale line after a first sale (clock time). */
 const OPENING_MS = 4000;
