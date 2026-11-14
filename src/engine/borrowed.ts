@@ -11,7 +11,8 @@ import { orderedTrades } from './simulate';
  */
 export function simulateBorrowed(closes: number[], trades: Trade[], start = 10000): BorrowedResult {
   const n = closes.length;
-  const holderFinal = n ? (start * closes[n - 1]) / closes[0] : start;
+  // Same holder as simulate (R18 order of operations).
+  const holderFinal = n ? (start / closes[0]) * closes[n - 1] : start;
   const perfectFinal = perfectTiming(closes, start).final;
   const ordered = orderedTrades(trades, n);
   const applied: Trade[] = [];

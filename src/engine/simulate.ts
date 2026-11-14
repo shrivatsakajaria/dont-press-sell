@@ -12,7 +12,8 @@ export function orderedTrades(trades: Trade[], length: number): Trade[] {
 
 export function simulate(closes: number[], trades: Trade[], start = 10000): RunResult {
   const n = closes.length;
-  const holderFinal = n ? (start * closes[n - 1]) / closes[0] : start;
+  // Same order of operations as the balances (shares x close), so holding exactly scores 0.
+  const holderFinal = n ? (start / closes[0]) * closes[n - 1] : start;
   const perfectFinal = perfectTiming(closes, start).final;
   const ordered = orderedTrades(trades, n);
   const applied: Trade[] = [];
@@ -58,5 +59,5 @@ export function simulate(closes: number[], trades: Trade[], start = 10000): RunR
 export function leadAt(closes: number[], trades: Trade[], dayIndex: number, start = 10000): number {
   const upTo = trades.filter((t) => t.dayIndex <= dayIndex);
   const { balances } = simulate(closes, upTo, start);
-  return balances[dayIndex] - (start * closes[dayIndex]) / closes[0];
+  return balances[dayIndex] - (start / closes[0]) * closes[dayIndex];
 }
