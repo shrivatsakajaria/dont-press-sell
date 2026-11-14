@@ -9,6 +9,7 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - Wave 1: lanes A to G in parallel.
 
 ## Open flags
+- Price check 1 (second source) could not run: Stooq now shows a bot challenge; FRED, WSJ and Nasdaq unusable from here. Asked SK to choose: he downloads the Stooq CSV in a browser, or use check 4's published figures, or both. Price files stay unmerged until settled. Checks 2 (integrity), 3 (recount), 5 (look-alike, 6 of 12 = chance) passed; check 4 running.
 - SK confirmed Cloudflare works (balloon site visible). Sent him click-by-click Pages hook-up steps (production branch = the claude/ branch, build `npm run build`, output `dist`); waiting for his pages.dev address. Web Analytics switch-on comes after first deploy.
 
 ## Rulings (lead agent)
