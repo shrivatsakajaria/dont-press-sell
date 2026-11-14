@@ -1,0 +1,11 @@
+date,real,anon,big,sombre,source_url,second_source_url,note
+2020-01-02,"Lehman Brothers files for bankruptcy, shocking markets","A 158-year-old bank files for bankruptcy",true,false,https://example.gov/a,https://example.org/a,
+2020-01-03,Central bank cuts rates,"Borrowing gets cheaper, ""again""",false,false,https://example.gov/b,https://example.org/b,"Over the weekend, a note"
+2020-01-06,Markets tumble on Monday,Shares have a terrible day,true,false,https://example.gov/c,https://example.org/c,
+2020-01-07,Officials announce a rescue plan,Help is promised,true,false,https://example.gov/d,https://example.org/d,
+2020-01-08,Unemployment rises again,More people are out of work,true,false,https://example.gov/e,https://example.org/e,
+2020-01-09,A big insurer is bailed out,A huge insurer gets a rescue,true,false,https://example.gov/f,https://example.org/f,
+2020-01-10,Car makers ask for aid,Auto firms ask for help,true,false,https://example.gov/g,https://example.org/g,
+2020-01-13,Stores report weak sales,Shops sell much less,true,false,https://example.gov/h,https://example.org/h,
+2020-01-14,Banks stop lending,Banks stop lending to each other,true,false,https://example.gov/i,https://example.org/i,
+2020-01-15,Calm returns briefly,Things look calmer,false,false,https://example.gov/j,https://example.org/j,
