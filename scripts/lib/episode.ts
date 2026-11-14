@@ -91,3 +91,16 @@ export function monthsInWords(n: number): string {
   if (!Number.isInteger(n) || n < 1 || n > 12) throw new Error(`no words for ${n} months`);
   return n === 1 ? 'a month' : `${NUMBER_WORDS[n]} months`;
 }
+
+/**
+ * How long from the lowest close to full recovery, in words (ruling R22):
+ * whole weeks when under two months ("two weeks"), otherwise whole months ("four months").
+ */
+export function backIn(lowDate: string, recoveryDate: string): string {
+  const days = (Date.parse(`${recoveryDate}T00:00:00Z`) - Date.parse(`${lowDate}T00:00:00Z`)) / DAY_MS;
+  if (days < 2 * AVERAGE_MONTH_DAYS) {
+    const w = Math.max(1, Math.round(days / 7));
+    return w === 1 ? 'a week' : `${NUMBER_WORDS[w]} weeks`;
+  }
+  return monthsInWords(monthsBetween(lowDate, recoveryDate));
+}

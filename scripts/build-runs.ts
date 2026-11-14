@@ -6,7 +6,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { RunData, RunKind, RunMeta } from '../src/engine/types';
-import { findEpisode, monthsBetween, monthsInWords } from './lib/episode';
+import { backIn, findEpisode, monthsBetween } from './lib/episode';
 
 export interface RunEntry {
   id: string;
@@ -26,9 +26,9 @@ export interface RunEntry {
 }
 
 /**
- * The launch pool (spec 7.2, lead rulings R1 and R12). A crash's high is the all-time
- * record close before it; a scare's high is its own prior peak (2010 and 2011 fall from
- * peaks below the October 2007 record).
+ * The launch pool (spec 7.2, lead rulings R1, R12, R22). A crash's high is the all-time
+ * record close before it; a scare's high is its own prior peak. Scares fall 7% to under
+ * 20%; 2014 and 2024 are shallow ones whose day 1 is the low.
  */
 export const RUN_TABLE: RunEntry[] = [
   { id: 'c1929', kind: 'crash', pickName: '1929: the Wall Street Crash', highDate: '1929-09-16', reveal: 'That was 1929.' },
@@ -38,10 +38,10 @@ export const RUN_TABLE: RunEntry[] = [
   { id: 'c2020', kind: 'crash', pickName: '2020: Covid', highDate: '2020-02-19', reveal: 'That was 2020.' },
   { id: 'c2022', kind: 'crash', pickName: '2022: inflation and interest rates', highDate: '2022-01-03', reveal: 'That was 2022.' },
   { id: 's1998', kind: 'scare', pickName: 'Summer 1998 Russia scare', highDate: '1998-07-17', reveal: 'That was the summer 1998 Russia scare.' },
-  { id: 's2010', kind: 'scare', pickName: '2010 flash crash scare', highDate: '2010-04-23', reveal: 'That was the 2010 flash crash scare.' },
   { id: 's2011', kind: 'scare', pickName: '2011 debt downgrade scare', highDate: '2011-04-29', reveal: 'That was the 2011 debt downgrade scare.' },
-  { id: 's2015', kind: 'scare', pickName: '2015 China scare', highDate: '2015-05-21', reveal: 'That was the 2015 China scare.' },
+  { id: 's2014', kind: 'scare', pickName: 'Autumn 2014 wobble', highDate: '2014-09-18', reveal: 'That was the autumn 2014 wobble.' },
   { id: 's2018', kind: 'scare', pickName: 'Autumn 2018 wobble', highDate: '2018-09-20', reveal: 'That was the autumn 2018 wobble.' },
+  { id: 's2024', kind: 'scare', pickName: 'Summer 2024 wobble', highDate: '2024-07-16', reveal: 'That was the summer 2024 wobble.' },
   { id: 's2025', kind: 'scare', pickName: 'Spring 2025 tariff scare', highDate: '2025-02-19', reveal: 'That was the spring 2025 tariff scare.' },
 ];
 
@@ -110,12 +110,12 @@ export function buildRun(
   const fallPct = (low / high - 1) * 100;
   // Compare prices, not the percentage, so 80 against 100 counts as exactly 20% down.
   const fell20 = low <= high * 0.8 + 1e-9;
-  const fell10 = low <= high * 0.9 + 1e-9;
   if (entry.kind === 'crash' && !fell20) {
     throw new Error(`${entry.id}: a crash must fall 20% or more; it fell ${fallPct.toFixed(2)}%`);
   }
-  if (entry.kind === 'scare' && (fell20 || !fell10)) {
-    throw new Error(`${entry.id}: a scare must fall 10% to under 20%; it fell ${fallPct.toFixed(2)}%`);
+  // Ruling R22: a scare falls at least 7% (guaranteed by the start rule) and under 20%.
+  if (entry.kind === 'scare' && fell20) {
+    throw new Error(`${entry.id}: a scare must fall under 20%; it fell ${fallPct.toFixed(2)}%`);
   }
   if (entry.kind === 'scare' && monthsBetween(dates[ep.startIndex], dates[ep.endIndex]) > 12) {
     throw new Error(`${entry.id}: a scare must recover within about a year of day 1`);
@@ -123,8 +123,7 @@ export function buildRun(
 
   let revealLine = entry.reveal;
   if (entry.kind === 'scare') {
-    const months = monthsBetween(dates[ep.lowIndex], dates[ep.endIndex]);
-    revealLine = `${entry.reveal} It was back in ${monthsInWords(months)}.`;
+    revealLine = `${entry.reveal} It was back in ${backIn(dates[ep.lowIndex], dates[ep.endIndex])}.`;
   }
 
   const s = ep.startIndex;
