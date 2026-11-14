@@ -23,3 +23,4 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - R9. Borrowed-money run with no trades and no wipe-out finishes ahead of the unborrowed holder; its verdict is "Diamond hands" with borrowed copy: "Borrowed three times over and held on" / "Local investor borrows big, holds on, gets away with it". Big Short and Nerves of steel need at least one trade.
 - R10. A wiped-out (margin called) run shows no near-miss lines.
 - R11. The daily crash follows a fixed 12-day cycle from launch (2026-11-21), so any twelve days in a row cover all twelve runs.
+- R12. A scare's "high" is the highest close before its fall (a local peak), not the all-time record (spec 7.2 says "fell 10% to 19% from a high and was back above that high"). This keeps SK's candidates 2010 and 2011, which sit inside the long 2007 to 2013 recovery. Crashes still use the all-time record. Cost if wrong: two scares swap for 1989 and 1990.
