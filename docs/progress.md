@@ -24,3 +24,4 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - R10. A wiped-out (margin called) run shows no near-miss lines.
 - R11. The daily crash follows a fixed 12-day cycle from launch (2026-11-21), so any twelve days in a row cover all twelve runs.
 - R12. A scare's "high" is the highest close before its fall (a local peak), not the all-time record (spec 7.2 says "fell 10% to 19% from a high and was back above that high"). This keeps SK's candidates 2010 and 2011, which sit inside the long 2007 to 2013 recovery. Crashes still use the all-time record. Cost if wrong: two scares swap for 1989 and 1990.
+- R13. Commentary context: price files carry `high` (the reference high) and `preCloses` (30 closes before day 1); "from the peak" is measured from the real high; `invested` means the position during today's move (held at yesterday's close); `neverSold` gates "still holding" lines; single percentages use normal rounding.
