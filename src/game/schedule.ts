@@ -1,4 +1,5 @@
 import type { Headline, RunData } from '../engine/types';
+import { hashString, mulberry32 } from './rng';
 
 /**
  * The game clock (spec 7.4, 6.4, 6.6): the list of screen steps for one run.
@@ -37,8 +38,15 @@ export const SLOW_MS = 800;
 export const MIN_STEP_MS = 125;
 /** The first slow step must begin by this time. */
 export const FIRST_SLOW_BY_MS = 10_000;
-/** Most slow steps taken from the largest daily moves (big headline days count towards it). */
+/** Most slow steps in a fall, decoys included (R20). */
 export const MAX_SLOW = 10;
+/** True slow days: big headline days, then the largest daily moves (either direction), up to this many (R20). */
+export const MAX_TRUE_SLOW = 7;
+/** Decoy slow days added after the true ones so slow motion is not a reliable signal (R20). */
+export const DECOYS = 3;
+/** Decoys come from days whose absolute move lies between these percentiles of the fall's moves. */
+const DECOY_LOW_PCT = 0.5;
+const DECOY_HIGH_PCT = 0.85;
 
 /** Opening days are squeezed to begin the first slow step by this time (margin under 10 s for rounding and floors). */
 const OPENING_TARGET_MS = 9_000;
@@ -68,6 +76,61 @@ function fillCapped(days: number[], weight: (d: number) => number, budget: numbe
   for (const d of free) out.set(d, 0);
 }
 
+/**
+ * The slow-motion days of a run's fall (R20).
+ * truth: big headline days in the fall, then the largest absolute daily moves, up to
+ * MAX_TRUE_SLOW in all (every big headline day is kept even beyond that).
+ * decoys: up to DECOYS more, picked with mulberry32(hashString(run.id)) from ordinary
+ * fall days whose absolute move lies between the 50th and 85th percentile, at least one
+ * rising and one falling when such days exist, never next to another slow day, and never
+ * taking the total above MAX_SLOW. Same run id, same decoys.
+ */
+export function pickSlowDays(run: RunData, headlines: Headline[]): { truth: number[]; decoys: number[] } {
+  const closes = run.closes;
+  const n = closes.length;
+  const fe = Math.min(Math.max(run.fallEndIndex, 1), n);
+  const move = (d: number) => Math.abs(closes[d] / closes[d - 1] - 1);
+
+  const slow = new Set<number>();
+  for (const h of headlines) {
+    if (h.big && Number.isInteger(h.dayIndex) && h.dayIndex >= 0 && h.dayIndex < fe) slow.add(h.dayIndex);
+  }
+  const byMove: number[] = [];
+  for (let d = 1; d < fe; d++) if (!slow.has(d)) byMove.push(d);
+  byMove.sort((a, b) => move(b) - move(a) || a - b);
+  for (const d of byMove.slice(0, Math.max(0, MAX_TRUE_SLOW - slow.size))) slow.add(d);
+  const truth = [...slow].sort((a, b) => a - b);
+
+  const want = Math.min(DECOYS, Math.max(0, MAX_SLOW - slow.size));
+  const decoys: number[] = [];
+  if (want > 0 && fe > 2) {
+    const sorted: number[] = [];
+    for (let d = 1; d < fe; d++) sorted.push(move(d));
+    sorted.sort((a, b) => a - b);
+    const lo = sorted[Math.floor(DECOY_LOW_PCT * (sorted.length - 1))];
+    const hi = sorted[Math.floor(DECOY_HIGH_PCT * (sorted.length - 1))];
+    let pool: number[] = [];
+    for (let d = 1; d < fe; d++) {
+      if (slow.has(d) || slow.has(d - 1) || slow.has(d + 1)) continue;
+      if (move(d) >= lo && move(d) <= hi) pool.push(d);
+    }
+    const rnd = mulberry32(hashString(run.id));
+    const rising = (d: number) => closes[d] > closes[d - 1];
+    const take = (from: number[]) => {
+      if (!from.length) return;
+      const d = from[Math.floor(rnd() * from.length)];
+      decoys.push(d);
+      slow.add(d);
+      pool = pool.filter((x) => Math.abs(x - d) > 1);
+    };
+    // One rising and one falling first, then the rest from either direction.
+    take(pool.filter(rising));
+    if (decoys.length < want) take(pool.filter((d) => !rising(d)));
+    while (decoys.length < want && pool.length) take(pool);
+  }
+  return { truth, decoys: decoys.sort((a, b) => a - b) };
+}
+
 interface Group {
   dayIndex: number;
   ms: number;
@@ -83,15 +146,9 @@ export function buildSchedule(run: RunData, headlines: Headline[]): Step[] {
 
   const move = (d: number) => (d >= 1 ? Math.abs(closes[d] / closes[d - 1] - 1) : 0);
 
-  // --- Slow days: big headline days in the fall, then the largest moves up to MAX_SLOW.
-  const slow = new Set<number>();
-  for (const h of headlines) {
-    if (h.big && Number.isInteger(h.dayIndex) && h.dayIndex >= 0 && h.dayIndex < fe) slow.add(h.dayIndex);
-  }
-  const byMove: number[] = [];
-  for (let d = 1; d < fe; d++) if (!slow.has(d)) byMove.push(d);
-  byMove.sort((a, b) => move(b) - move(a) || a - b);
-  for (const d of byMove.slice(0, Math.max(0, MAX_SLOW - slow.size))) slow.add(d);
+  // --- Slow days: the true ones, then the seeded decoys (R20).
+  const picked = pickSlowDays(run, headlines);
+  const slow = new Set<number>([...picked.truth, ...picked.decoys]);
 
   // --- Per-day hold for the other fall days: shorter as the recent swing grows.
   const swing: number[] = [];

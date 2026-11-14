@@ -8,7 +8,11 @@ import {
   LONG_FALL_BUDGET_MS,
   MAX_QUIET_MS,
   SLOW_MS,
+  DECOYS,
+  MAX_SLOW,
+  MAX_TRUE_SLOW,
   fallBudgetFor,
+  pickSlowDays,
   buildSchedule,
   type Step,
 } from '../../src/game/schedule';
@@ -35,6 +39,30 @@ function topMoves(run: RunData, count: number): number[] {
     .slice(0, count)
     .map((x) => x.d)
     .sort((a, b) => a - b);
+}
+
+const absMove = (run: RunData, d: number) => Math.abs(run.closes[d] / run.closes[d - 1] - 1);
+
+/** R20 decoy rules, checked from the outside. */
+function checkDecoys(run: RunData, slow: number[], decoys: number[]) {
+  const moves: number[] = [];
+  for (let d = 1; d < run.fallEndIndex; d++) moves.push(absMove(run, d));
+  moves.sort((a, b) => a - b);
+  const p50 = moves[Math.floor(0.5 * (moves.length - 1))];
+  const p85 = moves[Math.floor(0.85 * (moves.length - 1))];
+  const all = new Set(slow);
+  for (const d of decoys) {
+    expect(all.has(d)).toBe(true);
+    expect(d).toBeGreaterThanOrEqual(1);
+    expect(d).toBeLessThan(run.fallEndIndex);
+    expect(absMove(run, d)).toBeGreaterThanOrEqual(p50);
+    expect(absMove(run, d)).toBeLessThanOrEqual(p85);
+    expect(all.has(d - 1)).toBe(false); // never next to another slow day
+    expect(all.has(d + 1)).toBe(false);
+  }
+  const rising = decoys.filter((d) => run.closes[d] > run.closes[d - 1]);
+  expect(rising.length).toBeGreaterThanOrEqual(1);
+  expect(decoys.length - rising.length).toBeGreaterThanOrEqual(1);
 }
 
 describe('buildSchedule on every real run (no headlines)', () => {
@@ -81,13 +109,26 @@ describe('buildSchedule on every real run (no headlines)', () => {
         }
       });
 
-      it('slow steps are 800 ms, in the fall, and are the ten largest daily moves', () => {
+      it('slow steps are 800 ms, in the fall: the seven largest daily moves plus three decoys (R20)', () => {
         const slow = steps.filter((s) => s.slow);
         for (const s of slow) {
           expect(s.holdMs).toBe(800);
           expect(s.phase).toBe('fall');
         }
-        expect(slow.map((s) => s.dayIndex)).toEqual(topMoves(run, 10));
+        const days = slow.map((s) => s.dayIndex);
+        expect(days.length).toBe(MAX_SLOW);
+        const truth = topMoves(run, MAX_TRUE_SLOW);
+        for (const d of truth) expect(days).toContain(d);
+        const { truth: t, decoys } = pickSlowDays(run, []);
+        expect(t).toEqual(truth);
+        expect(decoys.length).toBe(DECOYS);
+        expect([...t, ...decoys].sort((a, b) => a - b)).toEqual(days);
+        checkDecoys(run, days, decoys);
+      });
+
+      it('decoys are the same every time for the same run (seeded by its id)', () => {
+        expect(buildSchedule(run, [])).toEqual(steps);
+        expect(pickSlowDays(run, []).decoys).toEqual(pickSlowDays(run, []).decoys);
       });
 
       it('the first slow step begins within 10,000 ms', () => {
@@ -145,6 +186,15 @@ describe('buildSchedule with headlines', () => {
     sombre: false,
   });
 
+  it('the decoy seed is the run id: another id can pick other decoys', () => {
+    const differs = runs.some((r) => {
+      const a = pickSlowDays(r, []).decoys;
+      const b = pickSlowDays({ ...r, id: r.id + '-other' }, []).decoys;
+      return a.join() !== b.join();
+    });
+    expect(differs).toBe(true);
+  });
+
   it('turns big headline days in the fall into slow steps, up to ten slow steps in all', () => {
     const run = synthetic();
     const headlines = [h(5, true), h(12, true), h(10, false), h(160, true)];
@@ -156,11 +206,15 @@ describe('buildSchedule with headlines', () => {
     expect(slow).not.toContain(10); // not a big headline, and a small move
     expect(slow).not.toContain(160); // no slow motion in the fast-forward
     expect(slow.length).toBe(10);
-    const expected = new Set([5, 12, ...topMovesExcluding(run, [5, 12], 8)]);
-    expect(new Set(slow)).toEqual(expected);
+    const { truth, decoys } = pickSlowDays(run, headlines);
+    expect(new Set(truth)).toEqual(new Set([5, 12, ...topMovesExcluding(run, [5, 12], 5)]));
+    expect(decoys.length).toBe(3);
+    checkDecoys(run, slow, decoys);
   });
 
-  it('keeps every big headline day slow even when there are more than ten', () => {
+  // Edge case beyond R20's wording: big headline days are never dropped, so more
+  // than ten of them gives more than ten slow steps and no decoys.
+  it('keeps every big headline day slow even when there are more than ten (and adds no decoys)', () => {
     const run = synthetic();
     const days = [3, 6, 9, 15, 18, 21, 24, 27, 33, 36, 39, 42];
     const steps = buildSchedule(run, days.map((d) => h(d, true)));
