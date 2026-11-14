@@ -61,14 +61,15 @@ function dailyCycle(): string[] {
   return out;
 }
 
-function utcDay(date: string): number {
+/** Whole days since 1970-01-01 for a yyyy-mm-dd UTC date. */
+export function utcDayNumber(date: string): number {
   const [y, m, d] = date.split('-').map(Number);
   return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
 }
 
 export function dailyPick(utcDate: string): { number: number; runId: string } {
   const cycle = dailyCycle();
-  const number = utcDay(utcDate) - utcDay(LAUNCH_DATE) + 1;
+  const number = utcDayNumber(utcDate) - utcDayNumber(LAUNCH_DATE) + 1;
   const idx = (((number - 1) % cycle.length) + cycle.length) % cycle.length;
   return { number, runId: cycle[idx] };
 }

@@ -1,6 +1,6 @@
 // The pot (spec 6.12): a running total that follows the player. Never changes any starting amount.
 import { cell } from '../store/store';
-import type { Mode } from '../store/record';
+import { isBlind, type Mode } from '../store/record';
 
 export const POT_START = 10000;
 
@@ -9,16 +9,15 @@ const bustsCell = cell<number>('busts', 0);
 /** "Tonight" counts from page open: plain module memory, never stored. */
 let tonight = 0;
 
-const BLIND: Mode[] = ['mystery', 'daily', 'challenge'];
-
 /**
  * Settles one finished run. Blind runs (mystery, a first daily, challenge) move the
  * pot by `lead`; rematch and picked runs change nothing. For double or nothing call
- * this once, when the streak ends, with the net lead of the whole streak.
+ * this once, when the streak ends, with the `settle` value from streak.ts. Pass
+ * `recordRun(...).blind` as `blind` so a repeated daily cannot move the pot twice.
  * A pot at zero or below is a bust: counted, then reset to $10,000.
  */
-export function applyToPot(mode: Mode, lead: number): { pot: number; tonight: number; bust: boolean } {
-  if (!BLIND.includes(mode)) return { pot: potCell.get(), tonight, bust: false };
+export function applyToPot(mode: Mode, lead: number, blind: boolean = isBlind(mode)): { pot: number; tonight: number; bust: boolean } {
+  if (!blind) return { pot: potCell.get(), tonight, bust: false };
   tonight += lead;
   const next = potCell.get() + lead;
   if (next <= 0) {

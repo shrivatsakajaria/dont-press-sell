@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
   dailyStreak,
   daysInRowText,
+  getDailyResult,
   getLastRun,
+  isBlind,
   getRecord,
   recordLine,
   recordRun,
@@ -57,6 +59,34 @@ describe('recordRun', () => {
     const r = getRecord();
     expect(r.titles).toEqual(['nerves']);
     expect(r.games).toBe(1);
+  });
+  test('recordRun reports whether the run was blind', () => {
+    expect(recordRun('daily', 'c1987', result(1), 'nerves', { date: '2026-11-21' }).blind).toBe(true);
+    expect(recordRun('daily', 'c1987', result(1), 'nerves', { date: '2026-11-21' }).blind).toBe(false);
+    expect(recordRun('rematch', 'c1987', result(1), 'nerves').blind).toBe(false);
+    expect(recordRun('mystery', 'c1987', result(1), 'nerves').blind).toBe(true);
+    expect(isBlind('daily')).toBe(true);
+    expect(isBlind('daily', { repeatDaily: true })).toBe(false);
+  });
+  test('corrupt stored values fall back and never throw', () => {
+    const s = g.localStorage as ReturnType<typeof memoryStorage>;
+    for (const k of ['record', 'lastRuns', 'dailyResults', 'dailyCount']) {
+      for (const bad of ['null', '5', '[1,2]', '"x"', '{"games":"a","played":7,"titles":null}']) {
+        s.setItem('dps:' + k, bad);
+        resetCells();
+        expect(() => {
+          getRecord();
+          getLastRun('c1929');
+          getDailyResult('2026-11-21');
+          dailyStreak('2026-11-21');
+          recordRun('mystery', 'c1929', result(10), 'diamond');
+        }).not.toThrow();
+        expect(getRecord().played).toContain('c1929');
+      }
+    }
+    s.setItem('dps:lastRuns', '{"c1929":{"balances":5}}');
+    resetCells();
+    expect(getLastRun('c1929')).toBeNull();
   });
   test('played ids are kept for every mode, without duplicates', () => {
     recordRun('picked', 'c2020', result(-5), 'bagholder');

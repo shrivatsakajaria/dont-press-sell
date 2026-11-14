@@ -10,6 +10,8 @@ export interface StreakState {
   start: number;
   /** Final balance of the last finished run when a win is waiting for a choice, else null. */
   final: number | null;
+  /** Sum of the leads over the holder of the wins so far in this streak. */
+  net: number;
 }
 
 export interface AfterRun {
@@ -20,32 +22,47 @@ export interface AfterRun {
   ended: boolean;
   /** Wins of the streak that just ended (0 when nothing ended). Record it with recordStreak. */
   bestStreak: number;
+  /** The amount to settle the pot with once the streak is over (net lead incl. this run), else null. */
+  settle: number | null;
 }
 
-export const initialStreak = (): StreakState => ({ wins: 0, start: START_AMOUNT, final: null });
+export const initialStreak = (): StreakState => ({ wins: 0, start: START_AMOUNT, final: null, net: 0 });
 
 /**
  * Feed in each finished run. Only a mystery run can start or continue a streak
- * (spec 6.11); any other mode leaves the state untouched. `start` is the amount
- * that run started with, `final` the player's final balance; lead is their difference.
+ * (spec 6.11); any other mode leaves the state untouched. A win is a lead over the
+ * holder above zero (not final above start: in a scare the holder can gain more
+ * than the player). `final` is kept for the carry.
  */
-export function afterRun(state: StreakState, mode: Mode, start: number, final: number): AfterRun {
-  if (mode !== 'mystery') return { state, offer: false, ended: false, bestStreak: 0 };
-  if (final - start > 0) {
-    return { state: { wins: state.wins + 1, start, final }, offer: true, ended: false, bestStreak: 0 };
+export function afterRun(state: StreakState, mode: Mode, result: { final: number; lead: number }): AfterRun {
+  if (mode !== 'mystery') return { state, offer: false, ended: false, bestStreak: 0, settle: null };
+  if (result.lead > 0) {
+    return {
+      state: { wins: state.wins + 1, start: state.start, final: result.final, net: state.net + result.lead },
+      offer: true,
+      ended: false,
+      bestStreak: 0,
+      settle: null,
+    };
   }
-  return { state: initialStreak(), offer: false, ended: state.wins > 0, bestStreak: state.wins };
+  return {
+    state: initialStreak(),
+    offer: false,
+    ended: state.wins > 0,
+    bestStreak: state.wins,
+    settle: state.net + result.lead,
+  };
 }
 
 /** "Double or nothing": the previous final becomes the next start. */
 export function doubleDown(state: StreakState): StreakState {
   if (state.final === null) throw new Error('no win to carry');
-  return { wins: state.wins, start: state.final, final: null };
+  return { wins: state.wins, start: state.final, final: null, net: state.net };
 }
 
-/** "Bank $N": ends the streak; `bestStreak` is the number of wins to record. */
-export function bank(state: StreakState): { state: StreakState; bestStreak: number } {
-  return { state: initialStreak(), bestStreak: state.wins };
+/** "Bank $N": ends the streak; record `bestStreak` and settle the pot with `settle`. */
+export function bank(state: StreakState): { state: StreakState; bestStreak: number; settle: number } {
+  return { state: initialStreak(), bestStreak: state.wins, settle: state.net };
 }
 
 export const RUNGS = [1, 2, 3, 5, 8];

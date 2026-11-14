@@ -1,6 +1,7 @@
 // The player's record, collection, last runs and daily count (spec 6.9 to 6.11, 7.5).
 import { daysInRowLine } from '../content/copy';
 import type { RunResult, Trade, VerdictId } from '../engine/types';
+import { utcDayNumber } from '../game/picker';
 import { cell } from './store';
 
 export type Mode = 'mystery' | 'daily' | 'picked' | 'rematch' | 'challenge';
@@ -38,8 +39,38 @@ const dailyCountCell = cell<{ last: string; count: number } | null>('dailyCount'
 
 const KEEP_DAILY_DAYS = 60;
 
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
+/** Corrupt storage (null, wrong types) falls back to empty fields; never throws. */
 function currentRecord(): RecordData {
-  return { ...EMPTY, ...recordCell.get() };
+  const r = recordCell.get();
+  if (!isObj(r)) return { ...EMPTY, played: [], titles: [] };
+  return {
+    games: num(r.games),
+    wins: num(r.wins),
+    soldTooEarly: num(r.soldTooEarly),
+    played: strs(r.played),
+    titles: strs(r.titles) as VerdictId[],
+    bestStreak: num(r.bestStreak),
+  };
+}
+
+function dailyResults(): Record<string, { runId: string; lead: number; verdict: VerdictId }> {
+  const d = dailyResultsCell.get();
+  return isObj(d) ? (d as ReturnType<typeof dailyResults>) : {};
+}
+
+/**
+ * The single definition of a blind run (spec 6.11): mystery, challenge, and the first play of
+ * a daily. A daily with no date given counts as blind. Rematch and picked never do.
+ * `repeatDaily` is true when the daily for that date already has a stored result.
+ */
+export function isBlind(mode: Mode, opts: { repeatDaily?: boolean } = {}): boolean {
+  if (mode === 'mystery' || mode === 'challenge') return true;
+  if (mode === 'daily') return !opts.repeatDaily;
+  return false;
 }
 
 /**
@@ -50,12 +81,18 @@ function currentRecord(): RecordData {
  * games, wins (lead > 0) and "sold too early" (first sale before `ctx.lowIndex` and finished
  * behind). Every mode adds the run to `played` and stores it as the last run for that crash.
  */
-export function recordRun(mode: Mode, runId: string, result: RunResult, verdict: VerdictId, ctx: RunContext = {}): void {
-  let blind = mode === 'mystery' || mode === 'challenge' || mode === 'daily';
+export function recordRun(
+  mode: Mode,
+  runId: string,
+  result: RunResult,
+  verdict: VerdictId,
+  ctx: RunContext = {},
+): { blind: boolean } {
+  let repeatDaily = false;
   if (mode === 'daily' && ctx.date) {
-    const results = { ...dailyResultsCell.get() };
+    const results = { ...dailyResults() };
     if (results[ctx.date]) {
-      blind = false;
+      repeatDaily = true;
     } else {
       results[ctx.date] = { runId, lead: result.lead, verdict };
       const dates = Object.keys(results).sort();
@@ -64,6 +101,7 @@ export function recordRun(mode: Mode, runId: string, result: RunResult, verdict:
     }
   }
 
+  const blind = isBlind(mode, { repeatDaily });
   const rec = currentRecord();
   const played = rec.played.includes(runId) ? rec.played : [...rec.played, runId];
   const next: RecordData = { ...rec, played };
@@ -78,14 +116,16 @@ export function recordRun(mode: Mode, runId: string, result: RunResult, verdict:
   }
   recordCell.set(next);
 
+  const lastRuns = lastRunsCell.get();
   lastRunsCell.set({
-    ...lastRunsCell.get(),
+    ...(isObj(lastRuns) ? lastRuns : {}),
     [runId]: {
       balances: result.balances.map((b) => Math.round(b)),
       trades: result.trades.map((t) => ({ dayIndex: t.dayIndex, side: t.side })),
       final: Math.round(result.final),
     },
   });
+  return { blind };
 }
 
 export function getRecord(): RecordData {
@@ -95,12 +135,15 @@ export function getRecord(): RecordData {
 
 /** The player's previous run of this crash, for the rematch line, or null. */
 export function getLastRun(runId: string): LastRun | null {
-  return lastRunsCell.get()[runId] ?? null;
+  const all = lastRunsCell.get();
+  const r = isObj(all) ? all[runId] : null;
+  if (!isObj(r) || !Array.isArray(r.balances) || !Array.isArray(r.trades) || typeof r.final !== 'number') return null;
+  return r as unknown as LastRun;
 }
 
 /** The first result stored for a daily date, or null. */
 export function getDailyResult(date: string): { runId: string; lead: number; verdict: VerdictId } | null {
-  return dailyResultsCell.get()[date] ?? null;
+  return dailyResults()[date] ?? null;
 }
 
 /** Call with the wins of a streak that has ended or been banked. Keeps the best. */
@@ -115,19 +158,15 @@ export function recordLine(r: Pick<RecordData, 'games' | 'wins' | 'soldTooEarly'
   return `${n(r.games, 'game', 'games')}, ${n(r.wins, 'win', 'wins')}, sold too early ${n(r.soldTooEarly, 'time', 'times')}`;
 }
 
-function dayNumber(date: string): number {
-  const [y, m, d] = date.split('-').map(Number);
-  return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
-}
-
 /**
  * Records that a daily crash was played on this UTC date and returns the days in a row.
  * Same date again: same count. Yesterday played: one more. Anything else: back to one.
  */
 export function dailyStreak(utcDate: string): number {
-  const prev = dailyCountCell.get();
+  const raw = dailyCountCell.get();
+  const prev = isObj(raw) && typeof raw.last === 'string' && typeof raw.count === 'number' ? (raw as { last: string; count: number }) : null;
   if (prev && prev.last === utcDate) return prev.count;
-  const count = prev && dayNumber(utcDate) - dayNumber(prev.last) === 1 ? prev.count + 1 : 1;
+  const count = prev && utcDayNumber(utcDate) - utcDayNumber(prev.last) === 1 ? prev.count + 1 : 1;
   dailyCountCell.set({ last: utcDate, count });
   return count;
 }

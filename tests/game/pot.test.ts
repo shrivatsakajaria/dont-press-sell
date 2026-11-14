@@ -60,4 +60,9 @@ describe('pot', () => {
     applyToPot('mystery', 200);
     expect(getPot()).toEqual({ pot: 10500, tonight: 500, busts: 0 });
   });
+  test('a repeated daily (blind: false from recordRun) does not move the pot', () => {
+    applyToPot('daily', 400);
+    const again = applyToPot('daily', 400, false);
+    expect(again).toEqual({ pot: 10400, tonight: 400, bust: false });
+  });
 });
