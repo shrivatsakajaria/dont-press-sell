@@ -57,7 +57,7 @@ export function encodeChallenge(c: Challenge): string {
   const final = Math.round(c.final);
   if (!(final >= MIN_FINAL && final <= MAX_FINAL)) throw new Error('final balance out of range');
   if (c.trades.length > MAX_TRADES) throw new Error('too many trades');
-  let prev = 0;
+  let prev = -1; // a sale on the first day (index 0) is legal
   c.trades.forEach((t, i) => {
     const side = i % 2 === 0 ? 'sell' : 'buy';
     if (t.side !== side) throw new Error('trades must alternate, starting with a sell');
@@ -91,7 +91,7 @@ export function decodeChallenge(s: string): Challenge | null {
     const count = b[6];
     if (count > MAX_TRADES || b.length !== 7 + count * 2) return null;
     const trades: Trade[] = [];
-    let prev = 0;
+    let prev = -1;
     for (let i = 0; i < count; i++) {
       const day = (b[7 + i * 2] << 8) | b[8 + i * 2];
       if (day <= prev || day > MAX_DAY) return null;

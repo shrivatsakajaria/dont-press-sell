@@ -5,13 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsx scripts/build-headlines.ts && tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "e2e": "playwright test --trace off",
     "data:fetch": "tsx scripts/fetch-prices.ts",
     "data:build": "tsx scripts/build-runs.ts",
-    "data:proof": "tsx scripts/data-proof.ts"
+    "data:proof": "tsx scripts/data-proof.ts",
+    "data:headlines": "tsx scripts/build-headlines.ts"
   },
   "devDependencies": {
     "@fontsource-variable/newsreader": "^5.3.0",

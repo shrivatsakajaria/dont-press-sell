@@ -25,26 +25,8 @@ const TITLE_ORDER: VerdictId[] = [
   'bigShort', 'nerves', 'diamond', 'shakenOut', 'paper', 'cashGang', 'overtrader', 'bagholder', 'marginCalled',
 ];
 
-export const MENU_TEXT = {
-  pickTitle: 'Pick a crash',
-  pickFolio: 'Practice',
-  pickStand: 'Practice runs. You know how each one ends, so they do not count towards your pot or your collection.',
-  collectionTitle: 'Your collection',
-  back: 'Back',
-  crash: 'Crash',
-  falseAlarm: 'False alarm',
-  titlesHeading: 'Verdict titles',
-  runsHeading: 'Runs played',
-  recordHeading: 'Your record',
-  noGames: 'No games yet',
-  noStreak: 'No streak yet',
-  notEarned: 'Not earned yet',
-  notPlayed: 'Not played yet',
-  keptOnPhone: 'Kept on this phone',
-  forVisit: 'For this visit',
-  on: 'On',
-  off: 'Off',
-};
+export { MENU_TEXT } from '../content/copy';
+import { MENU_TEXT, bestStreakLine, bustLine, playedLine, runsCountLine, titlesEarnedLine } from '../content/copy';
 
 /** "9 games, 3 wins, sold too early 4 times"; singulars "1 game, 1 win, sold too early once". */
 export function recordSentence(r: { games: number; wins: number; soldTooEarly: number }): string {
@@ -54,7 +36,6 @@ export function recordSentence(r: { games: number; wins: number; soldTooEarly: n
   return `${n(r.games, 'game', 'games')}, ${n(r.wins, 'win', 'wins')}, sold too early ${early}`;
 }
 
-const bustLine = (n: number) => (n === 1 ? 'Gone bust once' : `Gone bust ${n} times`);
 
 const CSS = `
 .dps-menu{box-sizing:border-box;min-height:100dvh;max-width:440px;margin:0 auto;display:flex;flex-direction:column;
@@ -117,7 +98,7 @@ function frame(root: HTMLElement, folioLeft: string, folioRight: string, title: 
   const paper = paperFor({ lossFrac: 0, inCash: false, worstDay: false });
   root.textContent = '';
   root.style.background = paper.bg;
-  const page = el('div', 'dps-menu');
+  const page = el('main', 'dps-menu');
   page.style.setProperty('--bg', paper.bg);
   page.style.setProperty('--ink', paper.ink);
   page.style.setProperty('--sec', paper.secondary);
@@ -150,7 +131,7 @@ export interface PickCrashProps {
 }
 
 export function mountPickCrash(root: HTMLElement, p: PickCrashProps): () => void {
-  const page = frame(root, MENU_TEXT.pickFolio, `${p.runs.length} runs`, MENU_TEXT.pickTitle, MENU_TEXT.pickStand);
+  const page = frame(root, MENU_TEXT.pickFolio, runsCountLine(p.runs.length), MENU_TEXT.pickTitle, MENU_TEXT.pickStand);
   const list = el('ul', 'dps-list');
   list.style.marginTop = '20px';
   list.style.borderTop = '1px solid var(--ink)';
@@ -192,7 +173,7 @@ export function mountCollection(root: HTMLElement, p: CollectionProps): () => vo
   const playedSet = new Set(p.played);
   const total = p.runs.length;
   const count = p.runs.filter((r) => playedSet.has(r.id)).length;
-  const page = frame(root, MENU_TEXT.collectionTitle, p.storageOk ? MENU_TEXT.keptOnPhone : MENU_TEXT.forVisit, MENU_TEXT.collectionTitle, `${count} of ${total} played`);
+  const page = frame(root, MENU_TEXT.collectionTitle, p.storageOk ? MENU_TEXT.keptOnPhone : MENU_TEXT.forVisit, MENU_TEXT.collectionTitle, playedLine(count, total));
 
   // Runs met: every crash by name, false alarms only once met.
   page.appendChild(el('h2', 'dps-h2', MENU_TEXT.runsHeading));
@@ -212,7 +193,7 @@ export function mountCollection(root: HTMLElement, p: CollectionProps): () => vo
   // Verdict titles: earned in ink with the plain line, the rest a quiet "Not earned yet".
   page.appendChild(el('h2', 'dps-h2', MENU_TEXT.titlesHeading));
   const earned = new Set(TITLE_ORDER.filter((id) => p.titles.includes(id)));
-  page.appendChild(el('p', 'dps-count', `${earned.size} of ${TITLE_ORDER.length} titles earned`));
+  page.appendChild(el('p', 'dps-count', titlesEarnedLine(earned.size, TITLE_ORDER.length)));
   const titleList = el('ul', 'dps-list');
   titleList.style.marginTop = '8px';
   for (const id of TITLE_ORDER) {
@@ -240,7 +221,7 @@ export function mountCollection(root: HTMLElement, p: CollectionProps): () => vo
   const lad = ladder(p.bestStreak);
   const streak =
     p.bestStreak > 0
-      ? `Best streak: ${p.bestStreak} ${p.bestStreak === 1 ? 'win' : 'wins'} in a row${lad.title ? `, ${lad.title}` : ''}`
+      ? bestStreakLine(p.bestStreak, lad.title)
       : MENU_TEXT.noStreak;
   page.appendChild(el('p', 'dps-fact', streak));
 

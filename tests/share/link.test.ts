@@ -43,8 +43,6 @@ describe('challenge link', () => {
   test('out-of-range days, non-increasing days and bad balances return null', () => {
     // version 1, run 0, final 7150 (0x1bee), two trades with day 60000
     expect(decodeChallenge(b64([1, 0, 0, 0, 0x1b, 0xee, 2, 0, 5, 0xea, 0x60]))).toBeNull();
-    // day 0
-    expect(decodeChallenge(b64([1, 0, 0, 0, 0x1b, 0xee, 1, 0, 0]))).toBeNull();
     // non-increasing: 9 then 9
     expect(decodeChallenge(b64([1, 0, 0, 0, 0x1b, 0xee, 2, 0, 9, 0, 9]))).toBeNull();
     // wrong version
@@ -54,6 +52,11 @@ describe('challenge link', () => {
     expect(decodeChallenge(b64([1, 0, 255, 255, 255, 255, 0]))).toBeNull();
     // control: a valid no-trade code
     expect(decodeChallenge(b64([1, 0, 0, 0, 0x1b, 0xee, 0]))).not.toBeNull();
+  });
+  test('a sale on the first day (index 0) is a legal trade and round-trips', () => {
+    const c = { runId: RUN_IDS[0], final: 7150, trades: mk([0, 4]) };
+    expect(decodeChallenge(encodeChallenge(c))).toEqual(c);
+    expect(decodeChallenge(b64([1, 0, 0, 0, 0x1b, 0xee, 1, 0, 0]))).toEqual({ runId: RUN_IDS[0], final: 7150, trades: [{ dayIndex: 0, side: 'sell' }] });
   });
   test('encode rejects trades that break the pattern', () => {
     expect(() => encodeChallenge({ ...sample, trades: [{ dayIndex: 3, side: 'buy' }] })).toThrow();

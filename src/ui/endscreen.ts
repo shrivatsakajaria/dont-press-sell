@@ -2,7 +2,10 @@
 // Plain DOM. The lead wires the callbacks; this module only draws and times.
 import {
   bankLabel,
+  BORROWED_ON,
   CHALLENGE,
+  COPIED,
+  COPY_RESULT,
   dollars,
   DOUBLE_OR_NOTHING,
   FOOTER_RESULT,
@@ -10,8 +13,8 @@ import {
   MASTHEAD,
   NEW_MYSTERY,
   nextMysteryLine,
+  PLAY_BORROWED,
   perfectLine,
-  potLine,
   REMATCH,
   TAP_TO_REVEAL,
   WINS_IN_A_ROW,
@@ -23,33 +26,13 @@ import { announce } from './a11y';
 import { endChart } from './endchart';
 import { paperFor } from './paper';
 
-// Fixed strings this screen owns. For the lead to move into src/content/copy.ts.
-export const LATE_EDITION = 'Late edition';
-export const SCORE_TO_BEAT = 'Score to beat';
-export const YOUR_CHALLENGER = 'Your challenger';
-export const SOMEONE_WHO_DID_NOTHING = 'Someone who did nothing';
-export const PERFECT_TIMING = 'Perfect timing';
-export const YOU = 'You';
-export const DAILY_CRASH = 'Daily crash';
-export const PICK_A_CRASH = 'Pick a crash';
-export const YOUR_COLLECTION = 'Your collection';
-export const soundLabel = (on: boolean) => (on ? 'Sound on' : 'Sound off');
-export const vibrationLabel = (on: boolean) => (on ? 'Vibration on' : 'Vibration off');
-/** Caption under the chart, keyed to its "Sold" and "Bought" marks. */
-export const tradeNewsLabel = (side: 'sell' | 'buy') => (side === 'sell' ? 'Sold:' : 'Bought:');
-export const doubleStakeLine = (lead: number, final: number) =>
-  `Keep your ${dollars(lead)} win, or take all ${dollars(final)} into another mystery game. Finish behind and the run is over.`;
-export const potResultLine = (pot: number, tonight: number) => {
-  const t = Math.round(tonight);
-  if (t === 0) return `${potLine(pot)}.`;
-  return `${potLine(pot)}. ${t > 0 ? 'Up' : 'Down'} ${dollars(t)} tonight.`;
-};
-export const challengerLine = (you: number, them: number) => {
-  const d = Math.round(you) - Math.round(them);
-  if (d > 0) return `You beat your challenger by ${dollars(d)}`;
-  if (d < 0) return `Your challenger beat you by ${dollars(d)}`;
-  return 'You and your challenger finished level';
-};
+// Strings this screen shows live in src/content/copy.ts; re-exported for existing importers.
+export {
+  LATE_EDITION, SCORE_TO_BEAT, YOUR_CHALLENGER, SOMEONE_WHO_DID_NOTHING, PERFECT_TIMING, YOU, DAILY_CRASH, PICK_A_CRASH, YOUR_COLLECTION, soundLabel, vibrationLabel, tradeNewsLabel, doubleStakeLine, potResultLine, challengerLine,
+} from '../content/copy';
+import {
+  LATE_EDITION, SCORE_TO_BEAT, YOUR_CHALLENGER, SOMEONE_WHO_DID_NOTHING, PERFECT_TIMING, YOU, DAILY_CRASH, PICK_A_CRASH, YOUR_COLLECTION, soundLabel, vibrationLabel, tradeNewsLabel, doubleStakeLine, potResultLine, challengerLine,
+} from '../content/copy';
 
 export const REVEAL_AFTER_MS = 4000;
 export const COUNT_MS = 1500;
@@ -75,12 +58,16 @@ export interface EndModel {
   double?: { lead: number; final: number; wins: number };
   pot: { pot: number; tonight: number };
   flags: { showCountdown: boolean; blind: boolean };
+  /** Plain lines printed under the score, such as "4 days in a row" on a daily result. */
+  extraLines?: string[];
   /** Replaces the verdict headline (bust: "Local investor loses the lot"; eighth rung). */
   headlineOverride?: string;
   /** The black-bordered front page for the eighth win in a row (6.8). */
   blackBorder?: boolean;
   sound?: { on: boolean };
   vibration?: { on: boolean };
+  /** The borrowed money switch, once unlocked (spec 6.13). */
+  borrowed?: { on: boolean };
   sfx?: Pick<Sfx, 'rise' | 'thud' | 'payout'>;
   actions: {
     onNewMystery: () => void;
@@ -94,6 +81,9 @@ export interface EndModel {
     /** Returns the new state (true = on). */
     onToggleSound?: () => boolean;
     onToggleVibration?: () => boolean;
+    onToggleBorrowed?: () => boolean;
+    /** Daily crash: copy the short text result (spec 6.9). Resolves true when copied. */
+    onCopyResult?: () => Promise<boolean>;
   };
 }
 
@@ -255,7 +245,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   };
   let destroyed = false;
 
-  const page = h('div', 'es' + (model.blackBorder ? ' es-black' : ''));
+  const page = h('main', 'es' + (model.blackBorder ? ' es-black' : ''));
 
   page.appendChild(h('div', 'es-mast', MASTHEAD));
 
@@ -342,6 +332,11 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     page.appendChild(scoreEnd);
   }
 
+  for (const line of model.extraLines ?? []) {
+    scoreEnd = h('p', 'es-vs', line);
+    page.appendChild(scoreEnd);
+  }
+
   if (model.nearMisses.length) {
     const ul = h('ul', 'es-misses');
     for (const m of model.nearMisses) ul.appendChild(h('li', '', m));
@@ -380,6 +375,16 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   // R24: with the double block, its red button is the only filled one.
   if (actions.onRematch) pair.appendChild(button(model.double ? 'es-out' : 'es-main', REMATCH, actions.onRematch));
   if (actions.onChallenge) pair.appendChild(button('es-out', CHALLENGE, actions.onChallenge));
+  if (actions.onCopyResult) {
+    const copyFn = actions.onCopyResult;
+    const b = button('es-out', COPY_RESULT);
+    b.addEventListener('click', () => {
+      void copyFn().then((ok) => {
+        if (ok) b.textContent = COPIED;
+      });
+    });
+    pair.appendChild(b);
+  }
   if (pair.childElementCount) page.appendChild(pair);
   page.appendChild(button('es-link', NEW_MYSTERY, actions.onNewMystery));
 
@@ -403,6 +408,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   };
   toggle(model.sound, actions.onToggleSound, soundLabel);
   toggle(model.vibration, actions.onToggleVibration, vibrationLabel);
+  toggle(model.borrowed, actions.onToggleBorrowed, (on) => (on ? BORROWED_ON : PLAY_BORROWED));
   if (links.childElementCount) page.appendChild(links);
   if (foot.childElementCount) page.appendChild(foot);
   page.appendChild(h('p', 'es-footer', FOOTER_RESULT));

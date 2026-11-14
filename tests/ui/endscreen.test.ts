@@ -355,4 +355,42 @@ describe('the front page', () => {
     expect(sound.textContent).toBe('Sound off');
     expect(sound.getAttribute('aria-pressed')).toBe('false');
   });
+
+  test('extra lines such as "4 days in a row" print under the score', () => {
+    const m = losingSample();
+    m.extraLines = ['4 days in a row'];
+    mount(m);
+    expect(Array.from(root.querySelectorAll('.es-vs')).map((e) => e.textContent)).toContain('4 days in a row');
+  });
+
+  test('the borrowed money switch shows its state and calls back', () => {
+    const m = c2007Sample();
+    let on = false;
+    m.borrowed = { on: false };
+    m.actions = { ...m.actions, onToggleBorrowed: vi.fn(() => (on = !on)) };
+    mount(m);
+    const b = Array.from(root.querySelectorAll('button')).find((x) => x.textContent === 'Play with borrowed money')!;
+    expect(b.getAttribute('aria-pressed')).toBe('false');
+    b.click();
+    expect(b.textContent).toBe('Borrowed money on');
+    expect(b.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  test('daily: "Copy result" calls back and says when it is copied', async () => {
+    const m = losingSample();
+    m.actions = { ...m.actions, onCopyResult: vi.fn(async () => true) };
+    mount(m);
+    const b = Array.from(root.querySelectorAll('button')).find((x) => x.textContent === 'Copy result')!;
+    b.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(m.actions.onCopyResult).toHaveBeenCalled();
+    expect(b.textContent).toBe('Copied');
+  });
+
+  test('the front page is the main landmark', () => {
+    mount(losingSample());
+    expect(root.querySelector('main.es')).not.toBeNull();
+  });
 });
+
