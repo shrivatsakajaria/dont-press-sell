@@ -7,7 +7,7 @@ import {
 } from '../content/copy';
 import type { RunData, RunResult, Trade } from '../engine/types';
 import type { Step } from '../game/schedule';
-import { createSession, type Session, type SessionView } from '../game/session';
+import { createSession, type Session, type SessionView, type SimulateFn } from '../game/session';
 import { load, save } from '../store/store';
 import { announce, initAnnouncer } from './a11y';
 import { drawChart, type ChartModel, type ChartPoint } from './chart';
@@ -107,6 +107,8 @@ export interface PlayState {
   soldLastTime?: number | null;
   scoreToBeat?: number | null;
   other?: number[] | null;
+  /** The line under the headline for the first seconds (borrowed money has its own). */
+  opening?: string;
 }
 
 function yearsSince(a: string, b: string): number {
@@ -154,7 +156,7 @@ export function screenModel(s: PlayState): ScreenModel {
   } else if (soldStep !== null && v.stepIndex >= soldStep && msBetween(soldStep, v.stepIndex) < SOLD_LAST_TIME_MS) {
     standfirst = SOLD_LAST_TIME;
   } else if (msBetween(0, v.stepIndex) < OPENING_MS) {
-    standfirst = OPENING_LINE;
+    standfirst = s.opening ?? OPENING_LINE;
   }
 
   let underButton = FOOTER_PLAY;
@@ -428,6 +430,14 @@ export interface PlayOpts {
   soldLastTime?: number | null;
   scoreToBeat?: number | null;
   other?: number[] | null;
+  opening?: string;
+  /** Rule book for balances (borrowed money plugs in simulateBorrowed). */
+  simulateFn?: SimulateFn;
+  /**
+   * Borrowed money (spec 6.13): the live counter is the balance against someone who put in
+   * the same amount unborrowed, and a balance at zero while invested ends the run at once.
+   */
+  borrowed?: boolean;
 }
 
 export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: PlayOpts): Session {
@@ -462,7 +472,17 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
     },
   });
 
-  function draw(v: SessionView) {
+  let ended = false;
+  const end = (r: RunResult) => {
+    if (ended) return;
+    ended = true;
+    opts.onEnd(r);
+  };
+
+  function draw(raw: SessionView) {
+    if (ended) return;
+    // Borrowed money: leadAt measures an unborrowed player, so the counter is taken from the view itself.
+    const v = opts.borrowed ? { ...raw, leadNow: raw.balance - raw.marketBalance } : raw;
     rendered = v;
     history.set(v.dayIndex, { balance: v.balance, invested: v.invested });
     if (v.invested !== lastInvested) {
@@ -485,19 +505,25 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
     const m = screenModel({
       run, steps, start, view: v, runLabel: opts.runLabel, history, trades, firstSaleStep, paused, pot: opts.pot ?? start,
       headline: words?.headline, commentary: words?.commentary,
-      soldLastTime: opts.soldLastTime, scoreToBeat: opts.scoreToBeat, other: opts.other,
+      soldLastTime: opts.soldLastTime, scoreToBeat: opts.scoreToBeat, other: opts.other, opening: opts.opening,
     });
     screen.render(m);
     if (v.slow && v.stepIndex !== lastAnnouncedStep) {
       lastAnnouncedStep = v.stepIndex;
       announce(`${m.status}. ${m.headline}. ${dollars(v.balance)}, ${m.deltaLabel}.`);
     }
+    // A wipe-out ends the run on the spot (spec 6.13).
+    if (opts.borrowed && opts.simulateFn && v.invested && v.balance <= 0) {
+      session.destroy();
+      end(opts.simulateFn(run.closes, trades, start));
+    }
   }
 
   const session = createSession(run, steps, {
     start,
     onStep: draw,
-    onEnd: (r) => opts.onEnd(r),
+    onEnd: end,
+    simulateFn: opts.simulateFn,
     onPause() {
       paused = true;
       if (rendered) draw(session.view());

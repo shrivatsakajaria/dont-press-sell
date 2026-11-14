@@ -48,3 +48,7 @@ export const REMATCH_LABEL = 'Rematch';
 export const dailyLabel = (n: number) => `Daily crash ${n}`;
 export const BUST_HEADLINE = 'Local investor loses the lot';
 export const ISLAND_HEADLINE = 'Local investor retires to private island';
+
+/** The borrowed money switch on the result page once it is on (off, it reads PLAY_BORROWED). */
+export const BORROWED_ON = 'Borrowed money on';
+export const BORROWED_LABEL = 'Borrowed money';

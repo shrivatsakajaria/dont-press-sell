@@ -362,5 +362,18 @@ describe('the front page', () => {
     mount(m);
     expect(Array.from(root.querySelectorAll('.es-vs')).map((e) => e.textContent)).toContain('4 days in a row');
   });
+
+  test('the borrowed money switch shows its state and calls back', () => {
+    const m = c2007Sample();
+    let on = false;
+    m.borrowed = { on: false };
+    m.actions = { ...m.actions, onToggleBorrowed: vi.fn(() => (on = !on)) };
+    mount(m);
+    const b = Array.from(root.querySelectorAll('button')).find((x) => x.textContent === 'Play with borrowed money')!;
+    expect(b.getAttribute('aria-pressed')).toBe('false');
+    b.click();
+    expect(b.textContent).toBe('Borrowed money on');
+    expect(b.getAttribute('aria-pressed')).toBe('true');
+  });
 });
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { RunResult } from '../../src/engine/types';
-import { bankPending, currentStreak, doubleUp, settle } from '../../src/game/flow';
+import { bankPending, borrowedUnlocked, currentStreak, doubleUp, settle } from '../../src/game/flow';
 import { getPot, resetPot } from '../../src/game/pot';
 import { getRecord } from '../../src/store/record';
 import { resetCells } from '../../src/store/store';
@@ -111,6 +111,24 @@ for (const [name, make] of [['with storage', memoryStorage], ['with storage thro
       }
       expect(s.double?.wins).toBe(8);
       expect(s.island).toBe(true);
+    });
+
+    test('a first blind win unlocks borrowed money; practice wins and blind losses do not', () => {
+      expect(borrowedUnlocked()).toBe(false);
+      settle({ ...base, mode: 'picked', result: result(900) });
+      settle({ ...base, mode: 'challenge', result: result(-900) });
+      expect(borrowedUnlocked()).toBe(false);
+      settle({ ...base, mode: 'challenge', result: result(900) });
+      expect(borrowedUnlocked()).toBe(true);
+    });
+
+    test('a borrowed run settles at once, never offers the double, and a wipe-out costs the pot $10,000', () => {
+      const won = settle({ ...base, borrowed: true, mode: 'mystery', result: result(1500) });
+      expect(won.double).toBeNull();
+      expect(getPot().pot).toBe(11500);
+      const wiped = { ...result(-6000, 0), wipedAt: 40 };
+      settle({ ...base, borrowed: true, mode: 'mystery', result: wiped });
+      expect(getPot().pot).toBe(1500);
     });
   });
 }

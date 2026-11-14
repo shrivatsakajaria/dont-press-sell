@@ -2,6 +2,7 @@
 // Plain DOM. The lead wires the callbacks; this module only draws and times.
 import {
   bankLabel,
+  BORROWED_ON,
   CHALLENGE,
   dollars,
   DOUBLE_OR_NOTHING,
@@ -10,6 +11,7 @@ import {
   MASTHEAD,
   NEW_MYSTERY,
   nextMysteryLine,
+  PLAY_BORROWED,
   perfectLine,
   potLine,
   REMATCH,
@@ -83,6 +85,8 @@ export interface EndModel {
   blackBorder?: boolean;
   sound?: { on: boolean };
   vibration?: { on: boolean };
+  /** The borrowed money switch, once unlocked (spec 6.13). */
+  borrowed?: { on: boolean };
   sfx?: Pick<Sfx, 'rise' | 'thud' | 'payout'>;
   actions: {
     onNewMystery: () => void;
@@ -96,6 +100,7 @@ export interface EndModel {
     /** Returns the new state (true = on). */
     onToggleSound?: () => boolean;
     onToggleVibration?: () => boolean;
+    onToggleBorrowed?: () => boolean;
   };
 }
 
@@ -410,6 +415,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   };
   toggle(model.sound, actions.onToggleSound, soundLabel);
   toggle(model.vibration, actions.onToggleVibration, vibrationLabel);
+  toggle(model.borrowed, actions.onToggleBorrowed, (on) => (on ? BORROWED_ON : PLAY_BORROWED));
   if (links.childElementCount) page.appendChild(links);
   if (foot.childElementCount) page.appendChild(foot);
   page.appendChild(h('p', 'es-footer', FOOTER_RESULT));

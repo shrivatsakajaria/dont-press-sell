@@ -1,7 +1,7 @@
 // Settling a finished run (spec 6.8, 6.11, 6.12): the record, the pot and the double-or-nothing
 // streak in one place, so the page code only draws. Storage may be missing: every value lives
 // in memory for the visit and is written through when it can be.
-import type { RunResult, VerdictId } from '../engine/types';
+import type { BorrowedResult, RunResult, VerdictId } from '../engine/types';
 import { dailyStreak, recordRun, recordStreak, type Mode } from '../store/record';
 import { cell } from '../store/store';
 import { applyToPot, getPot } from './pot';
@@ -9,6 +9,17 @@ import { afterRun, bank, doubleDown, initialStreak, RUNGS, type StreakState } fr
 
 /** The streak, stored so a win waiting for a choice is banked if the page closes (see bankPending). */
 const streakCell = cell<StreakState>('streak', initialStreak());
+
+/** Borrowed money unlocks after the first blind win (spec 6.13); the switch keeps its own state. */
+const unlockedCell = cell<boolean>('borrowedUnlocked', false);
+const borrowedOnCell = cell<boolean>('borrowed', false);
+
+export const borrowedUnlocked = (): boolean => unlockedCell.get() === true;
+/** The switch: new mystery runs use borrowed money (never double or nothing, daily, challenge or practice). */
+export const borrowedOn = (): boolean => borrowedUnlocked() && borrowedOnCell.get() === true;
+export function setBorrowed(on: boolean): void {
+  borrowedOnCell.set(on);
+}
 
 /** The eighth win in a row prints the island front page (spec 6.8). */
 export const ISLAND_WINS = RUNGS[RUNGS.length - 1];
@@ -60,11 +71,17 @@ export interface Settled {
 export function settle(i: SettleInput): Settled {
   const { blind } = recordRun(i.mode, i.runId, i.result, i.verdict, { lowIndex: i.lowIndex, date: i.date });
   const daysInRow = i.mode === 'daily' && blind && i.date ? dailyStreak(i.date) : null;
+  if (blind && i.result.lead > 0 && !borrowedUnlocked()) unlockedCell.set(true);
   const out = (p: { pot: number; tonight: number; bust: boolean }, double: Settled['double'] = null): Settled => ({
     blind, pot: { pot: p.pot, tonight: p.tonight }, bust: p.bust, double, island: !!double && double.wins === ISLAND_WINS, daysInRow,
   });
 
-  if (i.mode === 'mystery' && !i.borrowed) {
+  if (i.borrowed) {
+    // A wipe-out loses the $10,000 put in (spec 6.13); otherwise the score as usual. Settled at once.
+    const wiped = (i.result as BorrowedResult).wipedAt != null;
+    return out(applyToPot('mystery', wiped ? -i.start : i.result.lead, blind));
+  }
+  if (i.mode === 'mystery') {
     const ar = afterRun(currentStreak(), 'mystery', i.result);
     if (ar.offer) {
       streakCell.set(ar.state);

@@ -1,0 +1,38 @@
+import { expect, test, type Page } from '@playwright/test';
+
+async function unlockBorrowed(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('dps:borrowedUnlocked', 'true');
+    localStorage.setItem('dps:borrowed', 'true');
+    // A pot above $10,000, as after the first blind win that unlocks the mode (a wipe-out from $10,000 would be bust).
+    localStorage.setItem('dps:pot', '20000');
+  });
+}
+
+test('borrowed money on a known crash with no taps is wiped out on the margin-called page', async ({ page }) => {
+  await unlockBorrowed(page);
+  await page.clock.install();
+  await page.goto('/?run=c2007');
+  await expect(page.locator('.folio')).toContainText('Borrowed money');
+  await expect(page.locator('.standfirst')).toHaveText(
+    'You have borrowed $20,000. Every move is three times bigger. Fall a third and you are wiped out.',
+  );
+  // Run the clock a second at a time until the front page prints (the wipe-out comes mid-fall).
+  for (let i = 0; i < 60 && (await page.locator('.es-h1').count()) === 0; i++) await page.clock.runFor(1000);
+  await expect(page.locator('.es-folio span').first()).toHaveText('Borrowed money');
+  await expect(page.locator('.es-h1')).toHaveText('Local investor gets margin called');
+  await expect(page.locator('.es-pot')).toContainText('Your pot: $10,000. Down $10,000 tonight.');
+  await expect(page.getByRole('button', { name: 'Borrowed money on' })).toBeVisible();
+});
+
+test('borrowed money on a known scare with no taps finishes ahead', async ({ page }) => {
+  await unlockBorrowed(page);
+  await page.clock.install();
+  await page.goto('/?run=s2018');
+  await expect(page.locator('.folio')).toContainText('Borrowed money');
+  await page.clock.runFor(47_000);
+  await expect(page.getByText('Late edition')).toBeVisible();
+  await page.clock.runFor(6_000);
+  await expect(page.locator('.es-lead')).toHaveText(/^\$[\d,]+ ahead of someone who did nothing$/);
+  await expect(page.locator('.es-lead')).not.toHaveText(/^\$0 /);
+});

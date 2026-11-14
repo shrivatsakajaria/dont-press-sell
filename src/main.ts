@@ -1,15 +1,18 @@
 // Boot and flow (spec 6): straight into a mystery run, then the result front page, from which
 // every other mode starts. Rules live in the modules; this file only joins them.
 import {
-  BUST_HEADLINE, ISLAND_HEADLINE, REMATCH_LABEL, dailyLabel,
+  BORROWED_LABEL, BORROWED_OPENING, BUST_HEADLINE, ISLAND_HEADLINE, REMATCH_LABEL, dailyLabel,
 } from './content/copy';
 import { loadHeadlines } from './content/headlines';
 import { RUNS, RUN_IDS, loadRun, runMeta } from './content/runs';
+import { simulateBorrowed } from './engine/borrowed';
 import { nearMisses } from './engine/nearmiss';
 import type { Headline, RunData, RunResult } from './engine/types';
 import { verdictCopy, verdictFor } from './engine/verdict';
 import { setHapticsEnabled } from './fx/haptics';
-import { bankPending, currentStreak, doubleUp, settle } from './game/flow';
+import {
+  bankPending, borrowedOn, borrowedUnlocked, currentStreak, doubleUp, setBorrowed, settle,
+} from './game/flow';
 import { createNarrator, tradeNews, type NarratorRun } from './game/narrator';
 import { dailyPick, pickMystery } from './game/picker';
 import { getPot } from './game/pot';
@@ -38,6 +41,8 @@ interface Game {
   date?: string;
   /** Rematch: the previous go at this crash. */
   previous?: LastRun | null;
+  /** Borrowed money (mystery runs only, spec 6.13). */
+  borrowed?: boolean;
 }
 
 const START = 10000;
@@ -103,8 +108,12 @@ async function play(game: Game, opts: { double?: boolean } = {}) {
     start: game.start,
   });
   const prev = game.previous ?? null;
+  const borrowed = !!game.borrowed;
   session = startPlay(root, run, steps, {
     runLabel: game.label,
+    borrowed,
+    simulateFn: borrowed ? simulateBorrowed : undefined,
+    opening: borrowed ? BORROWED_OPENING : undefined,
     start: game.start,
     pot: potNow(),
     narrate: (d, prevDay, balance, trades) => narrator.step(d, prevDay, balance, trades),
@@ -120,7 +129,7 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
   const verdictId = verdictFor(r, run);
   const s = settle({
     mode: game.mode, runId: run.id, result: r, verdict: verdictId, lowIndex: run.lowIndex,
-    date: game.date, start: game.start, borrowed: false,
+    date: game.date, start: game.start, borrowed: !!game.borrowed,
   });
   const days = s.daysInRow !== null ? daysInRowText(s.daysInRow) : null;
   showResult({
@@ -142,6 +151,7 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
     extraLines: days ? [days] : undefined,
     sound: { on: soundCell.get() !== false },
     vibration: { on: vibrationCell.get() !== false },
+    borrowed: borrowedUnlocked() ? { on: borrowedOn() } : undefined,
     actions: resultActions(game, !!s.double),
   });
 }
@@ -166,7 +176,14 @@ function resultActions(game: Game, offered: boolean): EndModel['actions'] {
       setHapticsEnabled(on);
       return on;
     },
+    onToggleBorrowed: toggleBorrowed,
   };
+}
+
+function toggleBorrowed(): boolean {
+  const on = !borrowedOn();
+  setBorrowed(on);
+  return on;
 }
 
 function showResult(model: EndModel) {
@@ -199,7 +216,11 @@ function newMystery(start = START, opts: { double?: boolean } = {}) {
   const recent = Array.isArray(recentCell.get()) ? recentCell.get() : [];
   const runId = pickMystery(Math.random, recent);
   recentCell.set([runId, ...recent].slice(0, RECENT_KEEP));
-  return play({ mode: 'mystery', runId, label: MYSTERY_LABEL, start, real: false }, opts);
+  return play(mysteryGame(runId, start, !opts.double && borrowedOn()), opts);
+}
+
+function mysteryGame(runId: string, start: number, borrowed: boolean): Game {
+  return { mode: 'mystery', runId, label: borrowed ? BORROWED_LABEL : MYSTERY_LABEL, start, real: false, borrowed };
 }
 
 function double() {
@@ -207,9 +228,11 @@ function double() {
   return newMystery(s.start, { double: true });
 }
 
+/** Rematch: the same crash from the same start, as practice. Never borrowed; a borrowed go is not a fair score to beat. */
 function rematch(game: Game) {
   return play({
-    mode: 'rematch', runId: game.runId, label: REMATCH_LABEL, start: game.start, real: true, previous: getLastRun(game.runId),
+    mode: 'rematch', runId: game.runId, label: REMATCH_LABEL, start: game.start, real: true,
+    previous: game.borrowed ? null : getLastRun(game.runId),
   });
 }
 
@@ -245,6 +268,9 @@ function collection() {
     titles: rec.titles,
     runs: RUNS,
     storageOk: save('probe', true),
+    unlocked: borrowedUnlocked(),
+    borrowed: borrowedOn(),
+    onToggleBorrowed: (on) => setBorrowed(on),
     onBack: back,
   });
 }
@@ -252,7 +278,7 @@ function collection() {
 function boot() {
   // ?run=<id> opens that run as a mystery (testing and screenshots).
   const asked = new URLSearchParams(location.search).get('run') ?? '';
-  if (RUN_IDS.includes(asked)) return play({ mode: 'mystery', runId: asked, label: MYSTERY_LABEL, start: START, real: false });
+  if (RUN_IDS.includes(asked)) return play(mysteryGame(asked, START, borrowedOn()));
   return newMystery();
 }
 
