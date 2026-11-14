@@ -8,7 +8,10 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "e2e": "playwright test --trace off"
+    "e2e": "playwright test --trace off",
+    "data:fetch": "tsx scripts/fetch-prices.ts",
+    "data:build": "tsx scripts/build-runs.ts",
+    "data:proof": "tsx scripts/data-proof.ts"
   },
   "devDependencies": {
     "@fontsource-variable/newsreader": "^5.3.0",

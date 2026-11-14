@@ -22,6 +22,7 @@ export function perfectTiming(
       buyIndex = i;
     }
   }
-  const final = ((start * closes[closes.length - 1]) / closes[0]) * bestRatio;
+  // Same order of operations as the holder in simulate (R18), so no fall gives exactly the holder.
+  const final = (start / closes[0]) * closes[closes.length - 1] * bestRatio;
   return { final, sellIndex, buyIndex };
 }
