@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Result card, dev page</title>
+<style>
+@font-face{font-family:'Newsreader';src:url(/fonts/newsreader.woff2) format('woff2');font-weight:200 800;font-style:normal}
+@font-face{font-family:'Libre Franklin';src:url(/fonts/libre-franklin-500.woff2) format('woff2');font-weight:500;font-style:normal}
+@font-face{font-family:'Libre Franklin';src:url(/fonts/libre-franklin-700.woff2) format('woff2');font-weight:700;font-style:normal}
+body{margin:0;padding:24px;background:#ddd;font-family:'Libre Franklin',Arial,sans-serif;font-weight:500;color:#1c1a17}
+#cards{display:flex;flex-wrap:wrap;gap:24px}
+figure{margin:0}
+figcaption{font-size:14px;margin-bottom:8px}
+img{display:block;width:540px;height:675px;max-width:100%}
+</style>
+</head>
+<body>
+<div id="cards"></div>
+<script type="module" src="/dev/card.ts"></script>
+</body>
+</html>
