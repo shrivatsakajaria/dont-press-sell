@@ -34,7 +34,7 @@ export const MENU_TEXT = {
   crash: 'Crash',
   falseAlarm: 'False alarm',
   titlesHeading: 'Verdict titles',
-  runsHeading: 'Runs played',
+  runsHeading: 'Runs',
   recordHeading: 'Your record',
   noGames: 'No games yet',
   noStreak: 'No streak yet',

@@ -2,7 +2,8 @@
 // screenModel() turns the session's view into what the page shows (pure, tested);
 // mountScreen() draws it; startPlay() runs one session on it.
 import {
-  FIRST_SALE_LINE, FOOTER_PLAY, MASTHEAD, OPENING_LINE, buyBackLabel, dollars, potLine, sellLabel, sellingAtTopLine,
+  FIRST_SALE_LINE, FOOTER_PLAY, MASTHEAD, OPENING_LINE, SOLD_LAST_TIME, buyBackLabel, dollars, potLine, scoreToBeatLine,
+  sellLabel, sellingAtTopLine,
 } from '../content/copy';
 import type { RunData, RunResult, Trade } from '../engine/types';
 import type { Step } from '../game/schedule';
@@ -44,6 +45,8 @@ export const boughtAnnouncement = (n: number) => `Bought back with ${dollars(n)}
 /** How long the opening line stays up, and the first-sale line after a first sale (clock time). */
 const OPENING_MS = 4000;
 const FIRST_SALE_MS = 4000;
+/** How long "This is the day you sold last time." stays up (clock time). */
+const SOLD_LAST_TIME_MS = 3000;
 /** Button labels longer than this wrap at 24px in a 342px column, so they drop to the long size. */
 const LONG_LABEL_CHARS = 25;
 /** Gap from the peak at which the "Selling at the top" line appears (spec 6.4). */
@@ -100,6 +103,10 @@ export interface PlayState {
   /** The day's news line and the commentary under it (src/game/narrator.ts); placeholders when absent. */
   headline?: string;
   commentary?: string;
+  /** Rematch: the day the player sold last time, the score to beat and the previous go's balances (spec 6.7). */
+  soldLastTime?: number | null;
+  scoreToBeat?: number | null;
+  other?: number[] | null;
 }
 
 function yearsSince(a: string, b: string): number {
@@ -138,9 +145,14 @@ export function screenModel(s: PlayState): ScreenModel {
     for (let i = a; i < b; i++) t += steps[i]?.holdMs ?? 0;
     return t;
   };
+  // The first step that shows the day the player sold last time (a step may cover several days).
+  const soldIdx = s.soldLastTime == null ? -1 : steps.findIndex((st) => st.dayIndex >= s.soldLastTime!);
+  const soldStep = soldIdx >= 0 ? soldIdx : null;
   let standfirst = s.commentary ?? placeholderStandfirst(d + 1);
   if (s.firstSaleStep !== null && v.stepIndex >= s.firstSaleStep && msBetween(s.firstSaleStep, v.stepIndex) < FIRST_SALE_MS) {
     standfirst = FIRST_SALE_LINE;
+  } else if (soldStep !== null && v.stepIndex >= soldStep && msBetween(soldStep, v.stepIndex) < SOLD_LAST_TIME_MS) {
+    standfirst = SOLD_LAST_TIME;
   } else if (msBetween(0, v.stepIndex) < OPENING_MS) {
     standfirst = OPENING_LINE;
   }
@@ -161,6 +173,8 @@ export function screenModel(s: PlayState): ScreenModel {
       regret = amount > 0 ? { text: regretMadeLine(amount), rose: true } : { text: regretCostLine(amount), rose: false };
     }
   }
+
+  if (!regret && s.scoreToBeat != null) regret = { text: scoreToBeatLine(s.scoreToBeat), rose: false };
 
   const delta = v.balance - start;
   const roundedDelta = Math.round(delta);
@@ -221,6 +235,7 @@ function chartModel(s: PlayState, worst: boolean, inCash: boolean): ChartModel {
     worst,
     inCash,
     label: chartLabel(s.view.dayIndex + 1, s.view.balance, s.start),
+    other: s.other ?? undefined,
   };
 }
 
@@ -409,6 +424,10 @@ export interface PlayOpts {
   onEnd(r: RunResult): void;
   /** The headline and commentary for each new step (src/game/narrator.ts). */
   narrate?(dayIndex: number, prevDay: number | null, balance: number, trades: Trade[]): { headline: string; commentary: string };
+  /** Rematch and challenge extras (spec 6.7). */
+  soldLastTime?: number | null;
+  scoreToBeat?: number | null;
+  other?: number[] | null;
 }
 
 export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: PlayOpts): Session {
@@ -466,6 +485,7 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
     const m = screenModel({
       run, steps, start, view: v, runLabel: opts.runLabel, history, trades, firstSaleStep, paused, pot: opts.pot ?? start,
       headline: words?.headline, commentary: words?.commentary,
+      soldLastTime: opts.soldLastTime, scoreToBeat: opts.scoreToBeat, other: opts.other,
     });
     screen.render(m);
     if (v.slow && v.stepIndex !== lastAnnouncedStep) {

@@ -75,6 +75,8 @@ export interface EndModel {
   double?: { lead: number; final: number; wins: number };
   pot: { pot: number; tonight: number };
   flags: { showCountdown: boolean; blind: boolean };
+  /** Plain lines printed under the score, such as "4 days in a row" on a daily result. */
+  extraLines?: string[];
   /** Replaces the verdict headline (bust: "Local investor loses the lot"; eighth rung). */
   headlineOverride?: string;
   /** The black-bordered front page for the eighth win in a row (6.8). */
@@ -339,6 +341,11 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   page.appendChild(scoreEnd);
   if (model.other?.kind === 'challenger') {
     scoreEnd = h('p', 'es-vs', challengerLine(result.final, model.other.final));
+    page.appendChild(scoreEnd);
+  }
+
+  for (const line of model.extraLines ?? []) {
+    scoreEnd = h('p', 'es-vs', line);
     page.appendChild(scoreEnd);
   }
 

@@ -20,6 +20,8 @@ export interface ChartModel {
   inCash: boolean;
   /** Text alternative for the chart; it updates every step. */
   label: string;
+  /** Rematch: the previous go's balance for every day of the run, drawn dashed across the chart (spec 6.7). */
+  other?: number[];
 }
 
 export interface ChartGeometry {
@@ -28,6 +30,8 @@ export interface ChartGeometry {
   startY: number;
   today: [number, number];
   marks: { x: number; y: number; side: Trade['side'] }[];
+  /** The previous go, from day 1 to the chart's right edge; empty without one. */
+  other: [number, number][];
 }
 
 /** The fewest days the x-axis ever spans, so day 2 does not fill the width. */
@@ -58,6 +62,18 @@ export function chartGeometry(m: ChartModel, w: number, h: number): ChartGeometr
     lo = Math.min(lo, p.balance, p.ghost ?? Infinity);
     hi = Math.max(hi, p.balance, p.ghost ?? -Infinity);
   }
+  // The previous go, as far as the chart's right edge reaches (thinned to about one point per 2px).
+  const otherDays: number[] = [];
+  if (m.other?.length) {
+    const lastVisible = Math.min(m.other.length - 1, Math.floor(span));
+    const every = Math.max(1, Math.ceil(lastVisible / (usableW / 2)));
+    for (let d = 0; d <= lastVisible; d += every) otherDays.push(d);
+    if (otherDays[otherDays.length - 1] !== lastVisible) otherDays.push(lastVisible);
+    for (const d of otherDays) {
+      lo = Math.min(lo, m.other[d]);
+      hi = Math.max(hi, m.other[d]);
+    }
+  }
   // A minimum vertical range of 4% of the start, so small wobbles do not look like cliffs.
   const minRange = m.start * 0.04;
   if (hi - lo < minRange) {
@@ -84,7 +100,8 @@ export function chartGeometry(m: ChartModel, w: number, h: number): ChartGeometr
     return { x: line[i][0], y: line[i][1], side: t.side };
   });
 
-  return { line, ghosts, startY: yOf(m.start), today: line[line.length - 1], marks };
+  const other = otherDays.map((d) => [xOf(d), yOf(m.other![d])] as [number, number]);
+  return { line, ghosts, startY: yOf(m.start), today: line[line.length - 1], marks, other };
 }
 
 const fmt = (p: [number, number][]) => p.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
@@ -134,6 +151,14 @@ export function drawChart(svg: SVGSVGElement | SVGElement, m: ChartModel, paper:
     .map(clampY)
     .find((y) => marketY === null || Math.abs(y - marketY) >= 14);
 
+  if (g.other.length > 1) {
+    kids.push(
+      el('polyline', {
+        'data-other': '', fill: 'none', stroke: m.worst ? paper.ink : MARKET_DASH, 'stroke-width': 2,
+        'stroke-dasharray': '4 4', 'stroke-linecap': 'round', points: fmt(g.other),
+      }),
+    );
+  }
   for (const seg of g.ghosts) {
     kids.push(
       el('polyline', {

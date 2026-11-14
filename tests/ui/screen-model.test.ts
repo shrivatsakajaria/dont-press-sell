@@ -163,4 +163,16 @@ describe('screenModel', () => {
     expect(screenModel(state(view(0), words)).standfirst).toBe(OPENING_LINE);
     expect(screenModel(state(view(6), { ...words, steps: slow })).standfirst).toBe('Down two days in a row.');
   });
+
+  it('a rematch: "This is the day you sold last time." on that day, and the score to beat under the balance', () => {
+    const slow = steps.map((x) => ({ ...x, holdMs: 1000 }));
+    const words = { commentary: 'Commentary.', soldLastTime: 5, scoreToBeat: 7150, other: [10000, 9000] };
+    expect(screenModel(state(view(4), { ...words, steps: slow })).standfirst).toBe('Commentary.');
+    const m = screenModel(state(view(5), { ...words, steps: slow }));
+    expect(m.standfirst).toBe('This is the day you sold last time.');
+    expect(m.regret).toEqual({ text: 'Score to beat: $7,150', rose: false });
+    expect(m.chart.other).toEqual([10000, 9000]);
+    expect(screenModel(state(view(8), { ...words, steps: slow })).standfirst).toBe('Commentary.');
+  });
 });
+

@@ -38,3 +38,13 @@ export const FOOTER_RESULT = 'US stock market · A Still Signal build';
 
 /** The play headline before a run's first news line (always true: every run trades below its old high until the last day). */
 export const BEFORE_NEWS = 'Shares are down from their recent high';
+
+// Rematch and challenge (spec 6.7).
+export const SOLD_LAST_TIME = 'This is the day you sold last time.';
+export const scoreToBeatLine = (n: number) => `Score to beat: ${dollars(n)}`;
+
+// Run labels in the folio (spec 6.2) and special front pages (6.8, 6.12).
+export const REMATCH_LABEL = 'Rematch';
+export const dailyLabel = (n: number) => `Daily crash ${n}`;
+export const BUST_HEADLINE = 'Local investor loses the lot';
+export const ISLAND_HEADLINE = 'Local investor retires to private island';

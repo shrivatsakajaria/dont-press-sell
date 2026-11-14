@@ -103,3 +103,24 @@ describe('drawChart', () => {
     expect([...svg.querySelectorAll('text')].some((t) => t.textContent === 'The market')).toBe(true);
   });
 });
+
+describe('a rematch draws the previous run as a dashed line', () => {
+  const other = Array.from({ length: 100 }, (_, i) => 10000 - i * 30);
+  it('spans the chart from day 1 to the right edge, and its low widens the range', () => {
+    const g = chartGeometry({ ...base, other }, 342, 200);
+    expect(g.other.length).toBeGreaterThan(10);
+    expect(g.other[0][0]).toBe(0);
+    expect(g.other[g.other.length - 1][0]).toBeLessThanOrEqual(342 - 8);
+    expect(g.other[g.other.length - 1][0]).toBeGreaterThan(300);
+    const ys = g.other.map((p) => p[1]);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(200);
+  });
+  it('is drawn dashed, and there is none without a previous run', () => {
+    document.body.innerHTML = '<svg></svg>';
+    const svg = document.querySelector('svg')!;
+    drawChart(svg, { ...base, other }, paperFor({ lossFrac: 0, inCash: false, worstDay: false }), 342, 200);
+    expect(svg.querySelectorAll('polyline[data-other]').length).toBe(1);
+    expect(chartGeometry(base, 342, 200).other).toEqual([]);
+  });
+});
+

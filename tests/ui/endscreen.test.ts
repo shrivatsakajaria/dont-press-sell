@@ -355,4 +355,12 @@ describe('the front page', () => {
     expect(sound.textContent).toBe('Sound off');
     expect(sound.getAttribute('aria-pressed')).toBe('false');
   });
+
+  test('extra lines such as "4 days in a row" print under the score', () => {
+    const m = losingSample();
+    m.extraLines = ['4 days in a row'];
+    mount(m);
+    expect(Array.from(root.querySelectorAll('.es-vs')).map((e) => e.textContent)).toContain('4 days in a row');
+  });
 });
+
