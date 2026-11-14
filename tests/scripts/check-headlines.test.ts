@@ -24,6 +24,10 @@ describe('parseCsv', () => {
     const out = parseCsv('a,b,c\r\n"x, y","say ""hi""","line\nbreak"\r\n');
     expect(out).toEqual([['a', 'b', 'c'], ['x, y', 'say "hi"', 'line\nbreak']]);
   });
+  it('reports an unterminated quote', () => {
+    const { problems } = parseHeadlineRows('date,real,anon,big,sombre,source_url,second_source_url,note\n2020-01-02,"oops,b,c,d,e,f,g\n');
+    expect(problems.some((p) => /unterminated quote/.test(p))).toBe(true);
+  });
   it('keeps empty trailing fields and ignores a final blank line', () => {
     expect(parseCsv('a,b,\n1,,\n')).toEqual([['a', 'b', ''], ['1', '', '']]);
   });
@@ -60,7 +64,7 @@ describe('checkHeadlines', () => {
     expect(has(checkHeadlines(mutate(0, { anon: 'Brothers bank files for bankruptcy' }), run), /Brothers/)).toBe(true);
   });
   it('lets the first word and allow-listed words through', () => {
-    const rows = mutate(1, { real: 'Fed cuts US rates', anon: 'Fed watchers see US rates cut' });
+    const rows = mutate(1, { real: 'Shares cut US rates', anon: 'Shares watchers see US rates cut' });
     expect(has(checkHeadlines(rows, run), /capitalised/)).toBe(false);
     const rows2 = mutate(1, { real: 'Bank cuts US rates', anon: 'The US cuts rates' });
     expect(has(checkHeadlines(rows2, run), /capitalised/)).toBe(false);
@@ -68,6 +72,24 @@ describe('checkHeadlines', () => {
   it('fails a capitalised non-first word of real that appears in anon', () => {
     const rows = mutate(1, { real: 'Central bank cuts rates, says Powell', anon: 'Powell says rates are cut' });
     expect(has(checkHeadlines(rows, run), /Powell/)).toBe(true);
+  });
+  it('fails decades and apostrophe years in anon', () => {
+    for (const a of ['Worst since the 1930s', 'Best since the 1990s', "Worse than '87", 'Worse than \u201987']) {
+      expect(has(checkHeadlines(mutate(1, { anon: a }), run), /year/), a).toBe(true);
+    }
+  });
+  it('compares names case-insensitively and strips possessives', () => {
+    const r = (anon: string) => has(checkHeadlines(mutate(1, { real: 'Rates cut, says Powell', anon }), run), /Powell/);
+    expect(r('powell says rates fall')).toBe(true);
+    expect(r("Powell's view is calm")).toBe(true);
+    const r2 = has(checkHeadlines(mutate(1, { real: "Powell's team cuts rates", anon: 'The powell team acts' }), run), /Powell/);
+    expect(r2).toBe(true);
+  });
+  it('treats a non-listed first word as a name, but exempts common sentence-start words', () => {
+    const nameFirst = mutate(1, { real: 'Lehman fails today', anon: 'Lehman is gone' });
+    expect(has(checkHeadlines(nameFirst, run), /Lehman/)).toBe(true);
+    const common = mutate(1, { real: 'Markets fall hard', anon: 'Markets fall a lot' });
+    expect(has(checkHeadlines(common, run), /capitalised/)).toBe(false);
   });
   it('fails "in N years"', () => {
     expect(has(checkHeadlines(mutate(1, { anon: 'Worst fall in 20 years' }), run), /years/)).toBe(true);
@@ -79,7 +101,7 @@ describe('checkHeadlines', () => {
     expect(has(checkHeadlines(mutate(1, { anon: 'y'.repeat(56) }), run), /56/)).toBe(false);
   });
   it('fails jargon in anon', () => {
-    for (const w of ['funds', 'liquidity', 'equities', 'tranche', 'basis points', 'yield']) {
+    for (const w of ['funds', 'fund', 'Liquidity', 'equities', 'Equity', 'tranche', 'tranches', 'basis points', 'basis point', 'yield', 'YIELDS', 'liquidity']) {
       expect(has(checkHeadlines(mutate(1, { anon: `Big ${w} move` }), run), /jargon/)).toBe(true);
     }
   });

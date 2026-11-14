@@ -49,6 +49,12 @@ describe('paperFor', () => {
   it('worst day wins over in cash', () => {
     expect(paperFor({ lossFrac: 0, inCash: true, worstDay: true }).bg).toBe('#b3142a');
   });
+  it('treats a non-finite lossFrac as 0', () => {
+    const calm = paperFor({ lossFrac: 0, inCash: false, worstDay: false });
+    for (const lf of [NaN, Infinity, -Infinity]) {
+      expect(paperFor({ lossFrac: lf, inCash: false, worstDay: false })).toEqual(calm);
+    }
+  });
   it('exports the market dashed line colour', () => {
     expect(MARKET_DASH).toBe('#6b6558');
   });

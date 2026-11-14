@@ -17,12 +17,35 @@ export interface HeadlineRow {
 }
 
 export const MAX_LINE = 56;
-export const JARGON = ['funds', 'liquidity', 'equities', 'tranche', 'basis points', 'yield'];
-/** Capitalised words that may appear in both lines. */
-export const ALLOW = ['US', 'UK', 'EU', 'I'];
+/** Jargon banned from anon lines, as case-insensitive stems that also catch simple plurals. */
+export const JARGON: { label: string; re: RegExp }[] = [
+  { label: 'funds', re: /\bfunds?\b/i },
+  { label: 'liquidity', re: /\bliquidity\b/i },
+  { label: 'equities', re: /\bequit(?:y|ies)\b/i },
+  { label: 'tranche', re: /\btranches?\b/i },
+  { label: 'basis points', re: /\bbasis points?\b/i },
+  { label: 'yield', re: /\byields?\b/i },
+];
+/**
+ * Capitalised words exempt from the name rule: ordinary sentence-start words and
+ * country abbreviations. Any other capitalised word in `real`, the first word
+ * included, is treated as a name and must not appear in `anon`.
+ */
+export const ALLOW = [
+  'A', 'An', 'The', 'Over', 'After', 'Before', 'Shares', 'Stocks', 'Markets', 'Banks',
+  'Investors', 'Officials', 'Traders', 'Prices', 'Rates', 'Government', 'Congress',
+  'Shops', 'Stores', 'Companies', 'People', 'Workers', 'Another', 'More', 'Some', 'Many',
+  'Most', 'No', 'New', 'In', 'On', 'At', 'As', 'By', 'For', 'From', 'Into', 'With',
+  'US', 'UK', 'EU', 'I',
+];
 
 /** RFC 4180 parser: quoted fields, "" escapes, commas and newlines inside quotes, CRLF or LF. */
 export function parseCsv(text: string): string[][] {
+  return parseCsvChecked(text).rows;
+}
+
+/** Like parseCsv, but also reports whether a quoted field was never closed. */
+export function parseCsvChecked(text: string): { rows: string[][]; unterminated: boolean } {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';
@@ -45,7 +68,7 @@ export function parseCsv(text: string): string[][] {
     } else { field += c; any = true; }
   }
   if (any || field !== '') { row.push(field); rows.push(row); }
-  return rows;
+  return { rows, unterminated: quoted };
 }
 
 function parseBool(v: string): boolean | null {
@@ -57,8 +80,11 @@ function parseBool(v: string): boolean | null {
 
 /** Turn CSV text into rows. Structural problems (header, column count, bad flags) come back as problems. */
 export function parseHeadlineRows(text: string): { rows: HeadlineRow[]; problems: string[] } {
-  const table = parseCsv(text.replace(/^﻿/, ''));
+  const { rows: table, unterminated } = parseCsvChecked(text.replace(/^\uFEFF/, ''));
   const problems: string[] = [];
+  if (unterminated) {
+    return { rows: [], problems: ['unterminated quote: a quoted field is never closed, so the rest of the file is unreadable'] };
+  }
   const rows: HeadlineRow[] = [];
   if (table.length === 0) return { rows, problems: ['file is empty'] };
   const header = table[0].map((h) => h.trim());
@@ -88,13 +114,16 @@ function words(line: string): string[] {
   return line.split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
 }
 
-/** Capitalised words of `real` other than the first word and the allow-list. */
-function namesIn(real: string): string[] {
-  return words(real).slice(1).filter((w) => /^\p{Lu}/u.test(w) && !ALLOW.includes(w));
+function stem(w: string): string {
+  return w.replace(/['\u2019]s$/i, '').toLowerCase();
 }
 
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Capitalised words of `real` that are not on the allow-list (possessives stripped). */
+function namesIn(real: string): string[] {
+  return words(real)
+    .filter((w) => /^\p{Lu}/u.test(w))
+    .map((w) => w.replace(/['\u2019]s$/i, ''))
+    .filter((w) => !ALLOW.includes(w));
 }
 
 /** Returns a list of problems; empty means the file passes. */
@@ -111,15 +140,18 @@ export function checkHeadlines(
     if (!r.anon) bad('anon line is empty');
     if (r.real.length > MAX_LINE) bad(`real line is over ${MAX_LINE} characters (${r.real.length})`);
     if (r.anon.length > MAX_LINE) bad(`anon line is over ${MAX_LINE} characters (${r.anon.length})`);
-    if (/\b(1[0-9]|20)\d{2}\b/.test(r.anon)) bad('anon line contains a four-digit year');
+    if (/\b(1[0-9]|20)\d{2}s?\b/.test(r.anon) || /(?<![\p{L}\p{N}])['\u2019]\d{2}(?!\d)/u.test(r.anon)) {
+      bad('anon line contains a year or decade');
+    }
     if (/\bin \d+ years\b/i.test(r.anon)) bad('anon line contains an "in N years" figure');
+    const anonWords = new Set(words(r.anon).map(stem));
     for (const name of new Set(namesIn(r.real))) {
-      if (new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(name)}(?![\\p{L}\\p{N}])`, 'u').test(r.anon)) {
+      if (anonWords.has(stem(name))) {
         bad(`anon line repeats the capitalised name "${name}" from the real line`);
       }
     }
     for (const j of JARGON) {
-      if (new RegExp(`\\b${escapeRe(j)}\\b`, 'i').test(r.anon)) bad(`anon line uses jargon: "${j}"`);
+      if (j.re.test(r.anon)) bad(`anon line uses jargon: "${j.label}"`);
     }
     if (!r.source_url) bad('source_url is empty');
     if (opts.final && !r.second_source_url) bad('second_source_url is empty (required with --final)');

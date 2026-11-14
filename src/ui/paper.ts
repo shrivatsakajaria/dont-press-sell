@@ -40,7 +40,8 @@ export function paperFor(s: { lossFrac: number; inCash: boolean; worstDay: boole
     const bg = '#ebe4d6';
     return { bg, ink: INK, secondary: '#4a463c', accent: RED_INK, buttonBg: INK, buttonInk: bg };
   }
-  const t = Math.min(1, Math.max(0, s.lossFrac / LOSS_FULL));
+  const loss = Number.isFinite(s.lossFrac) ? s.lossFrac : 0;
+  const t = Math.min(1, Math.max(0, loss / LOSS_FULL));
   const bg = mix(CALM_BG, LOSING_BG, t);
   return {
     bg, ink: INK, secondary: mix(CALM_SECONDARY, LOSING_SECONDARY, t), accent: RED_INK,

@@ -7,6 +7,12 @@ import { checkHeadlines, parseHeadlineRows } from './lib/headlines';
 
 const dir = join(process.cwd(), 'data', 'runs');
 const args = process.argv.slice(2);
+const unknown = args.filter((a) => a.startsWith('--') && a !== '--final');
+if (unknown.length) {
+  console.error(`unknown option: ${unknown.join(' ')}`);
+  console.error('usage: npx tsx scripts/check-headlines.ts [--final] [runId ...]');
+  process.exit(2);
+}
 const final = args.includes('--final');
 const wanted = args.filter((a) => !a.startsWith('--'));
 
