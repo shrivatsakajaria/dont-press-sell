@@ -2,9 +2,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mountPickCrash, mountCollection, recordSentence, VERDICT_TITLES } from '../../src/ui/menus';
 import { RUNS } from '../../src/content/runs';
+import { verdictCopy } from '../../src/engine/verdict';
+import type { RunData, RunResult, VerdictId } from '../../src/engine/types';
+import type { CollectionProps } from '../../src/ui/menus';
 
 const rec = { games: 9, wins: 3, soldTooEarly: 4 };
-function collection(over: Record<string, unknown> = {}) {
+function collection(over: Partial<CollectionProps> = {}) {
   const root = document.createElement('div');
   document.body.appendChild(root);
   const props = {
@@ -13,13 +16,14 @@ function collection(over: Record<string, unknown> = {}) {
     busts: 0,
     bestStreak: 0,
     played: [] as string[],
-    titles: [] as never[],
+    storageOk: true,
+    titles: [] as VerdictId[],
     runs: RUNS,
     unlocked: false,
     onBack: () => {},
     ...over,
   };
-  mountCollection(root, props as never);
+  mountCollection(root, props);
   return root;
 }
 
@@ -42,9 +46,13 @@ describe('pick a crash', () => {
     mountPickCrash(root, { runs: RUNS, onPick, onBack: () => {} });
     const rows = root.querySelectorAll('button[data-run]');
     expect(rows.length).toBe(12);
-    expect(rows[0].textContent).toContain(RUNS[0].pickName);
-    expect(root.textContent).toContain('False alarm');
-    expect(root.textContent).toContain('Crash');
+    RUNS.forEach((r, i) => {
+      const t = rows[i].textContent!;
+      expect(t).toContain(r.pickName);
+      expect(t).toContain(r.kind === 'scare' ? 'False alarm' : 'Crash');
+    });
+    expect(root.textContent).toContain('Practice');
+    expect(root.textContent).toContain('do not count towards your pot or your collection');
     (rows[6] as HTMLElement).click();
     expect(onPick).toHaveBeenCalledWith(RUNS[6].id);
   });
@@ -57,10 +65,36 @@ describe('pick a crash', () => {
   });
 });
 
+describe('VERDICT_TITLES', () => {
+  const run = { id: 'x', kind: 'crash', pickName: '', revealLine: '', dates: [], closes: [1, 2, 3], lowIndex: 1, fallEndIndex: 2 } as RunData;
+  const result: RunResult = { final: 1, holderFinal: 1, perfectFinal: 1, lead: 0, share: 0, balances: [], daysInCash: 0, trades: [] };
+  it('matches verdictCopy for every id', () => {
+    for (const id of Object.keys(VERDICT_TITLES) as VerdictId[]) {
+      const c = verdictCopy(id, result, run);
+      expect(VERDICT_TITLES[id].title).toBe(c.title);
+      expect(VERDICT_TITLES[id].line).toBe(c.line);
+    }
+  });
+});
+
 describe('collection', () => {
   it('counts played out of twelve', () => {
     expect(collection({ played: ['c1929', 's1998'] }).textContent).toContain('2 of 12 played');
     expect(collection({ played: [] }).textContent).toContain('0 of 12 played');
+  });
+  it('shows the kind only for played runs and a visible not-played line for the rest', () => {
+    const root = collection({ played: ['c1929'] });
+    const played = root.querySelector('[data-run="c1929"]')!.textContent!;
+    expect(played).toContain('Crash');
+    expect(played).not.toContain('Not played yet');
+    const unplayed = root.querySelector('[data-run="c1987"]')!.textContent!;
+    expect(unplayed).toContain('Not played yet');
+    expect(unplayed).not.toContain('Crash');
+  });
+  it('count agrees with the list: the played count never counts hidden rows', () => {
+    const root = collection({ played: ['c1929', 's2010', 'ghost'] });
+    expect(root.textContent).toContain('2 of 12 played');
+    expect(root.querySelectorAll('[data-run]').length).toBe(7);
   });
   it('hides false alarms until met, but lists crashes', () => {
     const t = collection({ played: ['c1929'] }).textContent!;
@@ -76,8 +110,14 @@ describe('collection', () => {
     expect(root.textContent).toContain('Paper hands');
     expect(root.textContent).toContain('Diamond hands');
     expect(root.textContent).not.toContain('Bagholder');
+    expect(root.textContent).toContain('2 of 9 titles earned');
+    expect(root.textContent).toContain('Not earned yet');
     expect(root.querySelectorAll('[data-title="empty"]').length).toBe(7);
     expect(Object.keys(VERDICT_TITLES).length).toBe(9);
+  });
+  it('folio says where it is kept', () => {
+    expect(collection({ storageOk: true }).querySelector('.dps-folio')!.textContent).toContain('Kept on this phone');
+    expect(collection({ storageOk: false }).querySelector('.dps-folio')!.textContent).toContain('For this visit');
   });
   it('shows the record line, pot, busts and best streak title', () => {
     const t = collection({ busts: 2, bestStreak: 3 }).textContent!;

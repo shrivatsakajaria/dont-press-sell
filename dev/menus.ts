@@ -18,6 +18,6 @@ if (screen === 'pick') {
     record: { games: 9, wins: 3, soldTooEarly: 4 }, pot: 12300, busts: 1, bestStreak: 3,
     played: ['c1929', 'c2007', 'c2020', 's1998', 's2015'],
     titles: ['paper', 'diamond', 'nerves', 'shakenOut'],
-    runs: RUNS, unlocked: true, borrowed: false, onToggleBorrowed: (on) => console.log('borrowed', on), onBack: noop,
+    runs: RUNS, storageOk: true, unlocked: true, borrowed: false, onToggleBorrowed: (on) => console.log('borrowed', on), onBack: noop,
   });
 }

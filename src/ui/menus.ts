@@ -27,7 +27,8 @@ const TITLE_ORDER: VerdictId[] = [
 
 export const MENU_TEXT = {
   pickTitle: 'Pick a crash',
-  pickStand: 'Choose the day it starts. You will see real headlines from the first morning.',
+  pickFolio: 'Practice',
+  pickStand: 'Practice runs. You know how each one ends, so they do not count towards your pot or your collection.',
   collectionTitle: 'Your collection',
   back: 'Back',
   crash: 'Crash',
@@ -37,7 +38,10 @@ export const MENU_TEXT = {
   recordHeading: 'Your record',
   noGames: 'No games yet',
   noStreak: 'No streak yet',
-  notEarned: 'Not yet earned',
+  notEarned: 'Not earned yet',
+  notPlayed: 'Not played yet',
+  keptOnPhone: 'Kept on this phone',
+  forVisit: 'For this visit',
   on: 'On',
   off: 'Off',
 };
@@ -74,7 +78,9 @@ const CSS = `
 .dps-item.t{display:block;padding:8px 0}
 .dps-item.t .l{display:block;margin-top:2px;text-align:left;font-size:16px}
 .dps-item.dash-row{min-height:32px;padding:4px 0}
-.dps-item .dash{color:var(--sec);font-size:20px}
+.dps-item .dash{color:var(--sec);font-size:16px;line-height:1.25}
+.dps-item .n.sec{color:var(--sec)}
+.dps-count{margin:8px 0 0;font-size:16px;line-height:1.25;color:var(--sec);font-variant-numeric:lining-nums tabular-nums}
 .dps-fact{margin:12px 0 0;font-size:20px;line-height:1.3;font-variant-numeric:lining-nums tabular-nums}
 .dps-fact.sec{margin-top:4px;color:var(--sec);font-size:18px}
 .dps-switch{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;min-height:56px;margin:24px 0 0;padding:8px 0;border:0;border-top:1px solid var(--ink);border-bottom:1px solid var(--ink);border-radius:0;background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
@@ -144,7 +150,7 @@ export interface PickCrashProps {
 }
 
 export function mountPickCrash(root: HTMLElement, p: PickCrashProps): () => void {
-  const page = frame(root, MENU_TEXT.pickTitle, `${p.runs.length} runs`, MENU_TEXT.pickTitle, MENU_TEXT.pickStand);
+  const page = frame(root, MENU_TEXT.pickFolio, `${p.runs.length} runs`, MENU_TEXT.pickTitle, MENU_TEXT.pickStand);
   const list = el('ul', 'dps-list');
   list.style.marginTop = '20px';
   list.style.borderTop = '1px solid var(--ink)';
@@ -174,6 +180,8 @@ export interface CollectionProps {
   titles: VerdictId[];
   runs: RunMeta[];
   /** Borrowed money has been unlocked (first blind win). The switch shows only then. */
+  /** False when storage is missing or blocked: the folio then says "For this visit". */
+  storageOk?: boolean;
   unlocked?: boolean;
   borrowed?: boolean;
   onToggleBorrowed?(on: boolean): void;
@@ -184,7 +192,7 @@ export function mountCollection(root: HTMLElement, p: CollectionProps): () => vo
   const playedSet = new Set(p.played);
   const total = p.runs.length;
   const count = p.runs.filter((r) => playedSet.has(r.id)).length;
-  const page = frame(root, MENU_TEXT.collectionTitle, 'Kept on this phone', MENU_TEXT.collectionTitle, `${count} of ${total} played`);
+  const page = frame(root, MENU_TEXT.collectionTitle, p.storageOk ? MENU_TEXT.keptOnPhone : MENU_TEXT.forVisit, MENU_TEXT.collectionTitle, `${count} of ${total} played`);
 
   // Runs met: every crash by name, false alarms only once met.
   page.appendChild(el('h2', 'dps-h2', MENU_TEXT.runsHeading));
@@ -192,19 +200,21 @@ export function mountCollection(root: HTMLElement, p: CollectionProps): () => vo
   for (const r of p.runs) {
     if (r.kind === 'scare' && !playedSet.has(r.id)) continue;
     const li = el('li');
-    const item = el('div', 'dps-item');
     const done = playedSet.has(r.id);
-    item.append(el('span', 'n', r.pickName), done ? el('span', 'l', kindLabel(r)) : el('span', 'dash', '–'));
-    if (!done) item.lastElementChild!.setAttribute('aria-label', 'Not played yet');
+    const item = el('div', 'dps-item t');
+    item.setAttribute('data-run', r.id);
+    item.append(el('span', done ? 'n' : 'n sec', r.pickName), el('span', 'l', done ? kindLabel(r) : MENU_TEXT.notPlayed));
     li.appendChild(item);
     runList.appendChild(li);
   }
   page.appendChild(runList);
 
-  // Verdict titles: earned in ink with the plain line, the rest a quiet dash.
+  // Verdict titles: earned in ink with the plain line, the rest a quiet "Not earned yet".
   page.appendChild(el('h2', 'dps-h2', MENU_TEXT.titlesHeading));
+  const earned = new Set(TITLE_ORDER.filter((id) => p.titles.includes(id)));
+  page.appendChild(el('p', 'dps-count', `${earned.size} of ${TITLE_ORDER.length} titles earned`));
   const titleList = el('ul', 'dps-list');
-  const earned = new Set(p.titles);
+  titleList.style.marginTop = '8px';
   for (const id of TITLE_ORDER) {
     const li = el('li');
     const item = el('div', 'dps-item');
@@ -215,9 +225,7 @@ export function mountCollection(root: HTMLElement, p: CollectionProps): () => vo
     } else {
       item.classList.add('dash-row');
       item.setAttribute('data-title', 'empty');
-      const dash = el('span', 'dash', '–');
-      dash.setAttribute('aria-label', MENU_TEXT.notEarned);
-      item.appendChild(dash);
+      item.appendChild(el('span', 'dash', MENU_TEXT.notEarned));
     }
     li.appendChild(item);
     titleList.appendChild(li);
