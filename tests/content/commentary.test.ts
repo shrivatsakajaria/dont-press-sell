@@ -105,26 +105,26 @@ describe('commentaryFor', () => {
   it('can say down 40% from the peak when 40% or more has gone', () => {
     const closes = [90, 80, 70, 60];
     const seen = lines(base({ closes, balance: 6000 }));
-    expect(seen.has('Down 40% from the peak. Still holding?')).toBe(true);
+    expect(seen.has('The market is down 40% from the peak. Still holding?')).toBe(true);
   });
 
   it('measures the peak from the pre-run high and rounds to whole numbers', () => {
     // High 120, close 96: 20% below the high, though only 4% below the run's first close.
     const seen = lines(base({ closes: [100, 96], high: 120, preCloses: pre(105, 120) }));
-    expect(seen.has('Down 20% from the peak. Officially a bear market.')).toBe(true);
+    expect(seen.has('The market is down 20% from the peak. Officially a bear market.')).toBe(true);
     // 19.9% down must not read as 10% or 20%-as-floor-of-something-smaller.
     const s2 = lines(base({ closes: [100, 80.1], high: 100, preCloses: pre(100, 100) }));
     for (const l of s2) {
-      expect(l).not.toMatch(/Down 10% from the peak/);
+      expect(l).not.toMatch(/down 10% from the peak/);
       expect(l).not.toContain('bear market');
     }
-    expect(s2.has('Down 20% from the peak. The polite word for this is a correction.')).toBe(true);
+    expect(s2.has('The market is down almost 20% from the peak. The polite word for this is a correction.')).toBe(true);
   });
 
   it('rounds one-day moves instead of flooring them', () => {
     const closes = [96.01];
     const seen = lines(base({ closes, preCloses: pre(100), high: 100 }));
-    expect(seen.has('A fall of 4% in one day. Not a quiet one.')).toBe(true);
+    expect(seen.has('The market fell 4% in one day. Not a quiet one.')).toBe(true);
     for (const l of seen) expect(l).not.toContain('3%');
   });
 
@@ -269,21 +269,21 @@ describe('commentaryFor', () => {
       const peak = Math.max(c.high, ...series);
       const dd = ((peak - px) / peak) * 100;
       let m: RegExpMatchArray | null;
-      if ((m = l.match(/Down (\d+)% from the peak/))) {
+      if ((m = l.match(/down (\d+)% from the peak/))) {
         expect(Number(m[1])).toBe(Math.round(dd));
         checked++;
       }
-      if ((m = l.match(/(?:fall of|Down|Up) (\d+)% in (?:one|a) day/))) {
+      if ((m = l.match(/(?:fell|lost|rose) (\d+)% in (?:one|a) day/))) {
         expect(Number(m[1])).toBe(Math.round(Math.abs(chg)));
-        expect(l.startsWith('Up') ? chg > 0 : chg < 0).toBe(true);
+        expect(/rose/.test(l) ? chg > 0 : chg < 0).toBe(true);
         checked++;
       }
-      if ((m = l.match(/Down (\d+)% since day one/))) {
+      if ((m = l.match(/down (\d+)% since day one/))) {
         const f = c.closes[0];
         expect(Number(m[1])).toBe(Math.round(((f - px) / f) * 100));
         checked++;
       }
-      if ((m = l.match(/Up (\d+)% from the lowest point/))) {
+      if ((m = l.match(/up (\d+)% from its lowest close/))) {
         const low = Math.min(...c.closes.slice(0, c.dayIndex + 1));
         expect(Number(m[1])).toBe(Math.round(((px - low) / low) * 100));
         checked++;
@@ -312,5 +312,67 @@ describe('commentaryFor', () => {
       if (/^Holding|Still holding|held through/.test(l)) expect(c.neverSold).toBe(true);
     }
     expect(checked).toBeGreaterThan(500);
+  });
+});
+
+describe('round 2 counterexamples', () => {
+  /** Pre-run closes falling from `high` to `last` so a deep fall is already in the window. */
+  const fall = (high: number, last: number): number[] => {
+    const out: number[] = [];
+    for (let k = 0; k < 30; k++) out.push(high - ((high - last) * k) / 29);
+    return out;
+  };
+
+  it('N1: no "correction" once the market has been 20% down', () => {
+    const seen = lines(base({ closes: [90, 80, 75, 82], preCloses: fall(100, 91) }));
+    for (const l of seen) expect(l).not.toContain('correction');
+    const s2 = lines(base({ closes: [90, 85, 84], preCloses: fall(100, 91) }));
+    expect([...s2].some((l) => l.includes('correction'))).toBe(true);
+  });
+
+  it('N2: never prints a bare 20% for a fall short of 20%', () => {
+    const seen = lines(base({ closes: [90, 80.2], preCloses: fall(100, 91) }));
+    for (const l of seen) expect(l).not.toMatch(/down 20% from the peak/);
+    expect([...seen].some((l) => l.includes('almost 20%'))).toBe(true);
+  });
+
+  it('N3/N5: half and third lines stay inside their bands', () => {
+    const deep = lines(base({ closes: [80, 60, 43], preCloses: fall(100, 91) }));
+    for (const l of deep) {
+      expect(l).not.toContain('About half');
+      expect(l).not.toContain('About a third');
+      expect(l).not.toContain('Half of it is still there');
+    }
+    expect([...deep].some((l) => l.startsWith('More than half'))).toBe(true);
+    const mid = lines(base({ closes: [80, 60, 50], preCloses: fall(100, 91) }));
+    expect([...mid].some((l) => l.startsWith('About half'))).toBe(true);
+  });
+
+  it('N4: held-through figure is the player’s own fall from the run high', () => {
+    const seen = lines(base({ closes: [100, 90, 80], high: 120, balance: 8000, preCloses: fall(120, 101) }));
+    for (const l of seen) expect(l).not.toMatch(/held through a fall of (3\d)%/);
+    expect(seen.has('You have held through a fall of 20% so far.')).toBe(true);
+  });
+
+  it('N6: a dip line needs a rise of at least 1% the day before', () => {
+    const seen = lines(base({ closes: [95, 94, 94.01, 93], preCloses: fall(100, 96) }));
+    for (const l of seen) expect(l).not.toContain('dip kept dipping');
+    const s2 = lines(base({ closes: [95, 94, 95.5, 93], preCloses: fall(100, 96) }));
+    expect([...s2].some((l) => l.includes('dip kept dipping'))).toBe(true);
+  });
+
+  it('N7: day one has no lines about the player and today’s move', () => {
+    for (const invested of [true, false]) {
+      const seen = lines(base({ closes: [92], dayIndex: 0, invested }));
+      for (const l of seen) {
+        expect(l).not.toMatch(/in the market for it|there for it|sat out|without you|missed it|out of it|Out for today|sidelines/);
+      }
+    }
+  });
+
+  it('N8: single-day lines name the market', () => {
+    const seen = lines(base({ closes: [96.01] }));
+    expect(seen.has('The market fell 4% in one day. Not a quiet one.')).toBe(true);
+    for (const l of seen) expect(l).not.toMatch(/^(Down|Up|A fall of) \d+%/);
   });
 });
