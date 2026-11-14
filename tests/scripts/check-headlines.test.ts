@@ -105,6 +105,12 @@ describe('checkHeadlines', () => {
       expect(has(checkHeadlines(mutate(1, { anon: `Big ${w} move` }), run), /jargon/)).toBe(true);
     }
   });
+  it('fails "S&P" in real or anon, but not in the source columns', () => {
+    expect(has(checkHeadlines(mutate(1, { anon: 'S&P cuts the US credit grade' }), run), /S&P/)).toBe(true);
+    expect(has(checkHeadlines(mutate(1, { real: 'S&P 500 closes at a record' }), run), /S&P/)).toBe(true);
+    const src = mutate(1, { source_url: 'https://example.org/s&p-500', note: 'S&P index' });
+    expect(has(checkHeadlines(src, run), /S&P/)).toBe(false);
+  });
   it('fails an empty source column; second source only with --final', () => {
     expect(has(checkHeadlines(mutate(1, { source_url: '' }), run), /source_url/)).toBe(true);
     const rows = mutate(1, { second_source_url: '' });
