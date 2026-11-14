@@ -485,6 +485,11 @@ export interface PlayOpts {
    * the same amount unborrowed, and a balance at zero while invested ends the run at once.
    */
   borrowed?: boolean;
+  /** The sound switch: its first state, and the toggle (returns the new state). */
+  soundOn?: boolean;
+  onSoundToggle?(): boolean;
+  /** After every render: whether it is a new step, the trade just made, and the step's hold (for sound and vibration). */
+  onFrame?(v: SessionView, m: ScreenModel, e: { newStep: boolean; trade: Trade['side'] | null; holdMs: number }): void;
   /** The clock paused (Pause button or the page hidden): stop sound here. */
   onPause?(): void;
   onResume?(): void;
@@ -502,7 +507,8 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
   const trades: Trade[] = [];
   let firstSaleStep: number | null = null;
   let paused = false;
-  let soundOn = true;
+  let soundOn = opts.soundOn ?? true;
+  let lastFrameStep = -1;
   let rendered: SessionView | null = null;
   let pendingStep: number | null = null;
   /** The step on screen in the last painted frame, and the one captured when the finger went down. */
@@ -538,11 +544,12 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       else session.pause();
     },
     onSoundToggle() {
-      // Placeholder: the sound arrives with Task 12. The switch already remembers the choice.
-      soundOn = !soundOn;
+      // The caller owns the choice (stored, and it mutes the sound); without one the switch only flips.
+      soundOn = opts.onSoundToggle ? opts.onSoundToggle() : !soundOn;
       screen.setSound(soundOn);
     },
   });
+  screen.setSound(soundOn);
 
   let ended = false;
   const end = (r: RunResult) => {
@@ -557,10 +564,12 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
     const v = opts.borrowed ? { ...raw, leadNow: raw.balance - raw.marketBalance } : raw;
     rendered = v;
     history.set(v.dayIndex, { balance: v.balance, invested: v.invested });
+    let traded: Trade['side'] | null = null;
     if (v.invested !== lastInvested) {
       const at = pendingStep !== null ? steps[pendingStep].dayIndex : v.dayIndex;
       const side: Trade['side'] = v.invested ? 'buy' : 'sell';
       trades.push({ dayIndex: at, side });
+      traded = side;
       lastInvested = v.invested;
       if (side === 'sell' && firstSaleStep === null && !load(SEEN_FIRST_SALE, false)) {
         firstSaleStep = v.stepIndex;
@@ -580,6 +589,13 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       soldLastTime: opts.soldLastTime, scoreToBeat: opts.scoreToBeat, other: opts.other, opening: opts.opening,
     });
     screen.render(m);
+    const newStep = v.stepIndex !== lastFrameStep;
+    lastFrameStep = v.stepIndex;
+    try {
+      opts.onFrame?.(v, m, { newStep, trade: traded, holdMs: steps[v.stepIndex]?.holdMs ?? 0 });
+    } catch {
+      /* sound and vibration are optional */
+    }
     if (v.slow && v.stepIndex !== lastAnnouncedStep) {
       lastAnnouncedStep = v.stepIndex;
       announce(`${m.status}. ${m.headline}. ${dollars(v.balance)}, ${m.deltaLabel}.`);

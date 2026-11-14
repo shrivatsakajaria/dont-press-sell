@@ -266,7 +266,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   };
   let destroyed = false;
 
-  const page = h('div', 'es' + (model.blackBorder ? ' es-black' : ''));
+  const page = h('main', 'es' + (model.blackBorder ? ' es-black' : ''));
 
   page.appendChild(h('div', 'es-mast', MASTHEAD));
 

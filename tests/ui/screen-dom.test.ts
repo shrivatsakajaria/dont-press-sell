@@ -165,3 +165,26 @@ it('passes pause and resume on to the caller (for sound)', () => {
   expect(onResume).toHaveBeenCalledTimes(1);
   play.teardown();
 });
+
+it('tells the caller about each new step and each trade (for sound and vibration), and the sound switch is the caller\'s', () => {
+  vi.useFakeTimers({ toFake: [...FAKE] });
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  const frames: { step: number; newStep: boolean; trade: string | null; holdMs: number }[] = [];
+  let on = false;
+  const play = startPlay(root, run, steps, {
+    runLabel: 'Mystery crash', onEnd: () => {}, soundOn: false,
+    onSoundToggle: () => (on = !on),
+    onFrame: (v, _m, e) => frames.push({ step: v.stepIndex, ...e }),
+  });
+  const sound = root.querySelector('button.sound') as HTMLButtonElement;
+  expect(sound.textContent).toBe('Sound off');
+  sound.click();
+  expect(sound.textContent).toBe('Sound on');
+  vi.advanceTimersByTime(116);
+  (root.querySelector('button.act') as HTMLButtonElement).click();
+  expect(frames[0]).toEqual({ step: 0, newStep: true, trade: null, holdMs: 100 });
+  expect(frames[1]).toEqual({ step: 1, newStep: true, trade: null, holdMs: 100 });
+  expect(frames[frames.length - 1]).toEqual({ step: 1, newStep: false, trade: 'sell', holdMs: 100 });
+  play.teardown();
+});

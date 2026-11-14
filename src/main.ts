@@ -10,7 +10,9 @@ import { nearMisses } from './engine/nearmiss';
 import { simulate } from './engine/simulate';
 import type { Headline, RunData, RunResult } from './engine/types';
 import { verdictCopy, verdictFor } from './engine/verdict';
-import { setHapticsEnabled } from './fx/haptics';
+import { playCues } from './fx/cues';
+import { buzz, setHapticsEnabled } from './fx/haptics';
+import { createSfx } from './fx/sound';
 import {
   bankPending, borrowedOn, borrowedUnlocked, challengeFits, currentStreak, doubleUp, setBorrowed, settle,
 } from './game/flow';
@@ -71,9 +73,25 @@ let ticket = 0;
 
 setHapticsEnabled(vibrationCell.get() !== false);
 
+// Sound and vibration are on by default; phones allow them only after a tap, so the first tap anywhere unlocks them.
+const sfx = createSfx();
+const soundOn = () => soundCell.get() !== false;
+sfx.setMuted(!soundOn());
+for (const ev of ['pointerdown', 'keydown', 'touchend'] as const) {
+  document.addEventListener(ev, () => sfx.unlock(), { capture: true, passive: true });
+}
+function toggleSound(): boolean {
+  const on = !soundOn();
+  soundCell.set(on);
+  sfx.setMuted(!on);
+  if (on) sfx.unlock();
+  return on;
+}
+
 function clear() {
   session?.teardown();
   session = null;
+  sfx.setMuted(!soundOn()); // a run left while paused must not leave the sound off
   teardown?.();
   teardown = null;
   // Back to calm paper: the play screen tints the whole page, the menus set the column's background.
@@ -117,6 +135,8 @@ async function play(game: Game, opts: { double?: boolean } = {}) {
   });
   const prev = game.previous ?? null;
   const borrowed = !!game.borrowed;
+  const firstForward = steps.findIndex((st) => st.phase === 'forward');
+  const forwardSteps = firstForward < 0 ? 0 : steps.length - firstForward;
   session = startPlay(root, run, steps, {
     runLabel: game.label,
     borrowed,
@@ -129,6 +149,16 @@ async function play(game: Game, opts: { double?: boolean } = {}) {
     scoreToBeat: prev ? prev.final : game.challenge ? game.challenge.final : null,
     other: prev ? prev.balances : null,
     onEnd: (r) => finish(game, run, headlines, r),
+    soundOn: soundOn(),
+    onSoundToggle: toggleSound,
+    // A paused clock (Pause, or the page hidden) is silent.
+    onPause: () => sfx.setMuted(true),
+    onResume: () => sfx.setMuted(!soundOn()),
+    onFrame: (v, m, e) =>
+      playCues(sfx, buzz, {
+        ...e, worst: m.worst, invested: v.invested, phase: v.phase, leadNow: v.leadNow, start: game.start,
+        forwardProgress: forwardSteps ? (v.stepIndex - firstForward + 1) / forwardSteps : 0,
+      }),
   });
 }
 
@@ -171,7 +201,8 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
     headlineOverride: s.bust ? BUST_HEADLINE : s.island ? ISLAND_HEADLINE : undefined,
     blackBorder: s.island,
     extraLines: days ? [days] : undefined,
-    sound: { on: soundCell.get() !== false },
+    sound: { on: soundOn() },
+    sfx,
     vibration: { on: vibrationCell.get() !== false },
     borrowed: borrowedUnlocked() ? { on: borrowedOn() } : undefined,
     actions,
@@ -209,11 +240,7 @@ function resultActions(game: Game, offered: boolean): EndModel['actions'] {
     onDaily: () => void daily(),
     onPick: pickCrash,
     onCollection: collection,
-    onToggleSound: () => {
-      const on = soundCell.get() === false;
-      soundCell.set(on);
-      return on;
-    },
+    onToggleSound: toggleSound,
     onToggleVibration: () => {
       const on = vibrationCell.get() === false;
       vibrationCell.set(on);

@@ -117,7 +117,7 @@ function frame(root: HTMLElement, folioLeft: string, folioRight: string, title: 
   const paper = paperFor({ lossFrac: 0, inCash: false, worstDay: false });
   root.textContent = '';
   root.style.background = paper.bg;
-  const page = el('div', 'dps-menu');
+  const page = el('main', 'dps-menu');
   page.style.setProperty('--bg', paper.bg);
   page.style.setProperty('--ink', paper.ink);
   page.style.setProperty('--sec', paper.secondary);

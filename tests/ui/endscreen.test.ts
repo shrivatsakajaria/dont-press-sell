@@ -387,5 +387,10 @@ describe('the front page', () => {
     expect(m.actions.onCopyResult).toHaveBeenCalled();
     expect(b.textContent).toBe('Copied');
   });
+
+  test('the front page is the main landmark', () => {
+    mount(losingSample());
+    expect(root.querySelector('main.es')).not.toBeNull();
+  });
 });
 
