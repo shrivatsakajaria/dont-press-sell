@@ -375,5 +375,17 @@ describe('the front page', () => {
     expect(b.textContent).toBe('Borrowed money on');
     expect(b.getAttribute('aria-pressed')).toBe('true');
   });
+
+  test('daily: "Copy result" calls back and says when it is copied', async () => {
+    const m = losingSample();
+    m.actions = { ...m.actions, onCopyResult: vi.fn(async () => true) };
+    mount(m);
+    const b = Array.from(root.querySelectorAll('button')).find((x) => x.textContent === 'Copy result')!;
+    b.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(m.actions.onCopyResult).toHaveBeenCalled();
+    expect(b.textContent).toBe('Copied');
+  });
 });
 

@@ -20,7 +20,11 @@ import { getPot } from './game/pot';
 import { hashString, mulberry32 } from './game/rng';
 import { buildSchedule } from './game/schedule';
 import { daysInRowText, getDailyResult, getLastRun, getRecord, type LastRun, type Mode } from './store/record';
+import { renderCard, shareLine } from './share/card';
+import { dailyText } from './share/dailytext';
 import { decodeChallenge, type Challenge } from './share/link';
+import { challengeLink, resultCard } from './share/result';
+import { copyText, shareResult } from './share/share';
 import { cell, save } from './store/store';
 import { mountEndScreen, type EndModel } from './ui/endscreen';
 import { mountCollection, mountPickCrash } from './ui/menus';
@@ -38,8 +42,9 @@ interface Game {
   start: number;
   /** Real headlines (picked and rematch runs); anonymised in blind runs. */
   real: boolean;
-  /** UTC date of a daily run. */
+  /** UTC date of a daily run, and its number. */
   date?: string;
+  dailyNumber?: number;
   /** Rematch: the previous go at this crash. */
   previous?: LastRun | null;
   /** Borrowed money (mystery runs only, spec 6.13). */
@@ -135,6 +140,16 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
     date: game.date, start: game.start, borrowed: !!game.borrowed,
   });
   const days = s.daysInRow !== null ? daysInRowText(s.daysInRow) : null;
+  const verdict = verdictCopy(verdictId, r, run);
+  const actions = resultActions(game, !!s.double);
+  // Challenge a friend: never from borrowed money (spec 6.13), nor from a run with nothing left to beat.
+  if (!game.borrowed && r.final >= 1) {
+    actions.onChallenge = () => void challengeFriend(game, run, r, verdict, s.double?.wins);
+  }
+  if (game.mode === 'daily' && s.blind && game.dailyNumber !== undefined) {
+    const n = game.dailyNumber;
+    actions.onCopyResult = () => copyText(dailyText(n, verdict.title, r.lead, r.balances, siteBase(), s.daysInRow ?? 1));
+  }
   showResult({
     run: { pickName: meta.pickName, revealLine: meta.revealLine, kind: meta.kind },
     modeLabel: game.label,
@@ -142,7 +157,7 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
     closes: run.closes,
     start: game.start,
     verdictId,
-    verdict: verdictCopy(verdictId, r, run),
+    verdict,
     nearMisses: nearMisses(r, run),
     tradeNews: tradeNews(headlines, r.trades),
     other: game.previous
@@ -159,8 +174,30 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
     sound: { on: soundCell.get() !== false },
     vibration: { on: vibrationCell.get() !== false },
     borrowed: borrowedUnlocked() ? { on: borrowedOn() } : undefined,
-    actions: resultActions(game, !!s.double),
+    actions,
   });
+}
+
+/** The address the page is served from, read at the time (spec 10): never hard-coded. */
+const siteBase = () => location.origin + location.pathname;
+
+async function challengeFriend(
+  game: Game, run: RunFile, r: RunResult, verdict: { title: string; line: string; headline: string }, streak?: number,
+) {
+  const url = challengeLink(siteBase(), run.id, r, game.start);
+  const card = resultCard({
+    result: r, verdict, closes: run.closes, url: location.host,
+    practiceName: game.real ? shortName(run.id) : null,
+    dailyNumber: game.mode === 'daily' ? game.dailyNumber : undefined,
+    streak,
+  });
+  let image: Blob | null = null;
+  try {
+    image = await renderCard(card);
+  } catch {
+    /* no canvas here: share the line and the link alone */
+  }
+  await shareResult({ text: shareLine(card), url, image });
 }
 
 function resultActions(game: Game, offered: boolean): EndModel['actions'] {
@@ -250,7 +287,8 @@ function daily() {
   if (getDailyResult(date)) {
     return play({ mode: 'rematch', runId, label: REMATCH_LABEL, start: START, real: true, previous: getLastRun(runId) });
   }
-  return play({ mode: 'daily', runId, label: dailyLabel(Math.max(1, number)), start: START, real: false, date });
+  const n = Math.max(1, number);
+  return play({ mode: 'daily', runId, label: dailyLabel(n), start: START, real: false, date, dailyNumber: n });
 }
 
 function pickCrash() {

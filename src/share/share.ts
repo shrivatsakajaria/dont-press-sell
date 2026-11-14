@@ -36,7 +36,8 @@ export async function shareResult(m: CardModel): Promise<'shared' | 'fallback'> 
   return 'fallback';
 }
 
-async function copyText(text: string): Promise<boolean> {
+/** Copies text to the clipboard, with the old textarea route for in-app browsers. Never throws. */
+export async function copyText(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
       await navigator.clipboard.writeText(text);

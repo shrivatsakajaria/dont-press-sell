@@ -4,6 +4,8 @@ import {
   bankLabel,
   BORROWED_ON,
   CHALLENGE,
+  COPIED,
+  COPY_RESULT,
   dollars,
   DOUBLE_OR_NOTHING,
   FOOTER_RESULT,
@@ -101,6 +103,8 @@ export interface EndModel {
     onToggleSound?: () => boolean;
     onToggleVibration?: () => boolean;
     onToggleBorrowed?: () => boolean;
+    /** Daily crash: copy the short text result (spec 6.9). Resolves true when copied. */
+    onCopyResult?: () => Promise<boolean>;
   };
 }
 
@@ -392,6 +396,16 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   // R24: with the double block, its red button is the only filled one.
   if (actions.onRematch) pair.appendChild(button(model.double ? 'es-out' : 'es-main', REMATCH, actions.onRematch));
   if (actions.onChallenge) pair.appendChild(button('es-out', CHALLENGE, actions.onChallenge));
+  if (actions.onCopyResult) {
+    const copyFn = actions.onCopyResult;
+    const b = button('es-out', COPY_RESULT);
+    b.addEventListener('click', () => {
+      void copyFn().then((ok) => {
+        if (ok) b.textContent = COPIED;
+      });
+    });
+    pair.appendChild(b);
+  }
   if (pair.childElementCount) page.appendChild(pair);
   page.appendChild(button('es-link', NEW_MYSTERY, actions.onNewMystery));
 

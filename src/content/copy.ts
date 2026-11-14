@@ -52,3 +52,7 @@ export const ISLAND_HEADLINE = 'Local investor retires to private island';
 /** The borrowed money switch on the result page once it is on (off, it reads PLAY_BORROWED). */
 export const BORROWED_ON = 'Borrowed money on';
 export const BORROWED_LABEL = 'Borrowed money';
+
+// Sharing (spec 6.9, 10).
+export const COPY_RESULT = 'Copy result';
+export const COPIED = 'Copied';
