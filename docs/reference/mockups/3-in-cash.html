@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Blend: in cash while the market rises</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400..800&family=Libre+Franklin:wght@500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1c1a17}a:hover{color:#a3201a}
+::selection{background:#1c1a17;color:#ebe4d6}
+button:focus-visible{outline:2px solid #1c1a17;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; padding: 24px; background: #ebe4d6; color: #1c1a17; font-family: 'Newsreader', Georgia, serif; display: flex; flex-direction: column">
+  <div style="border-top: 4px solid #1c1a17; border-bottom: 1px solid #1c1a17; padding: 8px 0 4px; text-align: center; font-weight: 700; font-size: 30px; line-height: 1; letter-spacing: -0.02em">Don't Press Sell</div>
+  <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1c1a17; font-family: 'Libre Franklin', Arial, sans-serif; font-weight: 500; font-size: 12px; line-height: 1; color: #4a463c; font-variant-numeric: tabular-nums">
+    <span>Daily crash 12</span>
+    <span>Day 322</span>
+    <span>You are in cash</span>
+  </div>
+  <h1 style="margin: 20px 0 0; font-weight: 700; font-size: 44px; line-height: 0.98; letter-spacing: -0.02em; text-wrap: balance">Shares leap 11.6% in a single day</h1>
+  <p style="margin: 8px 0 0; font-size: 18px; line-height: 1.3; color: #4a463c">The best day since 1933. You watched it from the sidelines.</p>
+  <svg role="img" aria-label="Chart showing your balance flat at $5,610 since you sold, while the market line climbs above it" viewBox="0 0 342 220" style="margin-top: 16px; width: 342px; height: 220px; display: block; box-sizing: content-box; padding: 8px 0; border-top: 1px solid #1c1a17; border-bottom: 1px solid #1c1a17">
+    <line x1="0" y1="40" x2="342" y2="40" stroke="#1c1a17" stroke-width="1" stroke-dasharray="1 4"></line>
+    <polyline fill="none" stroke="#1c1a17" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="0,40 22,35 44,28 66,32 88,44 110,39 132,58 154,53 176,76 198,71 220,96 236,91 252,108 266,104 278,154 286,170 300,170"></polyline>
+    <polyline fill="none" stroke="#6b6558" stroke-width="2.5" stroke-dasharray="3 5" stroke-linecap="round" points="286,170 291,178 296,166 300,138"></polyline>
+    <circle cx="286" cy="170" r="6" fill="#a3201a"></circle>
+    <circle cx="300" cy="170" r="6" fill="#1c1a17"></circle>
+    <text x="230" y="190" fill="#1c1a17" font-family="'Libre Franklin', Arial, sans-serif" font-weight="700" font-size="12">Sold</text>
+    <text x="232" y="132" fill="#4a463c" font-family="'Libre Franklin', Arial, sans-serif" font-weight="500" font-size="12">The market</text>
+  </svg>
+  <div style="margin-top: 16px; display: flex; align-items: baseline; justify-content: space-between">
+    <div style="font-weight: 700; font-size: 72px; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: lining-nums tabular-nums">$5,610</div>
+    <div style="font-family: 'Libre Franklin', Arial, sans-serif; font-weight: 700; font-size: 16px; line-height: 1.25; text-align: right">in<br>cash</div>
+  </div>
+  <p style="margin: 8px 0 0; font-family: 'Libre Franklin', Arial, sans-serif; font-weight: 700; font-size: 16px; line-height: 1.3; color: #a3201a; font-variant-numeric: tabular-nums">Holding today would have made you $651</p>
+  <div style="flex-grow: 1"></div>
+  <button type="button" style="width: 100%; height: 72px; border: 0; border-radius: 0; background: #1c1a17; color: #ebe4d6; font-family: 'Libre Franklin', Arial, sans-serif; font-weight: 700; font-size: 24px; font-variant-numeric: tabular-nums; cursor: pointer">Buy back with $5,610</button>
+  <div style="margin-top: 12px; font-family: 'Libre Franklin', Arial, sans-serif; font-weight: 500; font-size: 12px; line-height: 1.35; color: #4a463c">Shares now cost 11.6% more than yesterday</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

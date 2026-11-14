@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Blend: result card after a winning run, double or nothing</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400..800&family=Libre+Franklin:wght@500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1c1a17}a:hover{color:#a3201a}
+::selection{background:#1c1a17;color:#f3e2d0}
+button:focus-visible{outline:2px solid #1c1a17;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; padding: 24px; background: #f3e2d0; color: #1c1a17; font-family: 'Newsreader', Georgia, serif; display: flex; flex-direction: column">
+  <div style="border-top: 4px solid #1c1a17; border-bottom: 1px solid #1c1a17; padding: 8px 0 4px; text-align: center; font-weight: 700; font-size: 30px; line-height: 1; letter-spacing: -0.02em">Don't Press Sell</div>
+  <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1c1a17; font-family: 'Libre Franklin', Arial, sans-serif; font-weight: 500; font-size: 12px; line-height: 1; color: #4a443c; font-variant-numeric: tabular-nums">
+    <span>Mystery crash</span>
+    <span>Late edition</span>
+    <span>That was 2020</span>
+  </div>
+  <h1 style="margin: 20px 0 0; font-weight: 700; font-size: 44px; line-height: 0.98; letter-spacing: -0.02em; text-wrap: balance">Local investor dodges the worst of the crash</h1>
+  <p style="margin: 8px 0 0; font-size: 18px; line-height: 1.3; color: #4a443c"><span style="font-weight: 700; color: #1c1a17">Big Short energy.</span> Out before the fall and back in near the low.</p>
+  <svg role="img" aria-label="Chart of the whole crash with your sell before the fall and your buy-back near the bottom marked" viewBox="0 0 342 104" style="margin-top: 16px; width: 342px; height: 104px; display: block; box-sizing: content-box; padding: 8px 0; border-top: 1px solid #1c1a17; border-bottom: 1px solid #1c1a17">
+    <line x1="0" y1="40" x2="342" y2="40" stroke="#1c1a17" stroke-width="1" stroke-dasharray="1 4"></line>
+    <polyline fill="none" stroke="#1c1a17" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="0,40 24,36 48,30 72,26 88,30 100,48 110,70 118,90 128,78 144,66 168,54 196,46 228,38 262,30 300,24 342,18"></polyline>
+    <circle cx="92" cy="36" r="6" fill="#1c1a17"></circle>
+    <circle cx="126" cy="80" r="6" fill="#f3e2d0" stroke="#1c1a17" stroke-width="2.5"></circle>
+    <text x="52" y="16" fill="#1c1a17" font-family="'Libre Franklin', Arial, sans-serif" font-weight="700" font-size="12">Sold</text>
+    <text x="138" y="94" fill="#1c1a17" font-family="'Libre Franklin', Arial, sans-serif" font-weight="700" font-size="12">Bought</text>
+  </svg>
+  <div style="margin-top: 12px; display: flex; flex-direction: column; font-family: 'Libre Franklin', Arial, sans-serif; font-size: 16px; line-height: 1; font-variant-numeric: tabular-nums">
+    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(28,26,23,0.25); font-weight: 700"><span>You</span><span>$13,240</span></div>
+    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(28,26,23,0.25); font-weight: 500"><span>Someone who did nothing</span><span>$11,600</span></div>
+    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1c1a17; font-weight: 500"><span>Perfect timing</span><span>$16,900</span></div>
+  </div>
+  <p style="margin: 12px 0 0; font-weight: 700; font-size: 28px; line-height: 1.05; letter-spacing: -0.02em; font-variant-numeric: lining-nums tabular-nums">$1,640 ahead of the holder</p>
+  <div style="flex-grow: 1"></div>
+  <div style="border-top: 4px solid #1c1a17; padding-top: 12px">
+    <h2 style="margin: 0; font-weight: 700; font-size: 28px; line-height: 1.05; letter-spacing: -0.02em">Double or nothing</h2>
+    <p style="margin: 8px 0 0; font-size: 16px; line-height: 1.35; color: #4a443c">Keep your $1,640 win, or take all $13,240 into another mystery game. Finish behind and the run is over.</p>
+    <div style="margin-top: 12px; display: flex; gap: 12px">
+      <button type="button" style="flex: 1 1 0; height: 56px; border: 0; border-radius: 0; background: #a3201a; color: #fbeee2; font-family: 'Libre Franklin', Arial, sans-serif; font-weight: 700; font-size: 16px; cursor: pointer">Double or nothing</button>
+      <button type="button" style="flex: 1 1 0; height: 56px; border: 2px solid #1c1a17; border-radius: 0; background: transparent; color: #1c1a17; font-family: 'Libre Franklin', Arial, sans-serif; font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; cursor: pointer">Bank $1,640</button>
+    </div>
+  </div>
+  <div style="margin-top: 12px; font-family: 'Libre Franklin', Arial, sans-serif; font-weight: 500; font-size: 12px; line-height: 1.35; color: #4a443c">US stock market · A Still Signal build</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
