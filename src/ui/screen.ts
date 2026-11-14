@@ -44,8 +44,6 @@ export const boughtAnnouncement = (n: number) => `Bought back with ${dollars(n)}
 /** How long the opening line stays up, and the first-sale line after a first sale (clock time). */
 const OPENING_MS = 4000;
 const FIRST_SALE_MS = 4000;
-/** Button labels longer than this wrap at 24px in a 342px column, so they drop to the long size. */
-const LONG_LABEL_CHARS = 25;
 /** Gap from the peak at which the "Selling at the top" line appears (spec 6.4). */
 const TOP_GAP = 500;
 const YEAR_MS = 365.25 * 24 * 3600 * 1000;
@@ -68,7 +66,7 @@ export interface ScreenModel {
   /** "up $340", "down $3,588", "level" or "in cash". */
   deltaLabel: string;
   buttonLabel: string;
-  /** The label is too long for 24px on one line: it is set a size smaller. */
+  /** A buy-back label: set at 20px (ruling R26); sell labels stay 24px. */
   longLabel: boolean;
   underButton: string;
   regret: { text: string; rose: boolean } | null;
@@ -149,11 +147,12 @@ export function screenModel(s: PlayState): ScreenModel {
     else if (!worst && v.peakBalance - v.balance >= TOP_GAP) underButton = sellingAtTopLine(v.peakBalance - v.balance);
   }
 
-  // Regret while in cash: what the cash would have made (or lost) since the last step, had it stayed in.
+  // Regret while in cash: what the cash would have made (or lost) on today's move alone, had it
+  // stayed in. Today only, even when a quiet step covers several days; none in the fast-forward.
   const lastSell = [...s.trades].reverse().find((t) => t.side === 'sell');
   let regret: ScreenModel['regret'] = null;
-  if (inCash && prevStep && lastSell && lastSell.dayIndex <= prevDay && lastSell.dayIndex < d) {
-    const amount = v.balance * (closes[d] / closes[prevDay] - 1);
+  if (inCash && !forward && d >= 1 && lastSell && lastSell.dayIndex < d) {
+    const amount = v.balance * (closes[d] / closes[d - 1] - 1);
     if (Math.round(Math.abs(amount)) >= 1) {
       regret = amount > 0 ? { text: regretMadeLine(amount), rose: true } : { text: regretCostLine(amount), rose: false };
     }
@@ -179,7 +178,8 @@ export function screenModel(s: PlayState): ScreenModel {
     delta,
     deltaLabel,
     buttonLabel,
-    longLabel: buttonLabel.length > LONG_LABEL_CHARS,
+    // Ruling R26: every buy-back label is 20px, so the size only changes on a trade.
+    longLabel: !v.invested,
     underButton,
     regret,
     paper: paperFor({ lossFrac, inCash, worstDay: worst }),
@@ -224,7 +224,11 @@ function chartModel(s: PlayState, worst: boolean, inCash: boolean): ChartModel {
 // --- Drawing ---------------------------------------------------------------
 
 export interface ScreenHandlers {
+  /** The finger (or Enter/Space key) went down on the main button. */
+  onPressStart?(): void;
   onPress?(): void;
+  /** The frame showing the latest render is about to be painted. */
+  onPainted?(): void;
   onPauseToggle?(): void;
   onSoundToggle?(): void;
 }
@@ -232,7 +236,16 @@ export interface ScreenHandlers {
 export interface Screen {
   render(v: ScreenModel): void;
   setSound(on: boolean): void;
+  /** Disconnects the resize watcher and clears the page colours on <html>. */
+  destroy(): void;
 }
+
+const raf = (f: () => void): number =>
+  typeof requestAnimationFrame === 'function' ? requestAnimationFrame(f) : (setTimeout(f, 16) as unknown as number);
+const cancelRaf = (id: number) => {
+  if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(id);
+  else clearTimeout(id);
+};
 
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -295,11 +308,20 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   const balanceRoll = createRoll(balance);
   const actRoll = createRoll(actFig);
 
+  act.addEventListener('pointerdown', () => handlers.onPressStart?.());
+  act.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') handlers.onPressStart?.();
+  });
   act.addEventListener('click', () => handlers.onPress?.());
   pause.addEventListener('click', () => handlers.onPauseToggle?.());
   sound.addEventListener('click', () => handlers.onSoundToggle?.());
 
   let last: ScreenModel | null = null;
+  let paintFrame = 0;
+  let snapFrame = 0;
+  let observer: ResizeObserver | null = null;
+  /** Elements whose colours otherwise cross-fade. */
+  const fading = (): HTMLElement[] => [document.documentElement, document.body, page, act];
 
   function applyPaper(p: Paper) {
     const s = page.style;
@@ -334,21 +356,35 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   // Redraw the chart when the column changes size (rotation, browser bars).
   if (typeof ResizeObserver === 'function') {
     let lastSize = '';
-    new ResizeObserver(() => {
+    observer = new ResizeObserver(() => {
       const r = chartWrap.getBoundingClientRect();
       const key = `${Math.round(r.width)}x${Math.round(r.height)}`;
       if (key !== lastSize && last) {
         lastSize = key;
         drawChartNow(last);
       }
-    }).observe(chartWrap);
+    });
+    observer.observe(chartWrap);
   }
 
   return {
     render(m) {
       const prev = last;
       last = m;
+      // Into and out of the worst day the paper switches at once (the jolt marks it);
+      // between the other states it keeps its slow cross-fade.
+      const snap = prev !== null && prev.worst !== m.worst;
+      if (snap) {
+        cancelRaf(snapFrame);
+        for (const e of fading()) e.style.transition = 'none';
+      }
       applyPaper(m.paper);
+      if (snap) {
+        void page.offsetWidth; // commit the new colours before the fade comes back
+        snapFrame = raf(() => {
+          for (const e of fading()) e.style.transition = '';
+        });
+      }
       page.classList.toggle('is-worst', m.worst);
       page.classList.toggle('is-big', m.big);
       page.classList.toggle('is-cash', m.inCash);
@@ -382,6 +418,8 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       pause.textContent = m.paused ? RESUME : PAUSE;
       pause.setAttribute('aria-pressed', String(m.paused));
       drawChartNow(m);
+      cancelRaf(paintFrame);
+      paintFrame = raf(() => handlers.onPainted?.());
       // A short jolt when a worst day arrives.
       if (m.worst && !prev?.worst && !reducedMotion() && typeof page.animate === 'function') {
         page.animate(
@@ -394,6 +432,15 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       sound.textContent = on ? SOUND_ON : SOUND_OFF;
       sound.setAttribute('aria-pressed', String(on));
     },
+    destroy() {
+      observer?.disconnect();
+      observer = null;
+      cancelRaf(paintFrame);
+      cancelRaf(snapFrame);
+      for (const e of fading()) e.style.transition = '';
+      document.documentElement.style.removeProperty('--bg');
+      document.documentElement.style.removeProperty('--ink');
+    },
   };
 }
 
@@ -404,9 +451,17 @@ export interface PlayOpts {
   start?: number;
   pot?: number;
   onEnd(r: RunResult): void;
+  /** The clock paused (Pause button or the page hidden): stop sound here. */
+  onPause?(): void;
+  onResume?(): void;
 }
 
-export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: PlayOpts): Session {
+export interface Play extends Session {
+  /** Stops the run and undoes what the screen set on the page (resize watcher, page colours). */
+  teardown(): void;
+}
+
+export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: PlayOpts): Play {
   const start = opts.start ?? 10000;
   initAnnouncer();
   const history = new Map<number, DayPoint>();
@@ -416,14 +471,31 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
   let soundOn = true;
   let rendered: SessionView | null = null;
   let pendingStep: number | null = null;
+  /** The step on screen in the last painted frame, and the one captured when the finger went down. */
+  let paintedStep: number | null = null;
+  let capturedStep: number | null = null;
   let lastInvested = true;
   let lastAnnouncedStep = -1;
 
   const screen = mountScreen(root, {
+    onPressStart() {
+      capturedStep = paintedStep ?? rendered?.stepIndex ?? null;
+    },
+    onPainted() {
+      if (rendered) paintedStep = rendered.stepIndex;
+    },
     onPress() {
-      if (!rendered || paused) return;
-      pendingStep = rendered.stepIndex;
-      session.press(rendered.stepIndex);
+      if (!rendered || paused) {
+        capturedStep = null;
+        return;
+      }
+      // Trade at the amount the player saw: the step painted when the finger went down.
+      // A finger held for two steps or more falls back to the step painted now.
+      let target = capturedStep ?? paintedStep ?? rendered.stepIndex;
+      if (target < rendered.stepIndex - 1) target = paintedStep ?? rendered.stepIndex;
+      capturedStep = null;
+      pendingStep = target;
+      session.press(target);
     },
     onPauseToggle() {
       if (paused) session.resume();
@@ -467,13 +539,21 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
     onEnd: (r) => opts.onEnd(r),
     onPause() {
       paused = true;
+      opts.onPause?.();
       if (rendered) draw(session.view());
     },
     onResume() {
       paused = false;
+      opts.onResume?.();
       if (rendered) draw(session.view());
     },
   });
   session.start();
-  return session;
+  return {
+    ...session,
+    teardown() {
+      session.destroy();
+      screen.destroy();
+    },
+  };
 }
