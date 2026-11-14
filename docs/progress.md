@@ -6,7 +6,7 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - Task 1 (scaffold): Vite + TS strict + Vitest + Playwright config, self-hosted fonts in `public/fonts/`, `src/engine/types.ts`, `src/content/copy.ts` (all fixed strings), placeholder `src/content/runs.ts` (run ids), docs copied in. GitHub repo exists (`shrivatsakajaria/dont-press-sell`).
 
 ## Next
-- Wave 1: lanes A to G in parallel.
+- See the SDD ledger (.superpowers, local) or the summary below. Merged on main: price data (12 runs), money rules, verdicts, commentary, links/store/pot/streak, sound/sharing, paper/rng/headline checker, headlines for 10 runs. In progress: clock/session (short runs), play screen, end screen, card, menus, headlines for s2014/s2024.
 
 ## Open flags
 - Price check 1 (second source) could not run: Stooq now shows a bot challenge; FRED, WSJ and Nasdaq unusable from here. Asked SK to choose: he downloads the Stooq CSV in a browser, or use check 4's published figures, or both. Price files stay unmerged until settled. Checks 2 (integrity), 3 (recount), 5 (look-alike, 6 of 12 = chance) passed; check 4 running.
