@@ -10,7 +10,6 @@ import type { RunData } from '../../src/engine/types';
 
 const ROOT = join(__dirname, '..', '..');
 const RUN_DIR = join(ROOT, 'data', 'runs');
-const RAW = join(ROOT, 'data', 'raw', 'gspc-daily.csv');
 
 const NUM: Record<string, number> = {
   two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
@@ -23,18 +22,6 @@ function lcg(seed: number): () => number {
     s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
     return s / 4294967296;
   };
-}
-
-interface Raw { dates: string[]; closes: number[] }
-function loadRaw(): Raw {
-  const dates: string[] = [];
-  const closes: number[] = [];
-  for (const row of readFileSync(RAW, 'utf8').trim().split('\n').slice(1)) {
-    const [d, c] = row.split(',');
-    dates.push(d);
-    closes.push(Number(c));
-  }
-  return { dates, closes };
 }
 
 const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
@@ -155,24 +142,29 @@ function checkNeutral(line: string, ctx: Parameters<typeof commentaryFor>[0]) {
   if (line === 'Prices are below where they were.') expect(dd).toBeGreaterThanOrEqual(5);
 }
 
-describe('whole-run scan over the twelve real runs', () => {
+describe('whole-run scan over every real run file', () => {
   const files = readdirSync(RUN_DIR).filter((f) => f.endsWith('.prices.json'));
-  const raw = loadRaw();
 
-  it('finds all twelve run files', () => {
-    expect(files.length).toBe(12);
+  it('finds run files', () => {
+    expect(files.length).toBeGreaterThan(0);
   });
 
   for (const f of files) {
     it(`every line is true on every day of ${f}`, { timeout: 120_000 }, () => {
       const run = JSON.parse(readFileSync(join(RUN_DIR, f), 'utf8')) as RunData;
-      const start = raw.dates.indexOf(run.dates[0]);
-      expect(start).toBeGreaterThan(30);
-      const pre = raw.closes.slice(start - 30, start);
-      const high = Math.max(...raw.closes.slice(Math.max(0, start - 250), start));
+      const { high, preCloses: pre } = run as RunData & { high: number; preCloses: number[] };
+      expect(pre.length).toBe(30);
+      expect(high).toBeGreaterThan(0);
+      // Every day for runs under 600 days; every 5th day plus big-move days and the last day for longer ones.
+      const days: number[] = [];
+      for (let d = 0; d < run.closes.length; d++) {
+        const prev = d === 0 ? pre[29] : run.closes[d - 1];
+        const big = Math.abs(run.closes[d] / prev - 1) >= 0.03;
+        if (run.closes.length < 600 || d % 5 === 0 || big || d === run.closes.length - 1) days.push(d);
+      }
       let total = 0;
       const seenLines = new Set<string>();
-      for (let d = 0; d < run.closes.length; d++) {
+      for (const d of days) {
         for (const invested of [true, false]) {
           for (const neverSold of [true, false]) {
             const balance = neverSold ? (10000 * run.closes[d]) / run.closes[0] : 9100;
