@@ -1,10 +1,11 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { simulate } from '../../src/engine/simulate';
 import type { RunData, Trade } from '../../src/engine/types';
 import { mulberry32 } from '../../src/game/rng';
 import { buildSchedule, type Step } from '../../src/game/schedule';
+import { parseHeadlineRows, toHeadlines } from '../../scripts/lib/headlines';
 
 /**
  * Strategy bots (plan Task 3 step 5). Each bot plays every real run through the
@@ -17,7 +18,14 @@ const runs: RunData[] = readdirSync(DIR)
   .filter((f) => f.endsWith('.prices.json'))
   .sort()
   .map((f) => JSON.parse(readFileSync(join(DIR, f), 'utf8')) as RunData);
-const schedules = new Map(runs.map((r) => [r.id, buildSchedule(r, [])]));
+/** Real headlines where a file exists (data/runs/<id>.headlines.csv), so big-headline days are slow. */
+function headlinesFor(run: RunData) {
+  const file = join(DIR, `${run.id}.headlines.csv`);
+  if (!existsSync(file)) return [];
+  return toHeadlines(parseHeadlineRows(readFileSync(file, 'utf8')).rows, run);
+}
+const withHeadlines = new Set(runs.filter((r) => existsSync(join(DIR, `${r.id}.headlines.csv`))).map((r) => r.id));
+const schedules = new Map(runs.map((r) => [r.id, buildSchedule(r, headlinesFor(r))]));
 
 type Bot = (run: RunData, steps: Step[]) => Trade[];
 
@@ -101,6 +109,7 @@ describe('strategy bots over all twelve runs through the real schedule', () => {
     table[`random presses (${GAMES} seeded games)`] = {
       wins: `mean ${mean.toFixed(2)}/12, max ${max}/12, ${over8} games > 8`,
     };
+    console.log(`headline files loaded: ${[...withHeadlines].join(' ')} (${withHeadlines.size} of ${runs.length})`);
     console.table(table);
   });
 
@@ -116,11 +125,9 @@ describe('strategy bots over all twelve runs through the real schedule', () => {
     expect(results.get("sell 15% down from day 1's close, buy 30% below the sale")!.wins).toBeLessThanOrEqual(8);
   });
 
-  // ESCALATED to SK via the lead (lane I report): with no headlines this strategy
-  // wins 9 of 12. The game is not tuned to hide it. When the decision lands (or
-  // headlines change the slow days) and it wins 8 or fewer, this marker fails:
-  // change it to a plain `it`.
-  it.fails('sell at first slow step, buy at next slow rising day wins at most 8 of 12', () => {
+  // Was escalated at 9 of 12 (no headlines, old pool). With the R22 pool and real
+  // headlines (big days slow) plus R20 decoys it wins 8 of 12: at the limit.
+  it('sell at first slow step, buy at next slow rising day wins at most 8 of 12', () => {
     expect(results.get('sell at first slow step, buy at next slow rising day')!.wins).toBeLessThanOrEqual(8);
   });
 });

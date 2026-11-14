@@ -46,12 +46,43 @@ export const MAX_TRUE_SLOW = 7;
 export const DECOYS = 3;
 /** Decoys come from days whose absolute move lies between these percentiles of the fall's moves. */
 const DECOY_LOW_PCT = 0.5;
+/**
+ * Very short falls (R22): a fall of fewer than this many days gets a shorter
+ * fast-forward (SHORT_FORWARD_MS_PER_DAY per forward day, up to FORWARD_BUDGET_MS)
+ * and the run simply finishes sooner. Rule-based, never by run id.
+ */
+export const SHORT_FALL_DAYS = 20;
+export const SHORT_FORWARD_MS_PER_DAY = 250;
+/** Fall days per true slow day, and per decoy, when the fall is too short for the full 7 + 3 (R22). */
+const DAYS_PER_TRUE_SLOW = 4;
+const DAYS_PER_DECOY = 8;
 const DECOY_HIGH_PCT = 0.85;
 
 /** Opening days are squeezed to begin the first slow step by this time (margin under 10 s for rounding and floors). */
 const OPENING_TARGET_MS = 9_000;
 /** Days in the trailing window that measures the recent swing. */
 const SWING_WINDOW = 5;
+
+/**
+ * How many true slow days and decoys a fall of `fallDays` days gets (R22):
+ * truth = min(7, max(1, floor(days / 4))), decoys = min(3, floor(days / 8)).
+ * From 28 fall days on this is the full 7 + 3; a 7-day fall gets 1 + 0.
+ */
+export function slowCountsFor(fallDays: number): { truth: number; decoys: number } {
+  return {
+    truth: Math.min(MAX_TRUE_SLOW, Math.max(1, Math.floor(fallDays / DAYS_PER_TRUE_SLOW))),
+    decoys: Math.min(DECOYS, Math.floor(fallDays / DAYS_PER_DECOY)),
+  };
+}
+
+/** The fast-forward budget: FORWARD_BUDGET_MS, or 250 ms a forward day (up to it) after a fall under SHORT_FALL_DAYS (R22). */
+export function forwardBudgetFor(run: RunData): number {
+  const n = run.closes.length;
+  const fe = Math.min(Math.max(run.fallEndIndex, 1), n);
+  const days = n - fe;
+  if (days <= 0) return 0;
+  return fe < SHORT_FALL_DAYS ? Math.min(FORWARD_BUDGET_MS, days * SHORT_FORWARD_MS_PER_DAY) : FORWARD_BUDGET_MS;
+}
 
 /** The fall budget for a run: the long-fall budget for falls over LONG_FALL_DAYS days. */
 export function fallBudgetFor(run: RunData): number {
@@ -79,7 +110,7 @@ function fillCapped(days: number[], weight: (d: number) => number, budget: numbe
 /**
  * The slow-motion days of a run's fall (R20).
  * truth: big headline days in the fall, then the largest absolute daily moves, up to
- * MAX_TRUE_SLOW in all (every big headline day is kept even beyond that).
+ * slowCountsFor(fall days).truth in all (7 from 28 days on; every big headline day is kept even beyond that).
  * decoys: up to DECOYS more, picked with mulberry32(hashString(run.id)) from ordinary
  * fall days whose absolute move lies between the 50th and 85th percentile, at least one
  * rising and one falling when such days exist, never next to another slow day, and never
@@ -98,10 +129,11 @@ export function pickSlowDays(run: RunData, headlines: Headline[]): { truth: numb
   const byMove: number[] = [];
   for (let d = 1; d < fe; d++) if (!slow.has(d)) byMove.push(d);
   byMove.sort((a, b) => move(b) - move(a) || a - b);
-  for (const d of byMove.slice(0, Math.max(0, MAX_TRUE_SLOW - slow.size))) slow.add(d);
+  const counts = slowCountsFor(fe);
+  for (const d of byMove.slice(0, Math.max(0, counts.truth - slow.size))) slow.add(d);
   const truth = [...slow].sort((a, b) => a - b);
 
-  const want = Math.min(DECOYS, Math.max(0, MAX_SLOW - slow.size));
+  const want = Math.min(counts.decoys, Math.max(0, MAX_SLOW - slow.size));
   const decoys: number[] = [];
   if (want > 0 && fe > 2) {
     const sorted: number[] = [];
@@ -235,9 +267,10 @@ export function buildSchedule(run: RunData, headlines: Headline[]): Step[] {
   // --- Fast-forward: sample the remaining days evenly, ending on the last day.
   const days = n - fe;
   if (days > 0) {
-    const k = Math.min(days, Math.floor(FORWARD_BUDGET_MS / MIN_STEP_MS));
-    const base = Math.floor(FORWARD_BUDGET_MS / k);
-    const extra = FORWARD_BUDGET_MS - base * k;
+    const fwd = forwardBudgetFor(run);
+    const k = Math.min(days, Math.floor(fwd / MIN_STEP_MS));
+    const base = Math.floor(fwd / k);
+    const extra = fwd - base * k;
     for (let j = 1; j <= k; j++) {
       steps.push({
         dayIndex: fe - 1 + Math.ceil((j * days) / k),

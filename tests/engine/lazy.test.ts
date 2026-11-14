@@ -34,12 +34,16 @@ describe('lazy strategies over all twelve real runs', () => {
       it('selling on day 1 and never buying back loses', () => {
         expect(simulate(run.closes, [{ dayIndex: 0, side: 'sell' }]).lead).toBeLessThan(0);
       });
-      it('selling on day 1 and buying back at the lowest close wins', () => {
+      // R22 brought in runs whose day 1 is the lowest close (s2014, s2024). There a sale
+      // and a buy-back on day 1 are at the same close, so the spec's "always wins" cannot
+      // hold: the lead is exactly zero instead. Every other run must win.
+      it('selling on day 1 and buying back at the lowest close wins (scores zero when day 1 is the low)', () => {
         const r = simulate(run.closes, [
           { dayIndex: 0, side: 'sell' },
           { dayIndex: run.lowIndex, side: 'buy' },
         ]);
-        expect(r.lead).toBeGreaterThan(0);
+        if (run.lowIndex === 0) expect(r.lead).toBe(0);
+        else expect(r.lead).toBeGreaterThan(0);
       });
     });
   }
