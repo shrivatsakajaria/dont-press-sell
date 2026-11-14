@@ -36,3 +36,4 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - R24. On a winning result, the red "Double or nothing" is the only filled button; Rematch and Challenge become outlines. Otherwise Rematch is the main filled button. The next ladder rung is marked in ink, never red.
 - R25. With reduced motion, the tap-to-reveal cover stays; only the count-up and the wipe become instant.
 - R26. Buy-back labels are always 20px (the 24px label cannot hold 'Buy back now: $12,345 behind' in a phone-width button); 'Sell for $N' stays 24px, so the size changes only on a trade.
+- Checkpoint 3 (SK): headlines approved as shown; mystery-run guessability accepted.
