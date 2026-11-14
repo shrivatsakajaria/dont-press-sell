@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cardLines, shareLine, type ResultCardModel } from '../../src/share/card';
+import { cardLines, drawCard, shareLine, type ResultCardModel } from '../../src/share/card';
 
 const base: ResultCardModel = {
   headline: 'Local investor sells three days before the bottom',
@@ -54,6 +54,27 @@ describe('cardLines', () => {
     expect(l.folioLeft).toBe('Rematch, 2008');
     expect(l.folioRight).not.toMatch(/guess/);
     expect(l.shareLine).toBe('I beat the market by $1,640 on my second go at 2008. Beat me.');
+  });
+});
+
+describe('card rules', () => {
+  it('keeps the verdict headline and never prints a dated one on a blind card', () => {
+    expect(cardLines(base).headline).toBe(base.headline);
+    const dated = { ...base, headline: 'Shares fall for a sixth week, September 2008' };
+    expect(cardLines(dated).headline).toBe('Paper hands');
+    expect(cardLines({ ...base, headline: 'Lehman fails on 15 March 2009' }).headline).toBe('Paper hands');
+  });
+  it('never shows a streak line on a practice card', () => {
+    const m = { ...base, lead: 1640, streak: 3, practice: { crashName: '2008', attempt: 2 } };
+    expect(cardLines(m).streak).toBeNull();
+  });
+  it('words a practice card that finished behind', () => {
+    const m = { ...base, practice: { crashName: '2008', attempt: 3 } };
+    expect(shareLine(m)).toBe('I finished $2,300 behind someone who did nothing on my third go at 2008. Beat me.');
+  });
+  it('throws a clear error when there is no 2D context', () => {
+    const canvas = { getContext: () => null } as unknown as HTMLCanvasElement;
+    expect(() => drawCard(canvas, base)).toThrow(/2D context/);
   });
 });
 
