@@ -57,12 +57,15 @@ function build(
 
 /** The brief's sample: c2007, sold 2008-09-29, bought back 2009-03-23. It finishes ahead ("Nerves of steel"). */
 export function c2007Sample(): EndModel {
-  return build(c2007, ['2008-09-29', '2009-03-23'], {
+  const m = build(c2007, ['2008-09-29', '2009-03-23'], {
     modeLabel: 'Mystery crash',
     news: ["House rejects the $700 billion bank rescue plan", "Treasury details a plan to buy banks' bad assets"],
     pot: { pot: 13719, tonight: 3719 },
     flags: { showCountdown: true, blind: true },
   });
+  // A winning mystery run, so double or nothing is offered (first win of a streak).
+  m.double = { lead: m.result.lead, final: m.result.final, wins: 1 };
+  return m;
 }
 
 /** A winning mystery run with the double-or-nothing block: c2020, out 2020-02-27, back in 2020-03-23. */

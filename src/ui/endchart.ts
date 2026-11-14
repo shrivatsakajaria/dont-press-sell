@@ -21,6 +21,8 @@ export interface EndChartInput {
   ink: string;
   red: string;
   paper: string;
+  /** Drawing height (default CHART_H); shorter on short viewports. */
+  height?: number;
 }
 
 function el<K extends keyof SVGElementTagNameMap>(name: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] {
@@ -53,6 +55,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 
 export function endChart(input: EndChartInput): SVGSVGElement {
   const { balances, trades, start, other, ink, red, paper } = input;
+  const H = input.height ?? CHART_H;
   const all = [start, ...balances, ...(other ?? [])].filter((v) => Number.isFinite(v));
   let lo = Math.min(...all);
   let hi = Math.max(...all);
@@ -62,14 +65,14 @@ export function endChart(input: EndChartInput): SVGSVGElement {
   }
   const n = Math.max(balances.length, other?.length ?? 0, 2);
   const x = (i: number) => SIDE + (i / (n - 1)) * (CHART_W - 2 * SIDE);
-  const y = (v: number) => TOP + ((hi - v) / (hi - lo)) * (CHART_H - TOP - BOTTOM);
+  const y = (v: number) => TOP + ((hi - v) / (hi - lo)) * (H - TOP - BOTTOM);
   const path = (vals: number[]) =>
     keep(vals)
       .map((i, k) => `${k ? 'L' : 'M'}${r1(x(i))} ${r1(y(vals[i]))}`)
       .join('');
 
   const svg = el('svg', {
-    viewBox: `0 0 ${CHART_W} ${CHART_H}`,
+    viewBox: `0 0 ${CHART_W} ${H}`,
     role: 'img',
     'aria-label': input.label,
     class: 'es-chart',
@@ -133,7 +136,7 @@ export function endChart(input: EndChartInput): SVGSVGElement {
     let ty = cy - 12 >= 12 ? cy - 12 : cy + 22;
     const clash = placed.find((p) => Math.abs(p.x - cx) < 52 && Math.abs(p.y - ty) < 14);
     if (clash) ty = ty < cy ? cy + 22 : cy - 12;
-    ty = Math.min(CHART_H - 2, Math.max(11, ty));
+    ty = Math.min(H - 2, Math.max(11, ty));
     placed.push({ x: cx, y: ty });
     const anchor = cx < 28 ? 'start' : cx > CHART_W - 28 ? 'end' : 'middle';
     const text = el('text', {

@@ -1,8 +1,12 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { announce } from '../../src/ui/a11y';
 import { keep } from '../../src/ui/endchart';
 import { mountEndScreen, type EndModel } from '../../src/ui/endscreen';
 import { c2007Sample, losingSample, winningSample } from '../fixtures/sample-result';
+
+vi.mock('../../src/ui/a11y', () => ({ announce: vi.fn(), initAnnouncer: vi.fn() }));
+const announced = () => vi.mocked(announce).mock.calls.map((c) => c[0]);
 
 describe('chart thinning', () => {
   test('keeps the ends, the high, the low and both edges of a flat stretch', () => {
@@ -34,6 +38,7 @@ const revealButton = () =>
   Array.from(root.querySelectorAll('button')).find((b) => b.textContent === 'Tap to see what that was');
 
 beforeEach(() => {
+  vi.mocked(announce).mockClear();
   vi.useFakeTimers();
   document.body.innerHTML = '';
   root = document.createElement('div');
@@ -75,9 +80,12 @@ describe('the reveal', () => {
   test('the lead counts from $0 to the final figure over about 1.5 s after the reveal', () => {
     const m = c2007Sample();
     mount(m);
-    const lead = () => root.querySelector('[data-lead]')!.textContent;
-    expect(lead()).toBe('$0 ahead of someone who did nothing');
+    const el = root.querySelector('[data-lead]') as HTMLElement;
+    const lead = () => el.textContent;
+    expect(el.style.visibility).toBe('hidden');
+    expect(lead()).not.toContain('$0');
     revealButton()!.click();
+    expect(el.style.visibility).toBe('');
     vi.advanceTimersByTime(700);
     const mid = lead();
     expect(mid).not.toBe('$0 ahead of someone who did nothing');
@@ -110,13 +118,37 @@ describe('the countdown', () => {
     mount(m);
     expect(root.textContent).not.toContain('Next mystery crash in');
     revealButton()!.click();
+    // Only once the count-up has finished.
+    vi.advanceTimersByTime(1400);
+    expect(root.textContent).not.toContain('Next mystery crash in');
+    vi.advanceTimersByTime(100);
     expect(root.textContent).toContain('Next mystery crash in 10. Tap to stop.');
+    // In flow, straight after the score lines.
+    const line = Array.from(root.querySelectorAll('button')).find((b) => b.textContent!.startsWith('Next mystery'))!;
+    expect(line.previousElementSibling!.textContent).toBe('Perfect timing made $24,188. You made $14,513.');
     vi.advanceTimersByTime(1000);
     expect(root.textContent).toContain('Next mystery crash in 9. Tap to stop.');
     vi.advanceTimersByTime(9000);
     expect(onNewMystery).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(5000);
     expect(onNewMystery).toHaveBeenCalledTimes(1);
+    expect(announced().filter((a) => a.includes('Next mystery crash in'))).toEqual(['Next mystery crash in 10. Tap to stop.']);
+  });
+
+  test('with reduced motion it starts at once and is announced with the reveal, once', () => {
+    const mm = vi.spyOn(window, 'matchMedia').mockImplementation(
+      (q: string) => ({ matches: q.includes('reduce'), media: q }) as unknown as MediaQueryList,
+    );
+    mount(c2007Sample());
+    expect(revealButton()).toBeTruthy(); // R25: the cover stays
+    revealButton()!.click();
+    expect(root.textContent).toContain('Next mystery crash in 10. Tap to stop.');
+    vi.advanceTimersByTime(3000);
+    const a = announced();
+    expect(a).toHaveLength(1);
+    expect(a[0]).toContain('That was 2008.');
+    expect(a[0]).toContain('Next mystery crash in 10. Tap to stop.');
+    mm.mockRestore();
   });
 
   test('any touch on the page stops it', () => {
@@ -125,7 +157,8 @@ describe('the countdown', () => {
     m.actions.onNewMystery = onNewMystery;
     mount(m);
     revealButton()!.click();
-    vi.advanceTimersByTime(2000);
+    vi.advanceTimersByTime(1500 + 2000);
+    expect(root.textContent).toContain('Next mystery crash in 8');
     root.querySelector('h1')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     expect(root.textContent).not.toContain('Next mystery crash in');
     vi.advanceTimersByTime(20000);
@@ -152,6 +185,7 @@ describe('the countdown', () => {
     vi.advanceTimersByTime(30000);
     expect(onNewMystery).not.toHaveBeenCalled();
     expect(root.childElementCount).toBe(0);
+    expect(document.getElementById('es-style')).toBeNull();
   });
 });
 
@@ -184,6 +218,7 @@ describe('the front page', () => {
   test('table, perfect line, near misses, trade news, pot line and footer', () => {
     const m = c2007Sample();
     mount(m);
+    revealButton()!.click();
     const t = root.textContent!;
     expect(t).toContain('You$14,513');
     expect(t).toContain('Someone who did nothing$10,794');
@@ -196,6 +231,37 @@ describe('the front page', () => {
     expect(t).toContain('US stock market · A Still Signal build');
     expect(t).toContain('Late edition');
     expect(t).toContain('Mystery crash');
+  });
+
+  test('trade headlines appear only after the reveal', () => {
+    mount(c2007Sample());
+    expect(root.textContent).not.toContain('House rejects');
+    expect(root.textContent).not.toContain('Treasury details');
+    revealButton()!.click();
+    expect(root.textContent).toContain('Sold: House rejects the $700 billion bank rescue plan');
+  });
+
+  test('R24: with the double block, Double or nothing is the only filled button', () => {
+    const m = winningSample();
+    m.actions = { ...m.actions, onRematch: () => {}, onChallenge: () => {}, onDouble: () => {}, onBank: () => {} };
+    mount(m);
+    const byText = (s: string) => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === s)!;
+    expect(byText('Double or nothing').className).toBe('es-dbl');
+    expect(byText('Rematch this crash').className).toBe('es-out');
+    expect(byText('Challenge a friend').className).toBe('es-out');
+  });
+
+  test('R24: without it, Rematch is the filled main action', () => {
+    const m = losingSample();
+    m.actions = { ...m.actions, onRematch: () => {}, onChallenge: () => {} };
+    mount(m);
+    const byText = (s: string) => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === s)!;
+    expect(byText('Rematch this crash').className).toBe('es-main');
+  });
+
+  test('the c2007 sample is a winning mystery run with a double block', () => {
+    mount(c2007Sample());
+    expect(root.querySelector('h2')!.textContent).toBe('Double or nothing');
   });
 
   test('chart marks sold and bought and has a text label', () => {

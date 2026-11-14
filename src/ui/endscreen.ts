@@ -118,6 +118,7 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-name{display:inline-block;color:var(--ink);font-weight:700}
 .es-name.es-wipe{animation:es-wipe 420ms ${EASE} both}
 @keyframes es-wipe{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+.es-newsbox{min-height:var(--news-h,0px)}
 .es-h1{margin-top:20px;font-weight:700;font-size:40px;line-height:0.98;letter-spacing:-0.02em;text-wrap:balance}
 .es-verdict{margin-top:8px;font-size:18px;line-height:1.3;color:var(--sec)}
 .es-verdict b{font-weight:700;color:var(--ink)}
@@ -146,11 +147,11 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-ladder-label{margin-top:16px;font-family:${SANS};font-weight:700;font-size:12px;line-height:1}
 .es-ladder{list-style:none;padding:0;margin-top:8px;display:grid;grid-template-columns:repeat(5,1fr);column-gap:4px}
 .es-rung{font-family:${SANS};font-weight:500;font-size:12px;line-height:1.2;color:var(--sec)}
-.es-rung i{font-style:normal;display:flex;align-items:center;justify-content:center;width:28px;height:28px;margin-bottom:4px;box-sizing:border-box;font-family:'Newsreader',Georgia,serif;font-weight:700;font-size:18px;border:1px solid var(--soft);color:var(--sec)}
+.es-rung i{font-style:normal;display:flex;align-items:center;justify-content:center;width:28px;height:28px;margin-bottom:4px;box-sizing:border-box;font-family:'Newsreader',Georgia,serif;font-weight:500;font-size:18px;color:var(--sec)}
 .es-rung[data-rung=reached]{color:var(--ink)}
-.es-rung[data-rung=reached] i{background:var(--ink);border-color:var(--ink);color:var(--bg)}
-.es-rung[data-rung=next]{color:var(--red);font-weight:700}
-.es-rung[data-rung=next] i{border:2px solid var(--red);color:var(--red)}
+.es-rung[data-rung=reached] i{background:var(--ink);color:var(--bg);font-weight:700}
+.es-rung[data-rung=next]{color:var(--ink);font-weight:700}
+.es-rung[data-rung=next] i{color:var(--ink);font-weight:700;border-bottom:2px solid var(--ink)}
 .es-pair{display:flex;gap:12px;margin-top:16px}
 .es-pair button{flex:1 1 0;min-height:56px;padding:0 4px;font-family:${SANS};font-weight:700;font-size:16px;line-height:1.1;letter-spacing:-0.01em}
 .es-main{background:var(--ink);color:var(--bg)}
@@ -161,7 +162,7 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-out:hover{background:rgba(28,26,23,0.06)}
 .es-link{display:flex;align-items:center;justify-content:center;width:100%;min-height:44px;margin-top:4px;font-family:${SANS};font-weight:700;font-size:14px;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
 .es-link:hover{color:var(--red)}
-.es-count{position:sticky;bottom:0;z-index:1;display:block;width:100%;min-height:44px;padding-bottom:env(safe-area-inset-bottom);background:var(--bg);border-top:1px solid var(--ink);text-align:center;font-family:${SANS};font-weight:700;font-size:14px;line-height:44px;color:var(--ink)}
+.es-count{display:flex;align-items:center;width:100%;min-height:44px;margin-top:4px;text-align:left;font-family:${SANS};font-weight:700;font-size:14px;line-height:1.3;color:var(--ink)}
 .es-pot{margin-top:8px;padding-top:8px;border-top:1px solid var(--ink);font-family:${SANS};font-weight:700;font-size:14px;line-height:1.35}
 .es-foot{display:flex;flex-wrap:wrap;column-gap:16px}
 .es-foot button{min-height:44px;font-family:${SANS};font-weight:500;font-size:13px;color:var(--sec);text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
@@ -169,6 +170,7 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-foot+.es-foot{margin-top:-8px}
 .es-footer{margin-top:4px;font-family:${SANS};font-weight:500;font-size:12px;line-height:1.35;color:var(--sec)}
 .es :is(.es-verdict,.es-news,.es-perfect,.es-stake,.es-vs,.es-misses li,.es-pot){text-wrap:pretty}
+@media (max-height: 700px){.es-h1{margin-top:12px;font-size:34px}.es-chart{margin-top:8px}.es-row{padding:6px 0}.es-lead{margin-top:12px}.es-perfect{font-size:16px}}
 @media (prefers-reduced-motion: reduce){.es-name.es-wipe{animation:none}}
 `;
 }
@@ -200,6 +202,15 @@ function ease(t: number): number {
     else hi = mid;
   }
   return by((lo + hi) / 2);
+}
+
+/** In-app browsers show about 660px: draw a shorter chart so the score is above the fold. */
+function shortViewport(): boolean {
+  try {
+    return typeof window.matchMedia === 'function' && window.matchMedia('(max-height: 700px)').matches;
+  } catch {
+    return false;
+  }
 }
 
 function reducedMotion(): boolean {
@@ -281,16 +292,23 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       ink: paper.ink,
       red: paper.accent,
       paper: paper.bg,
+      height: shortViewport() ? 68 : undefined,
     }),
   );
 
-  for (const n of model.tradeNews ?? []) {
-    if (!n.real) continue;
-    const p = h('p', 'es-news');
-    p.appendChild(h('b', '', tradeNewsLabel(n.side)));
-    p.appendChild(document.createTextNode(` ${n.real}`));
-    page.appendChild(p);
-  }
+  // Real headlines name the crash, so they print only after the reveal. The box keeps one line each meanwhile.
+  const news = (model.tradeNews ?? []).filter((n) => n.real);
+  const newsBox = h('div', 'es-newsbox');
+  if (news.length) newsBox.style.setProperty('--news-h', `${news.length * 18 + 8}px`);
+  page.appendChild(newsBox);
+  const printNews = () => {
+    for (const n of news) {
+      const p = h('p', 'es-news');
+      p.appendChild(h('b', '', tradeNewsLabel(n.side)));
+      p.appendChild(document.createTextNode(` ${n.real}`));
+      newsBox.appendChild(p);
+    }
+  };
 
   const table = h('div', 'es-table');
   const row = (label: string, value: number, cls = '', key?: 'solid' | 'dash') => {
@@ -312,11 +330,17 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   row(PERFECT_TIMING, result.perfectFinal);
   page.appendChild(table);
 
-  const lead = h('p', 'es-lead' + (behind ? ' es-behind' : ''), leadText(0, result.lead));
+  // Hidden until the reveal; it holds the final text so the layout does not jump.
+  const lead = h('p', 'es-lead' + (behind ? ' es-behind' : ''), leadText(result.lead, result.lead));
   lead.setAttribute('data-lead', '');
+  lead.style.visibility = 'hidden';
   page.appendChild(lead);
-  page.appendChild(h('p', 'es-perfect', perfectLine(result.perfectFinal, result.final)));
-  if (model.other?.kind === 'challenger') page.appendChild(h('p', 'es-vs', challengerLine(result.final, model.other.final)));
+  let scoreEnd: HTMLElement = h('p', 'es-perfect', perfectLine(result.perfectFinal, result.final));
+  page.appendChild(scoreEnd);
+  if (model.other?.kind === 'challenger') {
+    scoreEnd = h('p', 'es-vs', challengerLine(result.final, model.other.final));
+    page.appendChild(scoreEnd);
+  }
 
   if (model.nearMisses.length) {
     const ul = h('ul', 'es-misses');
@@ -353,13 +377,13 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   }
 
   const pair = h('div', 'es-pair');
-  if (actions.onRematch) pair.appendChild(button('es-main', REMATCH, actions.onRematch));
+  // R24: with the double block, its red button is the only filled one.
+  if (actions.onRematch) pair.appendChild(button(model.double ? 'es-out' : 'es-main', REMATCH, actions.onRematch));
   if (actions.onChallenge) pair.appendChild(button('es-out', CHALLENGE, actions.onChallenge));
   if (pair.childElementCount) page.appendChild(pair);
   page.appendChild(button('es-link', NEW_MYSTERY, actions.onNewMystery));
 
-  const pot = h('p', 'es-pot', potResultLine(model.pot.pot, model.pot.tonight));
-  page.appendChild(pot);
+  page.appendChild(h('p', 'es-pot', potResultLine(model.pot.pot, model.pot.tonight)));
 
   const links = h('div', 'es-foot');
   const foot = h('div', 'es-foot');
@@ -386,16 +410,19 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   root.replaceChildren(page);
 
   // The score counts to the lead over about 1.5 s (spec 6.6), at once with reduced motion.
-  const count = () => {
+  const count = (done: () => void) => {
     const target = result.lead;
     const up = Math.round(target) > 0;
     const down = Math.round(target) < 0;
+    lead.style.visibility = '';
     if (reducedMotion() || Math.round(target) === 0) {
       lead.textContent = leadText(target, target);
       if (up) model.sfx?.payout(true);
       if (down) model.sfx?.thud();
+      done();
       return;
     }
+    lead.textContent = leadText(0, target);
     if (down) model.sfx?.thud();
     const steps = Math.round(COUNT_MS / COUNT_STEP_MS);
     let i = 0;
@@ -404,20 +431,27 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       const p = i / steps;
       lead.textContent = leadText(target * ease(Math.min(1, p)), target);
       if (up && i % 5 === 0) model.sfx?.rise(p);
-      if (i < steps) later(step, COUNT_STEP_MS);
-      else if (up) model.sfx?.payout(true);
+      if (i < steps) {
+        later(step, COUNT_STEP_MS);
+        return;
+      }
+      if (up) model.sfx?.payout(true);
+      done();
     };
     later(step, COUNT_STEP_MS);
   };
 
   // "Next mystery crash in N. Tap to stop." Any touch on the page stops it (spec 6.6).
+  // It starts once the count-up has finished, sits right under the score and is announced once.
   let stopCountdown = () => {};
+  let revealNote: string | null = null;
   const startCountdown = () => {
     if (!model.flags.showCountdown || destroyed) return;
     let n = COUNTDOWN_FROM;
     const line = button('es-count', nextMysteryLine(n));
-    // Sticks to the foot of the viewport while it counts, so it is never off-screen.
-    pot.before(line);
+    scoreEnd.after(line);
+    if (revealNote !== null) revealNote += ` ${nextMysteryLine(n)}`;
+    else announce(nextMysteryLine(n));
     const events = ['pointerdown', 'touchstart', 'keydown', 'wheel'] as const;
     let interval: ReturnType<typeof setInterval> | null = null;
     stopCountdown = () => {
@@ -445,9 +479,12 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     revealed = true;
     const span = h('span', 'es-name' + (animate && !reducedMotion() ? ' es-wipe' : ''), name);
     revealSlot.replaceChildren(span);
-    announce(`${model.run.revealLine} ${leadText(result.lead, result.lead)}.`);
-    count();
-    startCountdown();
+    printNews();
+    // One announcement for the reveal; a countdown that starts at once joins it.
+    revealNote = `${model.run.revealLine} ${leadText(result.lead, result.lead)}.`;
+    count(startCountdown);
+    announce(revealNote);
+    revealNote = null;
   };
 
   if (model.flags.blind) {
@@ -466,6 +503,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       timers.clear();
       stopCountdown();
       root.replaceChildren();
+      document.getElementById(STYLE_ID)?.remove();
     },
   };
 }
