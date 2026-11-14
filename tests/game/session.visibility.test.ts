@@ -21,8 +21,10 @@ const steps: Step[] = [
 ];
 
 let hidden = false;
+const FAKE = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] } as const;
 beforeEach(() => {
-  vi.useFakeTimers();
+  // performance is faked too: the session measures time left with performance.now().
+  vi.useFakeTimers({ toFake: [...FAKE.toFake] });
   hidden = false;
   Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
   Object.defineProperty(document, 'visibilityState', {

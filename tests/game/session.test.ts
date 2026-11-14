@@ -40,8 +40,10 @@ function make(r: RunData, steps: Step[]) {
   return { s, views, ends };
 }
 
+const FAKE = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] } as const;
 beforeEach(() => {
-  vi.useFakeTimers();
+  // performance is faked too: the session measures time left with performance.now().
+  vi.useFakeTimers({ toFake: [...FAKE.toFake] });
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -219,6 +221,103 @@ describe('createSession', () => {
     vi.advanceTimersByTime(10_000);
     expect(fake).toHaveBeenCalled();
     expect(ends[0].final).toBeCloseTo(5400);
+  });
+
+  it('holding exactly matches the market, in the R18 order of operations', () => {
+    const { s } = make(run, buildSchedule(run, []));
+    s.start();
+    for (let k = 0; k < 40; k++) {
+      const v = s.view();
+      expect(v.marketBalance).toBe((10000 / run.closes[0]) * run.closes[v.dayIndex]);
+      expect(v.balance).toBe(v.marketBalance);
+      expect(v.leadNow).toBe(0);
+      vi.advanceTimersByTime(1000);
+    }
+    s.destroy();
+  });
+
+  describe('press(expectedStepIndex): a tap that lands just after the step changed', () => {
+    it('pins the trade to the step the UI last rendered when it is the previous step', () => {
+      const { s, views, ends } = make(tiny, tinySteps);
+      s.start();
+      const rendered = views[views.length - 1].stepIndex; // step 0, day 0
+      vi.advanceTimersByTime(200); // the clock moves on to step 1 (day 1) before the tap arrives
+      expect(s.view().stepIndex).toBe(1);
+      s.press(rendered);
+      expect(s.view().invested).toBe(false);
+      expect(s.view().balance).toBe(10000); // sold at day 0's close, the amount the button showed
+      s.press(rendered); // a double tap on the same rendered step: ignored
+      expect(s.view().invested).toBe(false);
+      vi.advanceTimersByTime(5000);
+      expect(ends[0].trades).toEqual([{ dayIndex: 0, side: 'sell' }]);
+    });
+
+    it('a pinned tap still allows one press on the current step', () => {
+      const { s, ends } = make(tiny, tinySteps);
+      s.start();
+      vi.advanceTimersByTime(200); // step 1
+      s.press(0); // sell at day 0
+      s.press(1); // buy back at day 1 (the current step)
+      s.press(1); // ignored
+      vi.advanceTimersByTime(5000);
+      expect(ends[0].trades).toEqual([
+        { dayIndex: 0, side: 'sell' },
+        { dayIndex: 1, side: 'buy' },
+      ]);
+    });
+
+    it('ignores a tap pinned to a step already pressed', () => {
+      const { s, ends } = make(tiny, tinySteps);
+      s.start();
+      s.press(0); // sell at day 0
+      vi.advanceTimersByTime(200); // step 1
+      s.press(0); // late second tap for step 0: ignored
+      vi.advanceTimersByTime(5000);
+      expect(ends[0].trades).toEqual([{ dayIndex: 0, side: 'sell' }]);
+    });
+
+    it('ignores a tap more than one step stale, or for a step not yet shown', () => {
+      const { s, ends } = make(tiny, tinySteps);
+      s.start();
+      vi.advanceTimersByTime(200 + 800); // step 2
+      s.press(0); // two steps back
+      s.press(3); // the future
+      expect(s.view().invested).toBe(true);
+      vi.advanceTimersByTime(5000);
+      expect(ends[0].trades).toEqual([]);
+    });
+
+    it('press(current) behaves as press()', () => {
+      const { s, ends } = make(tiny, tinySteps);
+      s.start();
+      vi.advanceTimersByTime(200);
+      s.press(1);
+      vi.advanceTimersByTime(5000);
+      expect(ends[0].trades).toEqual([{ dayIndex: 1, side: 'sell' }]);
+    });
+  });
+
+  it('a throwing onStep cannot freeze the clock', () => {
+    const ends: RunResult[] = [];
+    let calls = 0;
+    const s = createSession(tiny, tinySteps, {
+      start: 10000,
+      onStep: () => {
+        calls++;
+        throw new Error('UI broke');
+      },
+      onEnd: (r) => ends.push(r),
+    });
+    expect(() => s.start()).toThrow('UI broke');
+    for (let t = 0; t < 30; t++) {
+      try {
+        vi.advanceTimersByTime(100);
+      } catch {
+        // the UI error surfaces from the timer; the clock must carry on
+      }
+    }
+    expect(calls).toBe(tinySteps.length);
+    expect(ends.length).toBe(1);
   });
 
   it('destroy() stops the clock', () => {

@@ -106,6 +106,11 @@ describe('buildSchedule on every real run (no headlines)', () => {
         const total = sum(steps);
         expect(total).toBeLessThanOrEqual(60_000);
         expect(total).toBeGreaterThanOrEqual(SHORT.has(run.id) ? 25_000 : 40_000);
+        // The brief's band, for every run that is neither a long fall (R17) nor shortened by the 700 ms cap (R16).
+        if (!LONG.has(run.id) && !SHORT.has(run.id)) {
+          expect(total).toBeGreaterThanOrEqual(43_000);
+          expect(total).toBeLessThanOrEqual(48_000);
+        }
       });
     });
   }

@@ -43,8 +43,18 @@ export interface Session {
    * handle before the first onStep arrives. Calling it twice does nothing.
    */
   start(): void;
-  /** Sell while invested, buy back while in cash, at the close of the day on screen. At most one trade per step. */
-  press(): void;
+  /**
+   * Sell while invested, buy back while in cash, at the close of the day on screen.
+   * At most one trade per step.
+   *
+   * `expectedStepIndex` (optional) is the stepIndex of the view the UI last rendered,
+   * i.e. the step whose amount the button showed when the player tapped. If the clock
+   * has moved on by exactly one step before the tap arrives, the trade is pinned to
+   * that previous step (its day and close), unless that step already has a trade.
+   * A tap for any other step (two or more back, or ahead) is ignored. Without it,
+   * the press goes to the current step.
+   */
+  press(expectedStepIndex?: number): void;
   pause(): void;
   resume(): void;
   view(): SessionView;
@@ -69,10 +79,12 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
   let paused = false;
   let stepIndex = 0;
   let invested = true;
-  let pressedThisStep = false;
+  const pressedSteps = new Set<number>();
   let peak = -Infinity;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stepStartedAt = 0;
+  const now = () =>
+    typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
   let remaining = 0;
   let current: SessionView = compute();
 
@@ -80,7 +92,8 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
     const step = steps[stepIndex];
     const d = step ? step.dayIndex : 0;
     const balance = sim(closes, trades, start).balances[d] ?? start;
-    const marketBalance = closes.length ? (start * closes[d]) / closes[0] : start;
+    // R18: the holder in the same order of operations as the balances.
+    const marketBalance = closes.length ? (start / closes[0]) * closes[d] : start;
     return {
       stepIndex,
       dayIndex: d,
@@ -97,17 +110,17 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
   function arm(ms: number) {
     clearTimeout(timer);
     remaining = ms;
-    stepStartedAt = Date.now();
+    stepStartedAt = now();
     timer = setTimeout(advance, ms);
   }
 
   function enterStep() {
-    pressedThisStep = false;
     current = compute();
     peak = current.peakBalance;
-    opts.onStep({ ...current });
+    // Arm the clock before calling the UI, so a throwing onStep cannot freeze the run.
     if (!paused) arm(steps[stepIndex].holdMs);
     else remaining = steps[stepIndex].holdMs;
+    opts.onStep({ ...current });
   }
 
   function advance() {
@@ -138,7 +151,8 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
     if (started && timer !== undefined) {
       clearTimeout(timer);
       timer = undefined;
-      remaining = Math.max(0, remaining - (Date.now() - stepStartedAt));
+      const hold = steps[stepIndex].holdMs;
+      remaining = Math.min(hold, Math.max(0, remaining - (now() - stepStartedAt)));
     }
     opts.onPause?.();
   }
@@ -165,10 +179,18 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
       }
       enterStep();
     },
-    press() {
-      if (!started || ended || destroyed || paused || pressedThisStep) return;
-      pressedThisStep = true;
-      trades.push({ dayIndex: steps[stepIndex].dayIndex, side: invested ? 'sell' : 'buy' });
+    press(expectedStepIndex?: number) {
+      if (!started || ended || destroyed || paused) return;
+      let target = stepIndex;
+      if (expectedStepIndex !== undefined && expectedStepIndex !== stepIndex) {
+        if (expectedStepIndex !== stepIndex - 1) return;
+        target = expectedStepIndex;
+      }
+      if (pressedSteps.has(target)) return;
+      // A pinned trade on the previous step must not come after one on the current step.
+      if (target < stepIndex && pressedSteps.has(stepIndex)) return;
+      pressedSteps.add(target);
+      trades.push({ dayIndex: steps[target].dayIndex, side: invested ? 'sell' : 'buy' });
       invested = !invested;
       current = compute();
       opts.onStep({ ...current });

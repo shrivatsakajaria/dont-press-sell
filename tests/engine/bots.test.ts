@@ -79,7 +79,7 @@ const strategies: [string, Bot][] = [
   ['never sell', neverSell],
   ['sell at first slow step, never return', sellFirstSlow],
   ['sell at first slow step, buy at next slow rising day', sellFirstSlowBuyNextSlowRise],
-  ['sell 15% down, buy 30% below the sale', sellDown15BuyDown30],
+  ["sell 15% down from day 1's close, buy 30% below the sale", sellDown15BuyDown30],
 ];
 
 /** A win is a lead above zero; the tolerance absorbs simulate's float noise (see lazy.test.ts). */
@@ -112,8 +112,8 @@ describe('strategy bots over all twelve runs through the real schedule', () => {
     expect(results.get('sell at first slow step, never return')!.wins).toBe(0);
   });
 
-  it('sell 15% down, buy 30% below the sale wins at most 8 of 12', () => {
-    expect(results.get('sell 15% down, buy 30% below the sale')!.wins).toBeLessThanOrEqual(8);
+  it("sell 15% down from day 1's close, buy 30% below the sale wins at most 8 of 12", () => {
+    expect(results.get("sell 15% down from day 1's close, buy 30% below the sale")!.wins).toBeLessThanOrEqual(8);
   });
 
   // ESCALATED to SK via the lead (lane I report): with no headlines this strategy
