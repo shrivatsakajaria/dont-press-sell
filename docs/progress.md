@@ -20,3 +20,6 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - R6. `src/game/rng.ts` is owned by Lane G (Wave 1); Task 4 uses it and does not recreate it.
 - R7. Yahoo Finance history download works when the script sends an honest client name in the User-Agent header (it returns 429 with none). No browser impersonation.
 - R8. Near miss "Bought back N days after the peak" (spec 8.2) is read as "Bought back N days after the bottom" (buy 1 to 10 trading days after the lowest close), the mirror of the sale line. Cost if wrong: one string and one condition.
+- R9. Borrowed-money run with no trades and no wipe-out finishes ahead of the unborrowed holder; its verdict is "Diamond hands" with borrowed copy: "Borrowed three times over and held on" / "Local investor borrows big, holds on, gets away with it". Big Short and Nerves of steel need at least one trade.
+- R10. A wiped-out (margin called) run shows no near-miss lines.
+- R11. The daily crash follows a fixed 12-day cycle from launch (2026-11-21), so any twelve days in a row cover all twelve runs.
