@@ -184,7 +184,7 @@ describe('whole-run scan over every real run file', () => {
           }
         }
       }
-      expect(total).toBeGreaterThan(50);
+      expect(total).toBeGreaterThan(days.length);
       expect(seenLines.size).toBeGreaterThan(10);
     });
   }
