@@ -53,6 +53,15 @@ const DECOY_LOW_PCT = 0.5;
  */
 export const SHORT_FALL_DAYS = 20;
 export const SHORT_FORWARD_MS_PER_DAY = 250;
+/** Short-fall fast-forward floor (R23): max(SHORT_FORWARD_MIN_MS, days x 250 ms), up to FORWARD_BUDGET_MS. */
+export const SHORT_FORWARD_MIN_MS = 3_000;
+/**
+ * Pacing of a fall under SHORT_FALL_DAYS (R23): every fall day is its own step,
+ * ordinary days hold SHORT_QUIET_MS and slow days SHORT_SLOW_MS (still the longer).
+ * No fall budget applies; the run is as long as its days make it.
+ */
+export const SHORT_QUIET_MS = 1_400;
+export const SHORT_SLOW_MS = 1_800;
 /** Fall days per true slow day, and per decoy, when the fall is too short for the full 7 + 3 (R22). */
 const DAYS_PER_TRUE_SLOW = 4;
 const DAYS_PER_DECOY = 8;
@@ -75,13 +84,17 @@ export function slowCountsFor(fallDays: number): { truth: number; decoys: number
   };
 }
 
-/** The fast-forward budget: FORWARD_BUDGET_MS, or 250 ms a forward day (up to it) after a fall under SHORT_FALL_DAYS (R22). */
+/**
+ * The fast-forward budget: FORWARD_BUDGET_MS; after a fall under SHORT_FALL_DAYS,
+ * max(SHORT_FORWARD_MIN_MS, forward days x 250 ms) capped at FORWARD_BUDGET_MS (R22, R23).
+ */
 export function forwardBudgetFor(run: RunData): number {
   const n = run.closes.length;
   const fe = Math.min(Math.max(run.fallEndIndex, 1), n);
   const days = n - fe;
   if (days <= 0) return 0;
-  return fe < SHORT_FALL_DAYS ? Math.min(FORWARD_BUDGET_MS, days * SHORT_FORWARD_MS_PER_DAY) : FORWARD_BUDGET_MS;
+  if (fe >= SHORT_FALL_DAYS) return FORWARD_BUDGET_MS;
+  return Math.min(FORWARD_BUDGET_MS, Math.max(SHORT_FORWARD_MIN_MS, days * SHORT_FORWARD_MS_PER_DAY));
 }
 
 /** The fall budget for a run: the long-fall budget for falls over LONG_FALL_DAYS days. */
@@ -182,6 +195,16 @@ export function buildSchedule(run: RunData, headlines: Headline[]): Step[] {
   const picked = pickSlowDays(run, headlines);
   const slow = new Set<number>([...picked.truth, ...picked.decoys]);
 
+  // --- A very short fall (R23): one step a day at fixed holds, then the fast-forward.
+  if (fe < SHORT_FALL_DAYS) {
+    const steps: Step[] = [];
+    for (let d = 0; d < fe; d++) {
+      const isSlow = slow.has(d);
+      steps.push({ dayIndex: d, holdMs: isSlow ? SHORT_SLOW_MS : SHORT_QUIET_MS, phase: 'fall', slow: isSlow });
+    }
+    return appendForward(steps, run, fe);
+  }
+
   // --- Per-day hold for the other fall days: shorter as the recent swing grows.
   const swing: number[] = [];
   for (let d = 0; d < fe; d++) {
@@ -264,8 +287,12 @@ export function buildSchedule(run: RunData, headlines: Headline[]): Step[] {
     slow: g.slow,
   }));
 
-  // --- Fast-forward: sample the remaining days evenly, ending on the last day.
-  const days = n - fe;
+  return appendForward(steps, run, fe);
+}
+
+/** Fast-forward: sample the days after the fall evenly, ending on the last day, sharing forwardBudgetFor(run). */
+function appendForward(steps: Step[], run: RunData, fe: number): Step[] {
+  const days = run.closes.length - fe;
   if (days > 0) {
     const fwd = forwardBudgetFor(run);
     const k = Math.min(days, Math.floor(fwd / MIN_STEP_MS));

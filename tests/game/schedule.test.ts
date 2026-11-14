@@ -14,6 +14,9 @@ import {
   LONG_FALL_DAYS,
   SHORT_FALL_DAYS,
   SHORT_FORWARD_MS_PER_DAY,
+  SHORT_FORWARD_MIN_MS,
+  SHORT_QUIET_MS,
+  SHORT_SLOW_MS,
   fallBudgetFor,
   forwardBudgetFor,
   slowCountsFor,
@@ -89,6 +92,9 @@ describe('buildSchedule on every real run (no headlines)', () => {
   it('keeps the budgets as named constants', () => {
     expect(SLOW_MS).toBe(800);
     expect(MAX_QUIET_MS).toBe(700);
+    expect(SHORT_QUIET_MS).toBe(1400);
+    expect(SHORT_SLOW_MS).toBe(1800);
+    expect(SHORT_FORWARD_MIN_MS).toBe(3000);
     expect(FALL_BUDGET_MS).toBeGreaterThan(0);
     expect(LONG_FALL_BUDGET_MS).toBe(50_000);
     expect(FORWARD_BUDGET_MS).toBeGreaterThanOrEqual(7000);
@@ -128,8 +134,19 @@ describe('buildSchedule on every real run (no headlines)', () => {
         expect(fallBudgetFor(run)).toBe(isLong(run) ? LONG_FALL_BUDGET_MS : FALL_BUDGET_MS);
       });
 
-      it('an ordinary fall step never holds longer than 700 ms, so slow days feel slower (R16)', () => {
-        for (const s of steps) if (s.phase === 'fall' && !s.slow) expect(s.holdMs).toBeLessThanOrEqual(MAX_QUIET_MS);
+      it('ordinary fall steps: at most 700 ms (R16), or exactly 1,400 ms in a short fall (R23)', () => {
+        for (const s of steps) {
+          if (s.phase !== 'fall' || s.slow) continue;
+          if (isShortFall(run)) expect(s.holdMs).toBe(SHORT_QUIET_MS);
+          else expect(s.holdMs).toBeLessThanOrEqual(MAX_QUIET_MS);
+        }
+      });
+
+      it('every slow step holds longer than every ordinary fall step', () => {
+        const fall = steps.filter((s) => s.phase === 'fall');
+        const slowMin = Math.min(...fall.filter((s) => s.slow).map((s) => s.holdMs));
+        const quietMax = Math.max(...fall.filter((s) => !s.slow).map((s) => s.holdMs));
+        expect(slowMin).toBeGreaterThan(quietMax);
       });
 
       it('marks the phase by the fall end', () => {
@@ -138,10 +155,10 @@ describe('buildSchedule on every real run (no headlines)', () => {
         }
       });
 
-      it('slow steps are 800 ms, in the fall: the largest daily moves plus seeded decoys (R20, R22)', () => {
+      it('slow steps are 800 ms (1,800 ms in a short fall), in the fall: the largest moves plus seeded decoys (R20, R22, R23)', () => {
         const slow = steps.filter((s) => s.slow);
         for (const s of slow) {
-          expect(s.holdMs).toBe(800);
+          expect(s.holdMs).toBe(isShortFall(run) ? SHORT_SLOW_MS : SLOW_MS);
           expect(s.phase).toBe('fall');
         }
         const days = slow.map((s) => s.dayIndex);
@@ -171,12 +188,12 @@ describe('buildSchedule on every real run (no headlines)', () => {
         expect(sum(steps.slice(0, first))).toBeLessThanOrEqual(10_000);
       });
 
-      it('the forward phase totals 7,000 to 8,000 ms; a short fall gets 250 ms a day up to that (R22)', () => {
+      it('the forward phase totals 7,000 to 8,000 ms; after a short fall max(3,000, 250 ms a day) up to 7,500 (R23)', () => {
         const fwd = sum(steps.filter((s) => s.phase === 'forward'));
         const days = run.closes.length - run.fallEndIndex;
         expect(fwd).toBe(forwardBudgetFor(run));
         if (isShortFall(run)) {
-          expect(fwd).toBe(Math.min(FORWARD_BUDGET_MS, days * SHORT_FORWARD_MS_PER_DAY));
+          expect(fwd).toBe(Math.min(FORWARD_BUDGET_MS, Math.max(SHORT_FORWARD_MIN_MS, days * SHORT_FORWARD_MS_PER_DAY)));
         } else {
           expect(fwd).toBeGreaterThanOrEqual(7000);
           expect(fwd).toBeLessThanOrEqual(8000);
@@ -186,7 +203,12 @@ describe('buildSchedule on every real run (no headlines)', () => {
       it('the whole run fits the time budget', () => {
         const total = sum(steps);
         expect(total).toBeLessThanOrEqual(60_000);
-        if (isShortFall(run)) return; // a very short run simply finishes sooner (R22)
+        // A very short run simply finishes sooner (R22); R23 paces it so it is still
+        // at least about 13 s (aim given: s2014 ~14-16 s, s2024 ~20-30 s).
+        if (isShortFall(run)) {
+          expect(total).toBeGreaterThanOrEqual(13_000);
+          return;
+        }
         expect(total).toBeGreaterThanOrEqual(isCapped(run) ? 25_000 : 40_000);
         // The brief's band, for every run that is neither a long fall (R17) nor shortened by the 700 ms cap (R16).
         if (!isLong(run) && !isCapped(run)) {
@@ -288,7 +310,8 @@ describe('buildSchedule with the real headline files (R22)', () => {
       expect(slow.length).toBeLessThanOrEqual(MAX_SLOW);
       const first = steps.findIndex((s) => s.slow);
       expect(sum(steps.slice(0, first))).toBeLessThanOrEqual(10_000);
-      for (const s of steps) if (s.phase === 'fall' && !s.slow) expect(s.holdMs).toBeLessThanOrEqual(MAX_QUIET_MS);
+      const quietCap = run.fallEndIndex < SHORT_FALL_DAYS ? SHORT_QUIET_MS : MAX_QUIET_MS;
+      for (const s of steps) if (s.phase === 'fall' && !s.slow) expect(s.holdMs).toBeLessThanOrEqual(quietCap);
       expect(sum(steps)).toBeLessThanOrEqual(60_000);
     });
   }
