@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { nearMisses } from '../../src/engine/nearmiss';
-import type { RunData, RunResult, Trade } from '../../src/engine/types';
+import type { BorrowedResult, RunData, RunResult, Trade } from '../../src/engine/types';
 
 // Worst day: index 3 (80 / 95). Best day: index 5 (120 / 85).
 const closes = [100, 90, 95, 80, 85, 120, 110, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124];
@@ -16,16 +16,33 @@ function runData(lowIndex = 3): RunData {
     fallEndIndex: lowIndex,
   };
 }
+// A run whose lowest close really is at index 14 (for the "before the bottom" window).
+function runLow14(): RunData {
+  const c = Array.from({ length: 30 }, (_, i) => (i <= 14 ? 100 - i : 86 + (i - 14)));
+  return {
+    id: 'y',
+    kind: 'crash',
+    pickName: 'Test',
+    revealLine: 'That was test',
+    dates: c.map((_, i) => `2000-03-${String(i + 1).padStart(2, '0')}`),
+    closes: c,
+    lowIndex: 14,
+    fallEndIndex: 14,
+  };
+}
 const sell = (dayIndex: number): Trade => ({ dayIndex, side: 'sell' });
 const buy = (dayIndex: number): Trade => ({ dayIndex, side: 'buy' });
 function res(trades: Trade[], o: Partial<RunResult> = {}): RunResult {
+  const final = o.final ?? 10000;
+  const perfectFinal = o.perfectFinal ?? 15000;
+  const lead = final - 10000;
   return {
-    final: 10000,
+    final,
     holderFinal: 10000,
-    perfectFinal: 15000,
-    lead: 0,
-    share: 0,
-    balances: [],
+    perfectFinal,
+    lead,
+    share: lead / (perfectFinal - 10000),
+    balances: [10000, final],
     daysInCash: 0,
     trades,
     ...o,
@@ -34,12 +51,23 @@ function res(trades: Trade[], o: Partial<RunResult> = {}): RunResult {
 const joined = (r: RunResult, d: RunData) => nearMisses(r, d).join('|');
 
 describe('nearMisses', () => {
+  it('a wiped-out run gets no near-miss lines (R10)', () => {
+    const wiped: BorrowedResult = { ...res([]), wipedAt: 2 };
+    expect(nearMisses(wiped, runData())).toEqual([]);
+    const wiped2: BorrowedResult = { ...res([sell(1), buy(5)], { daysInCash: 4 }), wipedAt: 7 };
+    expect(nearMisses(wiped2, runData())).toEqual([]);
+  });
+  it('a borrowed run that was not wiped still gets lines', () => {
+    const ok: BorrowedResult = { ...res([]), wipedAt: null };
+    expect(nearMisses(ok, runData())).toEqual(['Held through the worst day of the run']);
+  });
+
   it('a player who did nothing only held through the worst day', () => {
     expect(nearMisses(res([]), runData())).toEqual(['Held through the worst day of the run']);
   });
 
   it('Sold N days before the bottom, only within 1 to 10 days', () => {
-    const r = runData(14);
+    const r = runLow14();
     expect(nearMisses(res([sell(11)]), r)).toContain('Sold 3 days before the bottom');
     expect(nearMisses(res([sell(13)]), r)).toContain('Sold 1 day before the bottom');
     expect(joined(res([sell(4)]), r)).toContain('Sold 10 days before the bottom');

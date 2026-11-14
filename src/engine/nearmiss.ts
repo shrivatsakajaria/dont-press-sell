@@ -1,5 +1,5 @@
 import { dollars } from '../content/copy';
-import type { RunData, RunResult } from './types';
+import type { BorrowedResult, RunData, RunResult } from './types';
 
 const days = (n: number) => (n === 1 ? '1 day' : `${n} days`);
 
@@ -15,6 +15,10 @@ function investedAt(result: RunResult, day: number): boolean {
 
 /** Near-miss lines for the end screen (spec 8.2), each shown only when true, in spec order. */
 export function nearMisses(result: RunResult, run: RunData): string[] {
+  // R10: a wiped-out run ended early; the scans below would use days that never happened.
+  if ('wipedAt' in result && (result as BorrowedResult).wipedAt !== null && (result as BorrowedResult).wipedAt !== undefined) {
+    return [];
+  }
   const out: string[] = [];
   const { trades } = result;
 

@@ -11,6 +11,11 @@ function isWiped(result: RunResult): boolean {
   return 'wipedAt' in result && (result as BorrowedResult).wipedAt !== null && (result as BorrowedResult).wipedAt !== undefined;
 }
 
+/** A borrowed-money result that was not wiped out. */
+function isBorrowed(result: RunResult): boolean {
+  return 'wipedAt' in result && (result as BorrowedResult).wipedAt === null;
+}
+
 /** The sale closest to the low, if one falls within 10 trading days of it (either side). */
 function saleNearLow(result: RunResult, run: RunData): { dayIndex: number; distance: number } | null {
   let best: { dayIndex: number; distance: number } | null = null;
@@ -38,8 +43,10 @@ function paperSale(result: RunResult, run: RunData): { dayIndex: number; distanc
 
 export function verdictFor(result: RunResult, run: RunData): VerdictId {
   if (isWiped(result)) return 'marginCalled';
-  if (result.share >= 0.5) return 'bigShort';
-  if (result.lead > 0) return 'nerves';
+  // R9: a borrowed run that never traded always ends ahead of the holder; it is still diamond hands.
+  if (isBorrowed(result) && result.trades.length === 0) return 'diamond';
+  if (result.trades.length > 0 && result.share >= 0.5) return 'bigShort';
+  if (result.trades.length > 0 && result.lead > 0) return 'nerves';
   if (result.trades.length === 0) return 'diamond';
   const sold = result.trades.some((t) => t.side === 'sell');
   if (sold && run.kind === 'scare' && result.lead <= 0) return 'shakenOut';
@@ -84,6 +91,13 @@ export function verdictCopy(
         headline: 'Local investor beats the market, tells everyone',
       };
     case 'diamond':
+      if (isBorrowed(result) && result.lead > 0) {
+        return {
+          title: 'Diamond hands',
+          line: 'Borrowed three times over and held on',
+          headline: 'Local investor borrows big, holds on, gets away with it',
+        };
+      }
       return {
         title: 'Diamond hands',
         line: 'Did nothing at all',

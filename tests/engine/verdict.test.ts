@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { verdictCopy, verdictFor } from '../../src/engine/verdict';
 import type { BorrowedResult, RunData, RunResult, Trade } from '../../src/engine/types';
 
-function run(kind: 'crash' | 'scare' = 'crash', lowIndex = 20, n = 40): RunData {
+function run(kind: 'crash' | 'scare' = 'crash', lowIndex = 20, n = 60, plateau = false): RunData {
   const closes = Array.from({ length: n }, (_, i) => (i <= lowIndex ? 100 - i : 100 - lowIndex + (i - lowIndex)));
+  if (plateau) closes[19] = closes[18]; // two equal closes: a sale and buy-back across them changes nothing
   return {
     id: 'x',
     kind,
@@ -58,33 +59,62 @@ describe('verdictFor, in spec 8.3 order', () => {
     expect(verdictFor(result({ trades: [] }), run())).toBe('diamond');
   });
   it('shakenOut: a sale in a scare with lead <= 0', () => {
-    expect(verdictFor(result({ trades: [sell(3), buy(30)], lead: -400 }), run('scare'))).toBe('shakenOut');
+    expect(verdictFor(result({ trades: [sell(25), buy(40)], lead: -400 }), run('scare'))).toBe('shakenOut');
   });
   it('shakenOut also at lead exactly zero', () => {
-    expect(verdictFor(result({ trades: [sell(3), buy(30)], lead: 0 }), run('scare'))).toBe('shakenOut');
+    expect(verdictFor(result({ trades: [sell(18), buy(19)], lead: 0 }), run('scare', 20, 60, true))).toBe('shakenOut');
   });
   it('paper: sale within 10 days of the low, bought back at a higher close', () => {
     expect(verdictFor(result({ trades: [sell(15), buy(30)], lead: -500 }), run())).toBe('paper');
   });
   it('not paper when the sale is 11 days from the low', () => {
-    expect(verdictFor(result({ trades: [sell(9), buy(30)], lead: -500 }), run())).toBe('bagholder');
+    expect(verdictFor(result({ trades: [sell(9), buy(33)], lead: -200 }), run())).toBe('bagholder');
   });
   it('not paper when the buy-back close is not higher', () => {
-    expect(verdictFor(result({ trades: [sell(18), buy(19)], lead: -50 }), run())).toBe('bagholder');
+    expect(verdictFor(result({ trades: [sell(18), buy(19)], lead: 0 }), run('crash', 20, 60, true))).toBe('bagholder');
   });
   it('cashGang: a sale with no later buy', () => {
     expect(verdictFor(result({ trades: [sell(4)], lead: -800 }), run())).toBe('cashGang');
   });
   it('overtrader: five or more trades', () => {
-    const t = [sell(1), buy(2), sell(3), buy(4), sell(5), buy(6)];
+    const t = [sell(40), buy(41), sell(42), buy(43), sell(44), buy(45)];
     expect(verdictFor(result({ trades: t, lead: -900 }), run())).toBe('overtrader');
   });
   it('five trades ending in a sale is cashGang first', () => {
-    const t = [sell(1), buy(2), sell(3), buy(4), sell(5)];
+    const t = [sell(40), buy(41), sell(42), buy(43), sell(44)];
     expect(verdictFor(result({ trades: t, lead: -900 }), run())).toBe('cashGang');
   });
   it('bagholder otherwise', () => {
-    expect(verdictFor(result({ trades: [sell(2), buy(6)], lead: -900 }), run())).toBe('bagholder');
+    expect(verdictFor(result({ trades: [sell(31), buy(38)], lead: -700 }), run())).toBe('bagholder');
+  });
+});
+
+describe('borrowed hold (R9)', () => {
+  const held = (share: number): BorrowedResult => ({
+    ...result({ trades: [], lead: 6000, final: 16000, share }),
+    wipedAt: null,
+  });
+  it('a borrowed run with no trades is diamond even when ahead, and even with share >= 0.5', () => {
+    expect(verdictFor(held(0.3), run())).toBe('diamond');
+    expect(verdictFor(held(0.8), run())).toBe('diamond');
+  });
+  it('wiped still wins over a no-trade borrowed hold', () => {
+    const wiped: BorrowedResult = { ...held(0.8), wipedAt: 30 };
+    expect(verdictFor(wiped, run())).toBe('marginCalled');
+  });
+  it('borrowed diamond copy is borrowed-specific when ahead', () => {
+    expect(verdictCopy('diamond', held(0.3), run())).toEqual({
+      title: 'Diamond hands',
+      line: 'Borrowed three times over and held on',
+      headline: 'Local investor borrows big, holds on, gets away with it',
+    });
+  });
+  it('a borrowed no-trade result with lead 0 keeps the plain diamond copy', () => {
+    const r: BorrowedResult = { ...result({ trades: [] }), wipedAt: null };
+    expect(verdictCopy('diamond', r, run()).line).toBe('Did nothing at all');
+  });
+  it('a plain result with no trades keeps the plain diamond copy', () => {
+    expect(verdictCopy('diamond', result({ trades: [] }), run()).line).toBe('Did nothing at all');
   });
 });
 
@@ -149,7 +179,7 @@ describe('verdictCopy', () => {
     );
   });
   it('overtrader headline uses the trade count: words to twelve, digits above', () => {
-    const mk = (n: number) => Array.from({ length: n }, (_, i) => (i % 2 === 0 ? sell(i + 1) : buy(i + 1)));
+    const mk = (n: number) => Array.from({ length: n }, (_, i) => (i % 2 === 0 ? sell(i + 40) : buy(i + 40)));
     expect(verdictCopy('overtrader', result({ trades: mk(9) }), run()).headline).toBe(
       'Local investor trades nine times, loses to a houseplant',
     );
