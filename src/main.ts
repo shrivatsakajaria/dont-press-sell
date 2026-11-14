@@ -18,13 +18,12 @@ import { dailyPick, pickMystery } from './game/picker';
 import { getPot } from './game/pot';
 import { hashString, mulberry32 } from './game/rng';
 import { buildSchedule } from './game/schedule';
-import type { Session } from './game/session';
 import { daysInRowText, getDailyResult, getLastRun, getRecord, type LastRun, type Mode } from './store/record';
 import { cell, save } from './store/store';
 import { mountEndScreen, type EndModel } from './ui/endscreen';
 import { mountCollection, mountPickCrash } from './ui/menus';
 import { paperFor } from './ui/paper';
-import { MYSTERY_LABEL, startPlay } from './ui/screen';
+import { MYSTERY_LABEL, startPlay, type Play } from './ui/screen';
 
 type RunFile = RunData & NarratorRun;
 
@@ -54,7 +53,7 @@ const soundCell = cell<boolean>('sound', true);
 const vibrationCell = cell<boolean>('vibration', true);
 
 const root = document.getElementById('app')!;
-let session: Session | null = null;
+let session: Play | null = null;
 let teardown: (() => void) | null = null;
 let lastGame: Game | null = null;
 let lastEnd: EndModel | null = null;
@@ -64,7 +63,7 @@ let ticket = 0;
 setHapticsEnabled(vibrationCell.get() !== false);
 
 function clear() {
-  session?.destroy();
+  session?.teardown();
   session = null;
   teardown?.();
   teardown = null;

@@ -81,4 +81,37 @@ describe('createSession and the page going to the background', () => {
     expect(s.view().stepIndex).toBe(1);
     s.destroy();
   });
+
+  it('a manual pause is not undone when the page becomes visible again', () => {
+    const onResume = vi.fn();
+    const s = createSession(tiny, steps, { start: 10000, onStep: () => {}, onEnd: () => {}, onResume });
+    s.start();
+    vi.advanceTimersByTime(300);
+    s.pause();
+    setHidden(true);
+    setHidden(false);
+    expect(onResume).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(5000);
+    expect(s.view().stepIndex).toBe(0);
+    s.resume();
+    expect(onResume).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(700);
+    expect(s.view().stepIndex).toBe(1);
+    s.destroy();
+  });
+
+  it('pressing Resume while the page is hidden waits for the page to be shown', () => {
+    const s = createSession(tiny, steps, { start: 10000, onStep: () => {}, onEnd: () => {} });
+    s.start();
+    s.pause();
+    setHidden(true);
+    s.resume();
+    vi.advanceTimersByTime(5000);
+    expect(s.view().stepIndex).toBe(0);
+    setHidden(false);
+    vi.advanceTimersByTime(1000);
+    expect(s.view().stepIndex).toBe(1);
+    s.destroy();
+  });
 });
+

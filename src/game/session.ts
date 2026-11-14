@@ -77,6 +77,10 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
   let ended = false;
   let destroyed = false;
   let paused = false;
+  /** Paused by the player (the Pause button). Only the player's Resume clears it. */
+  let userPaused = false;
+  /** Paused because the page is hidden. Showing the page clears it. */
+  let hiddenPaused = false;
   let stepIndex = 0;
   let invested = true;
   const pressedSteps = new Set<number>();
@@ -138,14 +142,19 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
 
   const hasDocument = typeof document !== 'undefined';
   const onVisibility = () => {
-    if (document.hidden) pause();
-    else resume();
+    hiddenPaused = document.hidden;
+    sync();
   };
+  /** The clock runs only when neither the player nor a hidden page holds it. */
+  function sync() {
+    if (userPaused || hiddenPaused) pauseClock();
+    else resumeClock();
+  }
   function unbind() {
     if (hasDocument) document.removeEventListener('visibilitychange', onVisibility);
   }
 
-  function pause() {
+  function pauseClock() {
     if (paused || ended || destroyed) return;
     paused = true;
     if (started && timer !== undefined) {
@@ -157,7 +166,7 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
     opts.onPause?.();
   }
 
-  function resume() {
+  function resumeClock() {
     if (!paused || ended || destroyed) return;
     paused = false;
     if (started) arm(remaining);
@@ -175,7 +184,10 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
       }
       if (hasDocument) {
         document.addEventListener('visibilitychange', onVisibility);
-        if (document.hidden) paused = true;
+        if (document.hidden) {
+          hiddenPaused = true;
+          paused = true;
+        }
       }
       enterStep();
     },
@@ -195,8 +207,14 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
       current = compute();
       opts.onStep({ ...current });
     },
-    pause,
-    resume,
+    pause() {
+      userPaused = true;
+      sync();
+    },
+    resume() {
+      userPaused = false;
+      sync();
+    },
     view() {
       return { ...current };
     },

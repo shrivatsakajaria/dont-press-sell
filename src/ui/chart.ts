@@ -127,30 +127,6 @@ export function drawChart(svg: SVGSVGElement | SVGElement, m: ChartModel, paper:
   }
   kids.push(el('line', { x1: 0, y1: g.startY, x2: w, y2: g.startY, stroke: ink, 'stroke-width': 1, 'stroke-dasharray': '1 4' }));
 
-  const clampY = (y: number) => Math.min(h - 4, Math.max(12, y));
-  const label = (x: number, y: number, text: string) =>
-    el('text', {
-      x, y, 'text-anchor': 'end', fill: paper.secondary,
-      'font-family': LABEL_FONT, 'font-weight': 500, 'font-size': 12,
-      // Knocked out of the lines behind it in the paper colour, as print does.
-      stroke: m.worst ? 'none' : paper.bg, 'stroke-width': 4, 'stroke-linejoin': 'round', 'paint-order': 'stroke',
-    }, text);
-
-  // "The market" sits by the end of the dashed line: above it when the market is
-  // above the player's flat line, below it otherwise.
-  let marketY: number | null = null;
-  let marketLabel: SVGElement | null = null;
-  if (m.inCash && g.ghosts.length) {
-    const last = g.ghosts[g.ghosts.length - 1];
-    const [gx, gy] = last[last.length - 1];
-    marketY = clampY(gy <= g.today[1] ? gy - 10 : gy + 18);
-    marketLabel = label(Math.max(72, gx - 10), marketY, THE_MARKET);
-  }
-  // The start label sits at the right, above the dotted line, or below it, whichever is clear.
-  const startY = [g.startY - 6, g.startY + 16]
-    .map(clampY)
-    .find((y) => marketY === null || Math.abs(y - marketY) >= 14);
-
   if (g.other.length > 1) {
     kids.push(
       el('polyline', {
@@ -173,6 +149,8 @@ export function drawChart(svg: SVGSVGElement | SVGElement, m: ChartModel, paper:
       'stroke-linejoin': 'round', 'stroke-linecap': 'round', points: fmt(g.line),
     }),
   );
+  kids.push(el('circle', { cx: g.today[0], cy: g.today[1], r: m.worst ? 8 : 6, fill: ink }));
+  // Sale and buy marks sit above today's dot, so a trade made today stays visible.
   for (const mk of g.marks) {
     kids.push(
       mk.side === 'sell'
@@ -180,8 +158,109 @@ export function drawChart(svg: SVGSVGElement | SVGElement, m: ChartModel, paper:
         : el('circle', { cx: mk.x, cy: mk.y, r: 5, fill: paper.bg, stroke: ink, 'stroke-width': 2 }),
     );
   }
-  kids.push(el('circle', { cx: g.today[0], cy: g.today[1], r: m.worst ? 8 : 6, fill: ink }));
-  if (startY !== undefined) kids.push(label(w, startY, STARTED_AT(m.start)));
-  if (marketLabel) kids.push(marketLabel);
+  kids.push(...placeLabels(m, g, paper, w, h));
   svg.replaceChildren(...kids);
+}
+
+// --- Labels -------------------------------------------------------------------
+
+interface Box { x0: number; x1: number; y0: number; y1: number }
+interface Spot { x: number; y: number; anchor: 'start' | 'end' }
+
+/** Rough width of a 12px Libre Franklin label. */
+const CHAR_W = 6.5;
+export const SOLD = 'Sold';
+
+function boxOf(s: Spot, text: string): Box {
+  const wd = text.length * CHAR_W;
+  const x0 = s.anchor === 'end' ? s.x - wd : s.x;
+  return { x0, x1: x0 + wd, y0: s.y - 11, y1: s.y + 3 };
+}
+const overlaps = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+
+/** True when any line passes through the box (sampled every 2px, with room for the stroke). */
+function crossesLine(b: Box, lines: [number, number][][]): boolean {
+  const pad = 2;
+  for (const pl of lines) {
+    for (let i = 0; i < pl.length; i++) {
+      const [x1, y1] = pl[Math.max(0, i - 1)];
+      const [x2, y2] = pl[i];
+      const n = Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 2));
+      for (let k = 0; k <= n; k++) {
+        const x = x1 + ((x2 - x1) * k) / n;
+        const y = y1 + ((y2 - y1) * k) / n;
+        if (x >= b.x0 - pad && x <= b.x1 + pad && y >= b.y0 - pad && y <= b.y1 + pad) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * The chart's words, each placed at the first of its candidate spots that stays inside
+ * the chart, clear of the other labels, the dots and the lines, in this order: "Sold",
+ * the start label, "The market". "Sold" and "The market" fall back to a spot clear of
+ * other labels only; the start label is dropped rather than drawn across a line.
+ */
+function placeLabels(m: ChartModel, g: ChartGeometry, paper: Paper, w: number, h: number): SVGElement[] {
+  const lines = [g.line, ...g.ghosts];
+  const taken: Box[] = [];
+  const dot = (x: number, y: number, r: number): Box => ({ x0: x - r - 2, x1: x + r + 2, y0: y - r - 2, y1: y + r + 2 });
+  const dots = [dot(g.today[0], g.today[1], 8), ...g.marks.map((mk) => dot(mk.x, mk.y, 6))];
+  const out: SVGElement[] = [];
+  const inside = (b: Box) => b.x0 >= 0 && b.x1 <= w && b.y0 >= 0 && b.y1 <= h;
+
+  function place(text: string, spots: Spot[], strict: boolean, fill: string, weight: number) {
+    const fits = (s: Spot, avoidLines: boolean) => {
+      const b = boxOf(s, text);
+      return inside(b) && !taken.some((t) => overlaps(t, b)) && !dots.some((d) => overlaps(d, b)) &&
+        (!avoidLines || !crossesLine(b, lines));
+    };
+    const spot = spots.find((s) => fits(s, true)) ?? (strict ? undefined : spots.find((s) => fits(s, false)));
+    if (!spot) return;
+    taken.push(boxOf(spot, text));
+    out.push(
+      el('text', {
+        x: spot.x, y: spot.y, 'text-anchor': spot.anchor, fill,
+        'font-family': LABEL_FONT, 'font-weight': weight, 'font-size': 12,
+      }, text),
+    );
+  }
+
+  const around = (x: number, y: number): Spot[] => [
+    { x: x - 10, y: y + 18, anchor: 'end' },
+    { x: x - 10, y: y - 10, anchor: 'end' },
+    { x: x + 10, y: y + 18, anchor: 'start' },
+    { x: x + 10, y: y - 10, anchor: 'start' },
+    { x: x - 12, y: y + 4, anchor: 'end' },
+  ];
+
+  const sale = [...g.marks].reverse().find((mk) => mk.side === 'sell');
+  if (sale) place(SOLD, around(sale.x, sale.y), false, paper.ink, 700);
+
+  const sy = g.startY;
+  // Along the dotted line from the right, above then below it, then from the left edge.
+  const startSpots: Spot[] = [];
+  for (const shift of [0, 60, 120, 180]) {
+    startSpots.push({ x: w - shift, y: sy - 6, anchor: 'end' }, { x: w - shift, y: sy + 16, anchor: 'end' });
+  }
+  startSpots.push({ x: 0, y: sy - 6, anchor: 'start' }, { x: 0, y: sy + 16, anchor: 'start' });
+  place(STARTED_AT(m.start), startSpots, true, paper.secondary, 500);
+  if (m.inCash && g.ghosts.length) {
+    const last = g.ghosts[g.ghosts.length - 1];
+    const [gx, gy] = last[last.length - 1];
+    const up = gy <= g.today[1];
+    // Close to the end of the dashed line first, then further out, on the side away from the player's line.
+    const dys = up ? [-10, 18, -24, 32] : [18, -10, 32, -24];
+    const spots: Spot[] = [];
+    for (const dx of [0, 40, 80]) {
+      for (const dy of dys) {
+        spots.push({ x: gx - 10 - dx, y: gy + dy, anchor: 'end' });
+      }
+    }
+    spots.push(...around(gx, gy));
+    place(THE_MARKET, spots, false, paper.secondary, 500);
+  }
+
+  return out;
 }

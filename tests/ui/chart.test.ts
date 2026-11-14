@@ -3,6 +3,19 @@ import { describe, expect, it } from 'vitest';
 import { chartGeometry, drawChart, type ChartModel } from '../../src/ui/chart';
 import { paperFor } from '../../src/ui/paper';
 
+/** The box a 12px label covers (about 6.5px per character), from its anchor. */
+function labelBox(t: Element) {
+  const x = Number(t.getAttribute('x'));
+  const y = Number(t.getAttribute('y'));
+  const w = (t.textContent ?? '').length * 6.5;
+  const anchor = t.getAttribute('text-anchor') ?? 'start';
+  const x0 = anchor === 'end' ? x - w : x;
+  return { x0, x1: x0 + w, y0: y - 11, y1: y + 3 };
+}
+function overlap(a: ReturnType<typeof labelBox>, b: ReturnType<typeof labelBox>) {
+  return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+}
+
 const base: ChartModel = {
   start: 10000,
   points: [
@@ -98,9 +111,61 @@ describe('drawChart', () => {
     };
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     drawChart(svg, m, paperFor({ lossFrac: 0, inCash: true, worstDay: false }), 342, 120);
-    const texts = [...svg.querySelectorAll('text')].map((t) => Number(t.getAttribute('y')));
-    if (texts.length === 2) expect(Math.abs(texts[0] - texts[1])).toBeGreaterThanOrEqual(14);
-    expect([...svg.querySelectorAll('text')].some((t) => t.textContent === 'The market')).toBe(true);
+    const texts = [...svg.querySelectorAll('text')];
+    expect(texts.map((t) => t.textContent).sort()).toEqual(['Sold', 'Started at $10,000', 'The market']);
+    const boxes = texts.map(labelBox);
+    for (let i = 0; i < boxes.length; i++)
+      for (let j = i + 1; j < boxes.length; j++) expect(overlap(boxes[i], boxes[j])).toBe(false);
+  });
+
+  it('draws the sale and buy marks above today\'s dot and labels the sale', () => {
+    const m: ChartModel = {
+      ...base,
+      points: [
+        { dayIndex: 0, balance: 10000, ghost: null },
+        { dayIndex: 5, balance: 9000, ghost: 9000 },
+      ],
+      trades: [{ dayIndex: 5, side: 'sell' }],
+      inCash: true,
+    };
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    drawChart(svg, m, paperFor({ lossFrac: 0, inCash: true, worstDay: false }), 342, 200);
+    const circles = [...svg.querySelectorAll('circle')];
+    const last = circles[circles.length - 1];
+    expect(last.getAttribute('fill')).toBe('#a3201a');
+    expect([...svg.querySelectorAll('text')].some((t) => t.textContent === 'Sold')).toBe(true);
+  });
+
+  it('keeps the start label clear of the player\'s line', () => {
+    // The line runs flat along the start level right under where the label would sit.
+    const m: ChartModel = {
+      ...base,
+      points: [
+        { dayIndex: 0, balance: 10000, ghost: null },
+        { dayIndex: 30, balance: 10060, ghost: null },
+        { dayIndex: 60, balance: 10040, ghost: null },
+        { dayIndex: 85, balance: 10050, ghost: null },
+        { dayIndex: 90, balance: 8000, ghost: null },
+      ],
+    };
+    const g = chartGeometry(m, 342, 200);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    drawChart(svg, m, paperFor({ lossFrac: 0, inCash: false, worstDay: false }), 342, 200);
+    const t = [...svg.querySelectorAll('text')].find((e) => e.textContent === 'Started at $10,000');
+    expect(t).toBeDefined();
+    {
+      const b = labelBox(t!);
+      for (let i = 1; i < g.line.length; i++) {
+        const [x1, y1] = g.line[i - 1];
+        const [x2, y2] = g.line[i];
+        // Sample the segment and check no sample falls inside the label box.
+        for (let k = 0; k <= 20; k++) {
+          const x = x1 + ((x2 - x1) * k) / 20;
+          const y = y1 + ((y2 - y1) * k) / 20;
+          expect(x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1).toBe(false);
+        }
+      }
+    }
   });
 });
 

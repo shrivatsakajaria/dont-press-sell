@@ -137,12 +137,37 @@ describe('screenModel', () => {
     expect(screenModel(state(later, { steps: slow, firstSaleStep: 4 })).standfirst).not.toBe(FIRST_SALE_LINE);
   });
 
-  it('the buy-back label is marked long when it would not fit at full size', () => {
+  it('every buy-back label is set at the long size and every sell label at full size (R26)', () => {
     const v = view(5, { invested: false, balance: 9000, leadNow: -12345 });
     const m = screenModel(state(v, { trades: [{ dayIndex: 4, side: 'sell' }] }));
     expect(m.buttonLabel).toBe('Buy back now: $12,345 behind');
     expect(m.longLabel).toBe(true);
+    const short = screenModel(state(view(5, { invested: false, balance: 9000, leadNow: 0 }), { trades: [{ dayIndex: 4, side: 'sell' }] }));
+    expect(short.buttonLabel).toBe('Buy back now: $0 ahead');
+    expect(short.longLabel).toBe(true);
     expect(screenModel(state(view(0))).longLabel).toBe(false);
+    expect(screenModel(state(view(0, { balance: 123456 }))).longLabel).toBe(false);
+  });
+
+  it('regret uses today\'s move only, even when the step covers several days', () => {
+    // One quiet step covers days 2 and 3; the previous step showed day 1.
+    const grouped: Step[] = [
+      { dayIndex: 0, holdMs: 300, phase: 'fall', slow: false },
+      { dayIndex: 1, holdMs: 300, phase: 'fall', slow: false },
+      { dayIndex: 3, holdMs: 300, phase: 'fall', slow: false },
+    ];
+    const v: SessionView = {
+      stepIndex: 2, dayIndex: 3, balance: 10100, invested: false, marketBalance: 10000,
+      peakBalance: 10100, leadNow: 100, phase: 'fall', slow: false,
+    };
+    const s = state(v, { steps: grouped, trades: [{ dayIndex: 1, side: 'sell' }] });
+    // closes[3] / closes[2] = 100 / 99: today's move is up about 1%, so $102 (not the $100 cost since day 1).
+    expect(screenModel(s).regret).toEqual({ text: 'Holding today would have made you $102', rose: true });
+  });
+
+  it('no regret line in the fast-forward', () => {
+    const v = view(7, { invested: false, balance: 9000 });
+    expect(screenModel(state(v, { trades: [{ dayIndex: 4, side: 'sell' }] })).regret).toBeNull();
   });
 
   it('fast forward shows the status and a year counter, never a date', () => {
