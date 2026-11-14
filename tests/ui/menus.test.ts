@@ -92,7 +92,7 @@ describe('collection', () => {
     expect(unplayed).not.toContain('Crash');
   });
   it('count agrees with the list: the played count never counts hidden rows', () => {
-    const root = collection({ played: ['c1929', 's2010', 'ghost'] });
+    const root = collection({ played: ['c1929', 's2011', 'ghost'] });
     expect(root.textContent).toContain('2 of 12 played');
     expect(root.querySelectorAll('[data-run]').length).toBe(7);
   });
@@ -102,7 +102,7 @@ describe('collection', () => {
     for (const r of RUNS.filter((r) => r.kind === 'scare')) expect(t).not.toContain(r.pickName);
     const t2 = collection({ played: ['s1998'] }).textContent!;
     expect(t2).toContain(RUNS.find((r) => r.id === 's1998')!.pickName);
-    expect(t2).not.toContain(RUNS.find((r) => r.id === 's2010')!.pickName);
+    expect(t2).not.toContain(RUNS.find((r) => r.id === 's2011')!.pickName);
   });
   it('shows earned titles and a dash for the rest', () => {
     const root = collection({ titles: ['paper', 'diamond'] });
