@@ -155,4 +155,12 @@ describe('screenModel', () => {
   it('paused overrides the status', () => {
     expect(screenModel(state(view(2), { paused: true })).status).toBe('Paused');
   });
+
+  it('shows the narrated headline and commentary once the opening line has gone', () => {
+    const slow = steps.map((x) => ({ ...x, holdMs: 1000 }));
+    const words = { headline: 'A big bank fails', commentary: 'Down two days in a row.' };
+    expect(screenModel(state(view(0), words)).headline).toBe('A big bank fails');
+    expect(screenModel(state(view(0), words)).standfirst).toBe(OPENING_LINE);
+    expect(screenModel(state(view(6), { ...words, steps: slow })).standfirst).toBe('Down two days in a row.');
+  });
 });

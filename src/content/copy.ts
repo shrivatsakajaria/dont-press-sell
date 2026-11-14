@@ -35,3 +35,6 @@ export const perfectLine = (perfect: number, you: number) =>
 
 export const FOOTER_PLAY = 'US stock market · Not financial advice';
 export const FOOTER_RESULT = 'US stock market · A Still Signal build';
+
+/** The play headline before a run's first news line (always true: every run trades below its old high until the last day). */
+export const BEFORE_NEWS = 'Shares are down from their recent high';

@@ -97,6 +97,9 @@ export interface PlayState {
   firstSaleStep: number | null;
   paused: boolean;
   pot: number;
+  /** The day's news line and the commentary under it (src/game/narrator.ts); placeholders when absent. */
+  headline?: string;
+  commentary?: string;
 }
 
 function yearsSince(a: string, b: string): number {
@@ -135,7 +138,7 @@ export function screenModel(s: PlayState): ScreenModel {
     for (let i = a; i < b; i++) t += steps[i]?.holdMs ?? 0;
     return t;
   };
-  let standfirst = placeholderStandfirst(d + 1);
+  let standfirst = s.commentary ?? placeholderStandfirst(d + 1);
   if (s.firstSaleStep !== null && v.stepIndex >= s.firstSaleStep && msBetween(s.firstSaleStep, v.stepIndex) < FIRST_SALE_MS) {
     standfirst = FIRST_SALE_LINE;
   } else if (msBetween(0, v.stepIndex) < OPENING_MS) {
@@ -170,7 +173,7 @@ export function screenModel(s: PlayState): ScreenModel {
     runLabel: s.runLabel,
     dayLabel: day,
     status,
-    headline: placeholderHeadline(d + 1),
+    headline: s.headline ?? placeholderHeadline(d + 1),
     standfirst,
     big: v.slow,
     worst,
@@ -404,6 +407,8 @@ export interface PlayOpts {
   start?: number;
   pot?: number;
   onEnd(r: RunResult): void;
+  /** The headline and commentary for each new step (src/game/narrator.ts). */
+  narrate?(dayIndex: number, prevDay: number | null, balance: number, trades: Trade[]): { headline: string; commentary: string };
 }
 
 export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: PlayOpts): Session {
@@ -418,6 +423,8 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
   let pendingStep: number | null = null;
   let lastInvested = true;
   let lastAnnouncedStep = -1;
+  let words: { headline: string; commentary: string } | undefined;
+  let wordsStep = -1;
 
   const screen = mountScreen(root, {
     onPress() {
@@ -451,8 +458,14 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       announce(side === 'sell' ? soldAnnouncement(v.balance) : boughtAnnouncement(v.balance));
     }
     pendingStep = null;
+    if (opts.narrate && v.stepIndex !== wordsStep) {
+      wordsStep = v.stepIndex;
+      const prevDay = v.stepIndex > 0 ? steps[v.stepIndex - 1].dayIndex : null;
+      words = opts.narrate(v.dayIndex, prevDay, v.balance, trades);
+    }
     const m = screenModel({
       run, steps, start, view: v, runLabel: opts.runLabel, history, trades, firstSaleStep, paused, pot: opts.pot ?? start,
+      headline: words?.headline, commentary: words?.commentary,
     });
     screen.render(m);
     if (v.slow && v.stepIndex !== lastAnnouncedStep) {
