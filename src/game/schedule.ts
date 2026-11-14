@@ -17,6 +17,18 @@ export interface Step {
 
 /** Time for the whole fall, slow steps included. SK may change it (checkpoint 2). */
 export const FALL_BUDGET_MS = 37_000;
+/**
+ * Fall budget for the long falls (ruling R17: c1929 and c2000, whose falls run
+ * past LONG_FALL_DAYS trading days); spec 7.4 lets them run to about 60 s in all.
+ */
+export const LONG_FALL_BUDGET_MS = 50_000;
+/** A fall of more than this many trading days takes LONG_FALL_BUDGET_MS (only c1929 and c2000 today). */
+export const LONG_FALL_DAYS = 500;
+/**
+ * Longest hold of an ordinary fall step (ruling R16), so slow days (800 ms) always
+ * feel slower. Falls too short to fill the budget under this cap finish sooner.
+ */
+export const MAX_QUIET_MS = 700;
 /** Time for the whole fast-forward. SK may change it (checkpoint 2); keep it within 7,000 to 8,000. */
 export const FORWARD_BUDGET_MS = 7_500;
 /** Hold of a slow-motion (big) day. */
@@ -32,6 +44,29 @@ export const MAX_SLOW = 10;
 const OPENING_TARGET_MS = 9_000;
 /** Days in the trailing window that measures the recent swing. */
 const SWING_WINDOW = 5;
+
+/** The fall budget for a run: the long-fall budget for falls over LONG_FALL_DAYS days. */
+export function fallBudgetFor(run: RunData): number {
+  return run.fallEndIndex > LONG_FALL_DAYS ? LONG_FALL_BUDGET_MS : FALL_BUDGET_MS;
+}
+
+/** Shares `budget` across `days` by weight, no day above `cap`; whatever the cap refuses is left unspent. */
+function fillCapped(days: number[], weight: (d: number) => number, budget: number, cap: number, out: Map<number, number>) {
+  let free = days.slice();
+  let left = budget;
+  while (free.length && left > 0) {
+    const total = free.reduce((a, d) => a + weight(d), 0);
+    const over = free.filter((d) => (total > 0 ? (left * weight(d)) / total : 0) > cap);
+    if (!over.length) {
+      for (const d of free) out.set(d, total > 0 ? (left * weight(d)) / total : 0);
+      return;
+    }
+    for (const d of over) out.set(d, cap);
+    left -= cap * over.length;
+    free = free.filter((d) => !over.includes(d));
+  }
+  for (const d of free) out.set(d, 0);
+}
 
 interface Group {
   dayIndex: number;
@@ -78,10 +113,10 @@ export function buildSchedule(run: RunData, headlines: Headline[]): Step[] {
 
   const quiet: number[] = [];
   for (let d = 0; d < fe; d++) if (!slow.has(d)) quiet.push(d);
-  const budget = Math.max(0, FALL_BUDGET_MS - SLOW_MS * slow.size);
-  const totalWeight = quiet.reduce((a, d) => a + weight(d), 0);
+  const fallBudget = fallBudgetFor(run);
+  const budget = Math.max(0, fallBudget - SLOW_MS * slow.size);
   const ms = new Map<number, number>();
-  for (const d of quiet) ms.set(d, totalWeight > 0 ? (budget * weight(d)) / totalWeight : 0);
+  fillCapped(quiet, weight, budget, MAX_QUIET_MS, ms);
 
   // --- Opening: if the first slow day comes too late, the opening days run faster
   // and the time saved goes to the quiet days after it.
@@ -90,10 +125,8 @@ export function buildSchedule(run: RunData, headlines: Headline[]): Step[] {
   const after = quiet.filter((d) => d > firstSlow);
   const prefix = before.reduce((a, d) => a + (ms.get(d) ?? 0), 0);
   if (prefix > OPENING_TARGET_MS && after.length) {
-    const rest = budget - prefix;
     for (const d of before) ms.set(d, ((ms.get(d) ?? 0) * OPENING_TARGET_MS) / prefix);
-    const scale = rest > 0 ? (budget - OPENING_TARGET_MS) / rest : 1;
-    for (const d of after) ms.set(d, (ms.get(d) ?? 0) * scale);
+    fillCapped(after, weight, budget - OPENING_TARGET_MS, MAX_QUIET_MS, ms);
   }
 
   // --- Group quiet days into steps of at least MIN_STEP_MS. Day 0 and every slow
@@ -104,7 +137,7 @@ export function buildSchedule(run: RunData, headlines: Headline[]): Step[] {
     const prev = groups[groups.length - 1];
     // A short group joins the quiet step just before it (contiguous, since slow days
     // are steps of their own); day 0 stays alone.
-    if (acc < MIN_STEP_MS && prev && !prev.slow && prev.dayIndex !== 0) {
+    if (acc < MIN_STEP_MS && prev && !prev.slow && prev.dayIndex !== 0 && prev.ms + acc <= MAX_QUIET_MS) {
       prev.dayIndex = d;
       prev.ms += acc;
     } else {
@@ -126,7 +159,7 @@ export function buildSchedule(run: RunData, headlines: Headline[]): Step[] {
   for (const g of groups) if (!g.slow) g.ms = Math.max(g.ms, MIN_STEP_MS);
   for (let pass = 0; pass < 8; pass++) {
     const total = groups.reduce((a, g) => a + g.ms, 0);
-    const excess = total - FALL_BUDGET_MS;
+    const excess = total - fallBudget;
     if (excess <= 0.5) break;
     const flexible = groups.filter((g) => !g.slow && g.dayIndex > firstSlow && g.ms > MIN_STEP_MS);
     const room = flexible.reduce((a, g) => a + (g.ms - MIN_STEP_MS), 0);
@@ -137,7 +170,7 @@ export function buildSchedule(run: RunData, headlines: Headline[]): Step[] {
 
   const steps: Step[] = groups.map((g) => ({
     dayIndex: g.dayIndex,
-    holdMs: g.slow ? SLOW_MS : Math.max(MIN_STEP_MS, Math.round(g.ms)),
+    holdMs: g.slow ? SLOW_MS : Math.min(MAX_QUIET_MS, Math.max(MIN_STEP_MS, Math.round(g.ms))),
     phase: 'fall',
     slow: g.slow,
   }));

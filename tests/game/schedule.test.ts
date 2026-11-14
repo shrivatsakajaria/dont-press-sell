@@ -5,7 +5,10 @@ import type { Headline, RunData } from '../../src/engine/types';
 import {
   FALL_BUDGET_MS,
   FORWARD_BUDGET_MS,
+  LONG_FALL_BUDGET_MS,
+  MAX_QUIET_MS,
   SLOW_MS,
+  fallBudgetFor,
   buildSchedule,
   type Step,
 } from '../../src/game/schedule';
@@ -18,6 +21,8 @@ const runs: RunData[] = readdirSync(DIR)
 
 const sum = (steps: Step[]) => steps.reduce((a, s) => a + s.holdMs, 0);
 const LONG = new Set(['c1929', 'c2000']);
+/** Falls too short to fill the budget under the 700 ms cap on ordinary steps (R16). */
+const SHORT = new Set(['c2020', 's2025']);
 
 /** The ten largest absolute daily moves among the fall days (days 1 .. fallEndIndex - 1). */
 function topMoves(run: RunData, count: number): number[] {
@@ -39,7 +44,9 @@ describe('buildSchedule on every real run (no headlines)', () => {
 
   it('keeps the budgets as named constants', () => {
     expect(SLOW_MS).toBe(800);
+    expect(MAX_QUIET_MS).toBe(700);
     expect(FALL_BUDGET_MS).toBeGreaterThan(0);
+    expect(LONG_FALL_BUDGET_MS).toBe(50_000);
     expect(FORWARD_BUDGET_MS).toBeGreaterThanOrEqual(7000);
     expect(FORWARD_BUDGET_MS).toBeLessThanOrEqual(8000);
   });
@@ -58,6 +65,14 @@ describe('buildSchedule on every real run (no headlines)', () => {
 
       it('never holds a step under 125 ms (at most eight changes a second)', () => {
         for (const s of steps) expect(s.holdMs).toBeGreaterThanOrEqual(125);
+      });
+
+      it('uses the long-fall budget for c1929 and c2000 only (R17)', () => {
+        expect(fallBudgetFor(run)).toBe(LONG.has(run.id) ? LONG_FALL_BUDGET_MS : FALL_BUDGET_MS);
+      });
+
+      it('an ordinary fall step never holds longer than 700 ms, so slow days feel slower (R16)', () => {
+        for (const s of steps) if (s.phase === 'fall' && !s.slow) expect(s.holdMs).toBeLessThanOrEqual(MAX_QUIET_MS);
       });
 
       it('marks the phase by the fall end', () => {
@@ -89,12 +104,8 @@ describe('buildSchedule on every real run (no headlines)', () => {
 
       it('the whole run fits the time budget', () => {
         const total = sum(steps);
-        expect(total).toBeGreaterThanOrEqual(40_000);
         expect(total).toBeLessThanOrEqual(60_000);
-        if (!LONG.has(run.id)) {
-          expect(total).toBeGreaterThanOrEqual(43_000);
-          expect(total).toBeLessThanOrEqual(48_000);
-        }
+        expect(total).toBeGreaterThanOrEqual(SHORT.has(run.id) ? 25_000 : 40_000);
       });
     });
   }

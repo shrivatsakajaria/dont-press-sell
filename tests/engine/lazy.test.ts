@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { simulate } from '../../src/engine/simulate';
+import { leadAt, simulate } from '../../src/engine/simulate';
 import type { RunData } from '../../src/engine/types';
 
 // Spec section 13: three lazy strategies across the whole pool.
@@ -16,19 +16,20 @@ describe('lazy strategies over all twelve real runs', () => {
     expect(runs.length).toBe(12);
   });
 
-  // KNOWN BUG, reported to the lead (not this lane's file): simulate() computes the
-  // holder as start * last / first but the player as (start / first) * last, so a
-  // player who never sells gets a lead of +/-1.8e-12 on c1987 and s2010, and
-  // `lead > 0` (streak, record, verdict) counts doing nothing as a win on c1987.
-  // When simulate is fixed this marker fails: change it to a plain `it`.
-  it.fails('never selling scores exactly zero (=== 0) on every run', () => {
-    for (const run of runs) expect(simulate(run.closes, []).lead).toBe(0);
+  // R18: the holder and the player are computed in the same order of operations,
+  // so doing nothing is exactly zero (not +/-1.8e-12, which `lead > 0` counted as a win).
+  it('never selling scores exactly zero (=== 0) on every run, and leadAt is 0 every day', () => {
+    for (const run of runs) {
+      expect(simulate(run.closes, []).lead).toBe(0);
+      for (let d = 0; d < run.closes.length; d += 7) expect(leadAt(run.closes, [], d)).toBe(0);
+      expect(leadAt(run.closes, [], run.closes.length - 1)).toBe(0);
+    }
   });
 
   for (const run of runs) {
     describe(run.id, () => {
       it('never selling scores zero', () => {
-        expect(Math.abs(simulate(run.closes, []).lead)).toBeLessThan(1e-6);
+        expect(simulate(run.closes, []).lead).toBe(0);
       });
       it('selling on day 1 and never buying back loses', () => {
         expect(simulate(run.closes, [{ dayIndex: 0, side: 'sell' }]).lead).toBeLessThan(0);
