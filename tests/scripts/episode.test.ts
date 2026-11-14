@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { findEpisode, monthsBetween, monthsInWords } from '../../scripts/lib/episode';
+import { backIn, findEpisode, monthsBetween, monthsInWords } from '../../scripts/lib/episode';
 
 describe('monthsBetween', () => {
   test('rounds calendar days to the nearest whole month', () => {
@@ -95,5 +95,16 @@ describe('findEpisode', () => {
     const closes = [100, 90, 80, 95];
     const dates = days(closes.length);
     expect(() => findEpisode(dates, closes, dates[0])).toThrow(/regain/);
+  });
+});
+
+describe('backIn (ruling R22)', () => {
+  test('weeks under two months, months from two months, low to recovery', () => {
+    expect(backIn('2014-10-15', '2014-10-31')).toBe('two weeks'); // 16 days
+    expect(backIn('2024-08-05', '2024-09-19')).toBe('six weeks'); // 45 days
+    expect(backIn('2000-01-03', '2000-01-10')).toBe('a week');
+    expect(backIn('2000-01-01', '2000-03-01')).toBe('nine weeks'); // 60 days = 8.6 weeks, under 2 months
+    expect(backIn('2000-01-01', '2000-03-02')).toBe('two months'); // 61 days
+    expect(backIn('2018-12-24', '2019-04-23')).toBe('four months');
   });
 });

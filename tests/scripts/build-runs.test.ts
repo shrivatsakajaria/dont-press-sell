@@ -102,6 +102,17 @@ describe('buildRun', () => {
     ).toThrow(/crash/);
   });
 
+  test('scare may be shallow (7% to under 10%), with day 1 at the low (ruling R22)', () => {
+    const closes = [100, 99, 92, 95, 97, 99, 100.5];
+    const dates = weeks(closes.length);
+    const { run, info } = buildRun(dates, closes, {
+      id: 's', kind: 'scare', pickName: 's', highDate: dates[0], reveal: 'That was a wobble.',
+    });
+    expect(info.fallPct).toBeCloseTo(-8, 10);
+    expect(run.lowIndex).toBe(0);
+    expect(run.revealLine).toBe('That was a wobble. It was back in four weeks.');
+  });
+
   test('refuses a scare that takes over a year from day 1 to recover', () => {
     const closes = [100, 92, 85, ...Array(60).fill(95), 101];
     const dates = weeks(closes.length);

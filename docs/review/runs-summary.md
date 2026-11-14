@@ -4,12 +4,12 @@ Daily closing values of the US stock market index from Yahoo Finance (symbol ^GS
 
 How each run is cut (spec 7.3):
 
-- **High:** the level the market has to get back above. For a crash, the all-time record close before the fall. For a scare, its own prior peak: the highest close of the year before it (lead ruling R12). The 2010 and 2011 peaks were below the October 2007 record.
+- **High:** the level the market has to get back above. For a crash, the all-time record close before the fall. For a scare, its own prior peak: the highest close of the year before it (lead ruling R12). A scare falls at least 7% and under 20%; the 2014 and 2024 wobbles turned straight back up from day 1 (ruling R22).
 - **Day 1:** the first close at least 7% below that high.
 - **Low:** the lowest close of the run, and how far it is below the high.
 - **Fall ends:** for a crash, the first close 20% above the low; for a scare, the first close two-thirds of the way back from the low to the high. After this the game fast-forwards.
 - **Recovery:** the first close above the high. This is the last day of the run.
-- **The fall took** high to low; **the recovery took** low to recovery. Scare reveal lines count months the same way (low to recovery, to the nearest month).
+- **The fall took** high to low; **the recovery took** low to recovery. Scare reveal lines count the same way (low to recovery): whole weeks if under two months, otherwise whole months.
 
 | Run | High | Day 1 | Low | Fall ends | Recovery | Trading days | Fall took | Recovery took |
 |---|---|---|---|---|---|--:|---|---|
@@ -20,10 +20,10 @@ How each run is cut (spec 7.3):
 | c2020 | 2020-02-19 (3,386.15) | 2020-02-25 | 2020-03-23 (2,237.40, −33.92%) | 2020-04-08 | 2020-08-18 | 123 | 5 weeks | 5 months |
 | c2022 | 2022-01-03 (4,796.56) | 2022-01-21 | 2022-10-12 (3,577.03, −25.43%) | 2023-06-08 | 2024-01-19 | 501 | 9 months | 15 months |
 | s1998 | 1998-07-17 (1,186.75) | 1998-08-04 | 1998-08-31 (957.28, −19.34%) | 1998-11-02 | 1998-11-23 | 79 | 6 weeks | 3 months |
-| s2010 | 2010-04-23 (1,217.28) | 2010-05-06 | 2010-07-02 (1,022.58, −15.99%) | 2010-10-05 | 2010-11-04 | 128 | 2 months | 4 months |
 | s2011 | 2011-04-29 (1,363.61) | 2011-06-15 | 2011-10-03 (1,099.23, −19.39%) | 2011-10-27 | 2012-02-24 | 176 | 5 months | 5 months |
-| s2015 | 2015-05-21 (2,130.82) | 2015-08-21 | 2016-02-11 (1,829.08, −14.16%) | 2016-03-17 | 2016-07-11 | 223 | 9 months | 5 months |
+| s2014 | 2014-09-18 (2,011.36) | 2014-10-15 | 2014-10-15 (1,862.49, −7.40%) | 2014-10-24 | 2014-10-31 | 13 | 4 weeks | 2 weeks |
 | s2018 | 2018-09-20 (2,930.75) | 2018-10-24 | 2018-12-24 (2,351.10, −19.78%) | 2019-02-05 | 2019-04-23 | 123 | 3 months | 4 months |
+| s2024 | 2024-07-16 (5,667.20) | 2024-08-05 | 2024-08-05 (5,186.33, −8.49%) | 2024-08-15 | 2024-09-19 | 33 | 3 weeks | 6 weeks |
 | s2025 | 2025-02-19 (6,144.15) | 2025-03-10 | 2025-04-08 (4,982.77, −18.90%) | 2025-05-12 | 2025-06-27 | 77 | 2 months | 3 months |
 
 ## In plain words
@@ -42,12 +42,12 @@ How each run is cut (spec 7.3):
 
 **Summer 1998 Russia scare** (scare, `s1998`). The market peaked at 1,186.75 on 17 July 1998. The run starts on 4 August 1998. It fell 19.34% to its lowest close on 31 August 1998, 6 weeks after the peak. The fall phase ends on 2 November 1998. It was back above the old high on 23 November 1998, 3 months after the low. 79 trading days in all. Reveal line: "That was the summer 1998 Russia scare. It was back in three months."
 
-**2010 flash crash scare** (scare, `s2010`). The market peaked at 1,217.28 on 23 April 2010. The run starts on 6 May 2010. It fell 15.99% to its lowest close on 2 July 2010, 2 months after the peak. The fall phase ends on 5 October 2010. It was back above the old high on 4 November 2010, 4 months after the low. 128 trading days in all. Reveal line: "That was the 2010 flash crash scare. It was back in four months."
-
 **2011 debt downgrade scare** (scare, `s2011`). The market peaked at 1,363.61 on 29 April 2011. The run starts on 15 June 2011. It fell 19.39% to its lowest close on 3 October 2011, 5 months after the peak. The fall phase ends on 27 October 2011. It was back above the old high on 24 February 2012, 5 months after the low. 176 trading days in all. Reveal line: "That was the 2011 debt downgrade scare. It was back in five months."
 
-**2015 China scare** (scare, `s2015`). The market peaked at 2,130.82 on 21 May 2015. The run starts on 21 August 2015. It fell 14.16% to its lowest close on 11 February 2016, 9 months after the peak. The fall phase ends on 17 March 2016. It was back above the old high on 11 July 2016, 5 months after the low. 223 trading days in all. Reveal line: "That was the 2015 China scare. It was back in five months."
+**Autumn 2014 wobble** (scare, `s2014`). The market peaked at 2,011.36 on 18 September 2014. The run starts on 15 October 2014. It fell 7.40% to its lowest close on 15 October 2014, 4 weeks after the peak. The fall phase ends on 24 October 2014. It was back above the old high on 31 October 2014, 2 weeks after the low. 13 trading days in all. Reveal line: "That was the autumn 2014 wobble. It was back in two weeks."
 
 **Autumn 2018 wobble** (scare, `s2018`). The market peaked at 2,930.75 on 20 September 2018. The run starts on 24 October 2018. It fell 19.78% to its lowest close on 24 December 2018, 3 months after the peak. The fall phase ends on 5 February 2019. It was back above the old high on 23 April 2019, 4 months after the low. 123 trading days in all. Reveal line: "That was the autumn 2018 wobble. It was back in four months."
+
+**Summer 2024 wobble** (scare, `s2024`). The market peaked at 5,667.20 on 16 July 2024. The run starts on 5 August 2024. It fell 8.49% to its lowest close on 5 August 2024, 3 weeks after the peak. The fall phase ends on 15 August 2024. It was back above the old high on 19 September 2024, 6 weeks after the low. 33 trading days in all. Reveal line: "That was the summer 2024 wobble. It was back in six weeks."
 
 **Spring 2025 tariff scare** (scare, `s2025`). The market peaked at 6,144.15 on 19 February 2025. The run starts on 10 March 2025. It fell 18.90% to its lowest close on 8 April 2025, 2 months after the peak. The fall phase ends on 12 May 2025. It was back above the old high on 27 June 2025, 3 months after the low. 77 trading days in all. Reveal line: "That was the spring 2025 tariff scare. It was back in three months."

@@ -10,10 +10,10 @@ export const RUNS: RunMeta[] = [
   { id: 'c2020', kind: 'crash', pickName: '2020: Covid', revealLine: 'That was 2020.' },
   { id: 'c2022', kind: 'crash', pickName: '2022: inflation and interest rates', revealLine: 'That was 2022.' },
   { id: 's1998', kind: 'scare', pickName: 'Summer 1998 Russia scare', revealLine: 'That was the summer 1998 Russia scare. It was back in three months.' },
-  { id: 's2010', kind: 'scare', pickName: '2010 flash crash scare', revealLine: 'That was the 2010 flash crash scare. It was back in four months.' },
   { id: 's2011', kind: 'scare', pickName: '2011 debt downgrade scare', revealLine: 'That was the 2011 debt downgrade scare. It was back in five months.' },
-  { id: 's2015', kind: 'scare', pickName: '2015 China scare', revealLine: 'That was the 2015 China scare. It was back in five months.' },
+  { id: 's2014', kind: 'scare', pickName: 'Autumn 2014 wobble', revealLine: 'That was the autumn 2014 wobble. It was back in two weeks.' },
   { id: 's2018', kind: 'scare', pickName: 'Autumn 2018 wobble', revealLine: 'That was the autumn 2018 wobble. It was back in four months.' },
+  { id: 's2024', kind: 'scare', pickName: 'Summer 2024 wobble', revealLine: 'That was the summer 2024 wobble. It was back in six weeks.' },
   { id: 's2025', kind: 'scare', pickName: 'Spring 2025 tariff scare', revealLine: 'That was the spring 2025 tariff scare. It was back in three months.' },
 ];
 

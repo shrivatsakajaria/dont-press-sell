@@ -144,6 +144,8 @@ export function checkHeadlines(
       bad('anon line contains a year or decade');
     }
     if (/\bin \d+ years\b/i.test(r.anon)) bad('anon line contains an "in N years" figure');
+    if (/S\s*&\s*P/i.test(r.real)) bad('real line contains "S&P" (say "the US stock market" or name the ratings firm another way)');
+    if (/S\s*&\s*P/i.test(r.anon)) bad('anon line contains "S&P"');
     const anonWords = new Set(words(r.anon).map(stem));
     for (const name of new Set(namesIn(r.real))) {
       if (anonWords.has(stem(name))) {
