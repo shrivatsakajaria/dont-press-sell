@@ -7,11 +7,12 @@ import { loadHeadlines } from './content/headlines';
 import { RUNS, RUN_IDS, loadRun, runMeta } from './content/runs';
 import { simulateBorrowed } from './engine/borrowed';
 import { nearMisses } from './engine/nearmiss';
+import { simulate } from './engine/simulate';
 import type { Headline, RunData, RunResult } from './engine/types';
 import { verdictCopy, verdictFor } from './engine/verdict';
 import { setHapticsEnabled } from './fx/haptics';
 import {
-  bankPending, borrowedOn, borrowedUnlocked, currentStreak, doubleUp, setBorrowed, settle,
+  bankPending, borrowedOn, borrowedUnlocked, challengeFits, currentStreak, doubleUp, setBorrowed, settle,
 } from './game/flow';
 import { createNarrator, tradeNews, type NarratorRun } from './game/narrator';
 import { dailyPick, pickMystery } from './game/picker';
@@ -19,6 +20,7 @@ import { getPot } from './game/pot';
 import { hashString, mulberry32 } from './game/rng';
 import { buildSchedule } from './game/schedule';
 import { daysInRowText, getDailyResult, getLastRun, getRecord, type LastRun, type Mode } from './store/record';
+import { decodeChallenge, type Challenge } from './share/link';
 import { cell, save } from './store/store';
 import { mountEndScreen, type EndModel } from './ui/endscreen';
 import { mountCollection, mountPickCrash } from './ui/menus';
@@ -42,6 +44,8 @@ interface Game {
   previous?: LastRun | null;
   /** Borrowed money (mystery runs only, spec 6.13). */
   borrowed?: boolean;
+  /** A challenge from a link: the challenger's final and trades. */
+  challenge?: Challenge;
 }
 
 const START = 10000;
@@ -117,7 +121,7 @@ async function play(game: Game, opts: { double?: boolean } = {}) {
     pot: potNow(),
     narrate: (d, prevDay, balance, trades) => narrator.step(d, prevDay, balance, trades),
     soldLastTime: prev?.trades.find((t) => t.side === 'sell')?.dayIndex ?? null,
-    scoreToBeat: prev ? prev.final : null,
+    scoreToBeat: prev ? prev.final : game.challenge ? game.challenge.final : null,
     other: prev ? prev.balances : null,
     onEnd: (r) => finish(game, run, headlines, r),
   });
@@ -141,7 +145,11 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
     verdict: verdictCopy(verdictId, r, run),
     nearMisses: nearMisses(r, run),
     tradeNews: tradeNews(headlines, r.trades),
-    other: game.previous ? { kind: 'previous', balances: game.previous.balances, final: game.previous.final } : undefined,
+    other: game.previous
+      ? { kind: 'previous', balances: game.previous.balances, final: game.previous.final }
+      : game.challenge
+        ? { kind: 'challenger', balances: simulate(run.closes, game.challenge.trades, game.start).balances, final: game.challenge.final }
+        : undefined,
     double: s.double ?? undefined,
     pot: s.pot,
     flags: { showCountdown: game.mode === 'mystery', blind: !game.real },
@@ -274,7 +282,29 @@ function collection() {
   });
 }
 
+/**
+ * A challenge link (#c=<code>) opens that exact run, blind, with the score to beat (spec 6.7).
+ * A code that does not decode, or whose trades fall outside the run, starts a fresh mystery with no error.
+ */
+async function challenge(code: string) {
+  history.replaceState(null, '', location.pathname + location.search);
+  const c = decodeChallenge(code);
+  if (c) {
+    try {
+      const run = await loadRun(c.runId);
+      if (challengeFits(c, run.closes.length)) {
+        return play({ mode: 'challenge', runId: c.runId, label: MYSTERY_LABEL, start: START, real: false, challenge: c });
+      }
+    } catch {
+      /* fall through to a mystery */
+    }
+  }
+  return newMystery();
+}
+
 function boot() {
+  const hash = /^#c=(.*)$/.exec(location.hash);
+  if (hash) return challenge(hash[1]);
   // ?run=<id> opens that run as a mystery (testing and screenshots).
   const asked = new URLSearchParams(location.search).get('run') ?? '';
   if (RUN_IDS.includes(asked)) return play(mysteryGame(asked, START, borrowedOn()));

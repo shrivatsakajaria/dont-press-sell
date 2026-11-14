@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { RunResult } from '../../src/engine/types';
-import { bankPending, borrowedUnlocked, currentStreak, doubleUp, settle } from '../../src/game/flow';
+import { bankPending, borrowedUnlocked, challengeFits, currentStreak, doubleUp, settle } from '../../src/game/flow';
 import { getPot, resetPot } from '../../src/game/pot';
 import { getRecord } from '../../src/store/record';
 import { resetCells } from '../../src/store/store';
@@ -132,3 +132,14 @@ for (const [name, make] of [['with storage', memoryStorage], ['with storage thro
     });
   });
 }
+
+describe('challengeFits', () => {
+  const c = (days: number[]) => ({ runId: 'c2007', final: 7150, trades: days.map((d, i) => ({ dayIndex: d, side: (i % 2 ? 'buy' : 'sell') as 'buy' | 'sell' })) });
+  test('trades inside the run fit; a trade on or beyond the last day does not', () => {
+    expect(challengeFits(c([3, 40]), 100)).toBe(true);
+    expect(challengeFits(c([]), 100)).toBe(true);
+    expect(challengeFits(c([3, 99]), 100)).toBe(true);
+    expect(challengeFits(c([3, 100]), 100)).toBe(false);
+    expect(challengeFits(c([3, 5000]), 100)).toBe(false);
+  });
+});

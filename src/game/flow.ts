@@ -117,3 +117,8 @@ export function doubleUp(): StreakState {
   streakCell.set(next);
   return { ...next };
 }
+
+/** A decoded challenge can be played only if every trade falls inside the run (spec 6.7). */
+export function challengeFits(c: { trades: { dayIndex: number }[] }, runLength: number): boolean {
+  return c.trades.every((t) => Number.isInteger(t.dayIndex) && t.dayIndex >= 0 && t.dayIndex < runLength);
+}
