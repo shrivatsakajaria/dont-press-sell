@@ -1,9 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { buildAll, ROOT } from '../../scripts/build-runs';
+import { buildAll, readRaw, ROOT, type RunFile } from '../../scripts/build-runs';
 import { loadRun, RUNS, RUN_IDS } from '../../src/content/runs';
-import type { RunData } from '../../src/engine/types';
 
 const built = buildAll();
 
@@ -11,7 +10,7 @@ describe('committed run data matches a fresh build from the raw file', () => {
   test.each(built.map((b) => [b.run.id, b.run] as const))('%s', (id, fresh) => {
     const onDisk = JSON.parse(
       readFileSync(resolve(ROOT, `data/runs/${id}.prices.json`), 'utf8'),
-    ) as RunData;
+    ) as RunFile;
     expect(onDisk).toEqual(fresh);
   });
 
@@ -20,11 +19,27 @@ describe('committed run data matches a fresh build from the raw file', () => {
     await expect(loadRun('nope')).rejects.toThrow(/unknown run/);
   });
 
+  test('data/runs holds exactly the twelve price files', () => {
+    const files = readdirSync(resolve(ROOT, 'data/runs')).filter((f) => f.endsWith('.prices.json'));
+    expect(files.sort()).toEqual(built.map((b) => `${b.run.id}.prices.json`).sort());
+  });
+
   test('manifest lists the same twelve runs in table order', () => {
     expect(RUN_IDS).toEqual(built.map((b) => b.run.id));
     expect(RUNS).toEqual(
       built.map(({ run: { id, kind, pickName, revealLine } }) => ({ id, kind, pickName, revealLine })),
     );
+  });
+});
+
+describe('ruling R13: high and preCloses', () => {
+  const raw = readRaw();
+  test.each(built.map((b) => [b.run.id, b] as const))('%s', (_id, { run, info }) => {
+    expect(run.high).toBe(info.high);
+    expect(run.preCloses).toHaveLength(30);
+    const day1 = raw.dates.indexOf(run.dates[0]);
+    expect(run.preCloses[29]).toBe(raw.closes[day1 - 1]);
+    expect(run.preCloses).toEqual(raw.closes.slice(day1 - 30, day1));
   });
 });
 

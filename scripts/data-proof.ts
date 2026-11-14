@@ -269,7 +269,7 @@ function summaryMd(built: { run: RunData; info: RunInfo }[]): string {
     '',
     'How each run is cut (spec 7.3):',
     '',
-    '- **High:** the record close before the fall: the level the market has to get back above.',
+    '- **High:** the level the market has to get back above. For a crash, the all-time record close before the fall. For a scare, its own prior peak: the highest close of the year before it (lead ruling R12). The 2010 and 2011 peaks were below the October 2007 record.',
     '- **Day 1:** the first close at least 7% below that high.',
     '- **Low:** the lowest close of the run, and how far it is below the high.',
     '- **Fall ends:** for a crash, the first close 20% above the low; for a scare, the first close two-thirds of the way back from the low to the high. After this the game fast-forwards.',
@@ -299,12 +299,6 @@ function summaryMd(built: { run: RunData; info: RunInfo }[]): string {
       '',
     );
   }
-  lines.push(
-    '## Why 1989 and 1990 instead of 2010 and 2011',
-    '',
-    'The 2010 and 2011 falls (about 16% and 19%) started from highs of 1,217.28 (23 April 2010) and 1,363.61 (29 April 2011). Both were below the record close of 1,565.15 set on 9 October 2007, which was not passed until 28 March 2013. Under the rule that every run starts from the record close before it, they are part of the 2008 run, not separate scares. The autumn 1989 wobble and the 1990 Gulf War scare both start from record closes, fall 10% to 19.9%, and recover within a year.',
-    '',
-  );
   return lines.join('\n');
 }
 

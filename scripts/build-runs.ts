@@ -1,8 +1,8 @@
 // Builds the twelve playable runs from data/raw/gspc-daily.csv.
-// Writes data/runs/<id>.prices.json (one RunData object each) and regenerates
+// Writes data/runs/<id>.prices.json (a RunData plus high and preCloses, ruling R13) and regenerates
 // src/content/runs.ts (the manifest: RUNS, RUN_IDS, runMeta, loadRun).
 // Run: npm run data:build
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { RunData, RunKind, RunMeta } from '../src/engine/types';
@@ -13,7 +13,10 @@ export interface RunEntry {
   kind: RunKind;
   /** Plain name shown in "Pick a crash". */
   pickName: string;
-  /** Date of the record close before the episode: the high the market must regain. */
+  /**
+   * The high the market must regain. Crash: the all-time record close before the fall.
+   * Scare (ruling R12): its own prior peak, the highest close of the year before it.
+   */
   highDate: string;
   /**
    * Crash: the whole reveal line. Scare: its first sentence; the build adds
@@ -23,9 +26,9 @@ export interface RunEntry {
 }
 
 /**
- * The launch pool (spec 7.2, lead ruling R1). Each high is the all-time record close
- * before the episode. 2010 and 2011 were candidates but fall from highs below the
- * October 2007 record, so they are not records; 1989 and 1990 replace them.
+ * The launch pool (spec 7.2, lead rulings R1 and R12). A crash's high is the all-time
+ * record close before it; a scare's high is its own prior peak (2010 and 2011 fall from
+ * peaks below the October 2007 record).
  */
 export const RUN_TABLE: RunEntry[] = [
   { id: 'c1929', kind: 'crash', pickName: '1929: the Wall Street Crash', highDate: '1929-09-16', reveal: 'That was 1929.' },
@@ -34,13 +37,23 @@ export const RUN_TABLE: RunEntry[] = [
   { id: 'c2007', kind: 'crash', pickName: '2008: the financial crisis', highDate: '2007-10-09', reveal: 'That was 2008.' },
   { id: 'c2020', kind: 'crash', pickName: '2020: Covid', highDate: '2020-02-19', reveal: 'That was 2020.' },
   { id: 'c2022', kind: 'crash', pickName: '2022: inflation and interest rates', highDate: '2022-01-03', reveal: 'That was 2022.' },
-  { id: 's1989', kind: 'scare', pickName: 'Autumn 1989 wobble', highDate: '1989-10-09', reveal: 'That was the autumn 1989 wobble.' },
-  { id: 's1990', kind: 'scare', pickName: '1990 Gulf War scare', highDate: '1990-07-16', reveal: 'That was the 1990 Gulf War scare.' },
   { id: 's1998', kind: 'scare', pickName: 'Summer 1998 Russia scare', highDate: '1998-07-17', reveal: 'That was the summer 1998 Russia scare.' },
+  { id: 's2010', kind: 'scare', pickName: '2010 flash crash scare', highDate: '2010-04-23', reveal: 'That was the 2010 flash crash scare.' },
+  { id: 's2011', kind: 'scare', pickName: '2011 debt downgrade scare', highDate: '2011-04-29', reveal: 'That was the 2011 debt downgrade scare.' },
   { id: 's2015', kind: 'scare', pickName: '2015 China scare', highDate: '2015-05-21', reveal: 'That was the 2015 China scare.' },
   { id: 's2018', kind: 'scare', pickName: 'Autumn 2018 wobble', highDate: '2018-09-20', reveal: 'That was the autumn 2018 wobble.' },
   { id: 's2025', kind: 'scare', pickName: 'Spring 2025 tariff scare', highDate: '2025-02-19', reveal: 'That was the spring 2025 tariff scare.' },
 ];
+
+/**
+ * What a prices.json holds: a RunData plus (lead ruling R13) the reference high's close
+ * and the closes of the 30 trading days before day 1, oldest first. The lead adds
+ * `high?` and `preCloses?` to RunData in types.ts at merge.
+ */
+export type RunFile = RunData & { high: number; preCloses: number[] };
+
+/** Trading days of history before day 1 kept in each file. */
+export const PRE_DAYS = 30;
 
 export interface RunInfo {
   highDate: string;
@@ -64,20 +77,32 @@ export function buildRun(
   dates: string[],
   closes: number[],
   entry: RunEntry,
-): { run: RunData; info: RunInfo } {
+): { run: RunFile; info: RunInfo } {
   const highIndex = dates.indexOf(entry.highDate);
   if (highIndex < 0) throw new Error(`${entry.id}: high date ${entry.highDate} not in data`);
   const high = closes[highIndex];
-  for (let i = 0; i < highIndex; i++) {
-    if (closes[i] >= high) {
-      throw new Error(`${entry.id}: ${entry.highDate} is not a record close (${dates[i]} was ${closes[i]})`);
+  if (entry.kind === 'crash') {
+    for (let i = 0; i < highIndex; i++) {
+      if (closes[i] >= high) {
+        throw new Error(`${entry.id}: ${entry.highDate} is not a record close (${dates[i]} was ${closes[i]})`);
+      }
+    }
+  } else {
+    // Ruling R12: a scare's high is the highest close in the year (365 calendar days) before it.
+    const yearBefore = new Date(Date.parse(`${entry.highDate}T00:00:00Z`) - 365 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    for (let i = 0; i < highIndex; i++) {
+      if (dates[i] >= yearBefore && closes[i] >= high) {
+        throw new Error(`${entry.id}: ${entry.highDate} is not the highest close of the year before it (${dates[i]} was ${closes[i]})`);
+      }
     }
   }
 
   const ep = findEpisode(dates, closes, entry.highDate, entry.kind);
   for (let i = highIndex + 1; i < ep.startIndex; i++) {
     if (closes[i] >= high) {
-      throw new Error(`${entry.id}: a higher record (${dates[i]}) comes before day 1`);
+      throw new Error(`${entry.id}: a higher close (${dates[i]}) comes between the high and day 1`);
     }
   }
 
@@ -103,7 +128,7 @@ export function buildRun(
   }
 
   const s = ep.startIndex;
-  const run: RunData = {
+  const run: RunFile = {
     id: entry.id,
     kind: entry.kind,
     pickName: entry.pickName,
@@ -112,6 +137,8 @@ export function buildRun(
     closes: closes.slice(s, ep.endIndex + 1),
     lowIndex: ep.lowIndex - s,
     fallEndIndex: ep.fallEndIndex - s,
+    high,
+    preCloses: closes.slice(Math.max(0, s - PRE_DAYS), s),
   };
   const info: RunInfo = {
     highDate: entry.highDate,
@@ -149,7 +176,7 @@ export function readRaw(): { dates: string[]; closes: number[] } {
 }
 
 /** Builds all twelve runs. */
-export function buildAll(): { run: RunData; info: RunInfo }[] {
+export function buildAll(): { run: RunFile; info: RunInfo }[] {
   const { dates, closes } = readRaw();
   return RUN_TABLE.map((entry) => buildRun(dates, closes, entry));
 }
@@ -189,6 +216,14 @@ export async function loadRun(id: string): Promise<RunData> {
 function main(): void {
   const built = buildAll();
   mkdirSync(resolve(ROOT, 'data/runs'), { recursive: true });
+  // Remove price files of runs no longer in the table, so loadRun's glob cannot see them.
+  const keep = new Set(built.map((b) => `${b.run.id}.prices.json`));
+  for (const f of readdirSync(resolve(ROOT, 'data/runs'))) {
+    if (f.endsWith('.prices.json') && !keep.has(f)) {
+      rmSync(resolve(ROOT, 'data/runs', f));
+      console.log(`removed stale data/runs/${f}`);
+    }
+  }
   for (const { run } of built) {
     writeFileSync(resolve(ROOT, `data/runs/${run.id}.prices.json`), JSON.stringify(run) + '\n');
   }

@@ -27,9 +27,12 @@ describe('buildRun', () => {
       closes: [92.9, 80, 60, 72, 90, 100.5],
       lowIndex: 2,
       fallEndIndex: 3,
+      high: 100,
+      preCloses: [90, 100, 96], // all the days before day 1 here; 30 when there are 30
     });
     expect(Object.keys(run)).toEqual([
       'id', 'kind', 'pickName', 'revealLine', 'dates', 'closes', 'lowIndex', 'fallEndIndex',
+      'high', 'preCloses',
     ]);
     expect(info.fallPct).toBeCloseTo(-40, 10);
     expect(info.highDate).toBe(dates[1]);
@@ -57,6 +60,34 @@ describe('buildRun', () => {
     expect(() =>
       buildRun(dates, closes, { id: 'x', kind: 'crash', pickName: 'x', highDate: dates[1], reveal: 'x' }),
     ).toThrow(/record/);
+  });
+
+  test('scare: high need not be a record, only the highest close of the year before it (ruling R12)', () => {
+    // An old record of 120 more than a year (60 weeks) earlier, then a local peak of 100.
+    const closes = [120, ...Array(60).fill(90), 100, 92, 85, ...Array(8).fill(95), 100.5];
+    const dates = weeks(closes.length);
+    const entry = { id: 's', kind: 'scare' as const, pickName: 's', highDate: dates[61], reveal: 'x.' };
+    const { run } = buildRun(dates, closes, entry);
+    expect(run.closes).toEqual([92, 85, ...Array(8).fill(95), 100.5]);
+    expect(run.revealLine).toBe('x. It was back in two months.');
+    // The same series refused as a crash: its high is not a record.
+    expect(() => buildRun(dates, closes, { ...entry, kind: 'crash' })).toThrow(/record/);
+  });
+
+  test('scare: refuses a high beaten within the year before it', () => {
+    const closes = [80, ...Array(40).fill(90), 101, 90, 100, 92, 85, 95, 101.5];
+    const dates = weeks(closes.length);
+    expect(() =>
+      buildRun(dates, closes, { id: 's', kind: 'scare', pickName: 's', highDate: dates[43], reveal: 'x.' }),
+    ).toThrow(/year before/);
+  });
+
+  test('refuses a high beaten between the high and day 1', () => {
+    const closes = [90, 100, 101, 92, 85, 95, 102];
+    const dates = weeks(closes.length);
+    expect(() =>
+      buildRun(dates, closes, { id: 's', kind: 'scare', pickName: 's', highDate: dates[1], reveal: 'x.' }),
+    ).toThrow(/between the high and day 1/);
   });
 
   test('refuses a scare that falls 20% or more, and a crash that falls less', () => {
