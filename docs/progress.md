@@ -9,7 +9,7 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - Wave 1: lanes A to G in parallel.
 
 ## Open flags
-- SK: confirm Cloudflare account still signs in (asked at start). Cloudflare Pages hook-up (Task 1 step 5) waits on this; nothing else does.
+- SK confirmed Cloudflare works (balloon site visible). Sent him click-by-click Pages hook-up steps (production branch = the claude/ branch, build `npm run build`, output `dist`); waiting for his pages.dev address. Web Analytics switch-on comes after first deploy.
 
 ## Rulings (lead agent)
 - R1. Run ids are fixed now: crashes `c1929 c1987 c2000 c2007 c2020 c2022`; scares `s1998 s2010 s2011 s2015 s2018` and a sixth, provisionally `s2025` (Feb to Jun 2025 fall). Lane A confirms against the data and may swap the sixth (then updates the manifest). Modules read the pool from `src/content/runs.ts` (`RUNS`, `RUN_IDS`, `runMeta`, `loadRun`), never hard-code it.
