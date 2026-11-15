@@ -1,4 +1,4 @@
-import { dollars } from '../content/copy';
+import { dollars, outOfMarketLine } from '../content/copy';
 import type { BorrowedResult, RunData, RunResult } from './types';
 
 const days = (n: number) => (n === 1 ? '1 day' : `${n} days`);
@@ -11,6 +11,24 @@ function investedAt(result: RunResult, day: number): boolean {
     invested = t.side === 'buy';
   }
   return invested;
+}
+
+const DAY_MS = 24 * 3600 * 1000;
+
+/** Calendar days spent in cash: from each sale's close to the next buy-back's close, or to the run's last close. */
+function calendarDaysOut(result: RunResult, run: RunData): number {
+  const at = (i: number) => Date.parse(run.dates[Math.min(i, run.dates.length - 1)]);
+  let total = 0;
+  let soldAt: number | null = null;
+  for (const t of result.trades) {
+    if (t.side === 'sell' && soldAt === null) soldAt = t.dayIndex;
+    else if (t.side === 'buy' && soldAt !== null) {
+      total += at(t.dayIndex) - at(soldAt);
+      soldAt = null;
+    }
+  }
+  if (soldAt !== null) total += at(run.dates.length - 1) - at(soldAt);
+  return Number.isFinite(total) ? Math.round(total / DAY_MS) : 0;
 }
 
 /** Near-miss lines for the end screen (spec 8.2), each shown only when true, in spec order. */
@@ -61,7 +79,9 @@ export function nearMisses(result: RunResult, run: RunData): string[] {
     out.push('Held through the worst day of the run');
   }
 
-  if (result.daysInCash >= 1) out.push(`${days(result.daysInCash)} in cash`);
+  // Calendar time out of the market, from the dates: each sale to its buy-back, or to the last day (R28).
+  const away = calendarDaysOut(result, run);
+  if (result.daysInCash >= 1 && away >= 1) out.push(outOfMarketLine(away));
 
   const sells = trades.filter((t) => t.side === 'sell').length;
   const buys = trades.filter((t) => t.side === 'buy').length;

@@ -9,6 +9,7 @@ import {
   dollars,
   DOUBLE_OR_NOTHING,
   FOOTER_RESULT,
+  HOLDER_NOTE,
   leadLine,
   MASTHEAD,
   NEW_MYSTERY,
@@ -22,6 +23,7 @@ import {
 import type { RunKind, RunResult, VerdictId } from '../engine/types';
 import type { Sfx } from '../fx/sound';
 import { ladder, RUNG_TITLES } from '../game/streak';
+import { load, save } from '../store/store';
 import { announce } from './a11y';
 import { endChart } from './endchart';
 import { paperFor } from './paper';
@@ -58,6 +60,8 @@ export interface EndModel {
   double?: { lead: number; final: number; wins: number };
   pot: { pot: number; tonight: number };
   flags: { showCountdown: boolean; blind: boolean };
+  /** Print the plain line about someone who did nothing under the table (R28: first result only). */
+  holderNote?: boolean;
   /** Plain lines printed under the score, such as "4 days in a row" on a daily result. */
   extraLines?: string[];
   /** Replaces the verdict headline (bust: "Local investor loses the lot"; eighth rung). */
@@ -124,6 +128,7 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-row-you{font-weight:700}
 .es-key{display:inline-block;width:16px;margin-right:8px;vertical-align:middle;border-top:2.5px solid var(--ink)}
 .es-key-dash{border-top:2px dashed #6b6558}
+.es-note{margin-top:8px;font-family:${SANS};font-weight:500;font-size:13px;line-height:1.35;color:var(--sec)}
 .es-lead{margin-top:16px;font-weight:700;font-size:28px;line-height:1.05;letter-spacing:-0.02em}
 .es-lead.es-behind{color:var(--red)}
 .es-perfect{margin-top:8px;font-size:18px;line-height:1.3}
@@ -163,6 +168,18 @@ function css(p: ReturnType<typeof paperFor>): string {
 @media (max-height: 700px){.es-h1{margin-top:12px;font-size:34px}.es-chart{margin-top:8px}.es-row{padding:6px 0}.es-lead{margin-top:12px}.es-perfect{font-size:16px}}
 @media (prefers-reduced-motion: reduce){.es-name.es-wipe{animation:none}}
 `;
+}
+
+const SEEN_HOLDER_NOTE = 'seenHolderNote';
+
+/**
+ * Whether this result should explain "someone who did nothing": the first result on this phone,
+ * and every result when storage is unavailable. Marks it seen.
+ */
+export function holderNoteDue(): boolean {
+  if (load<boolean>(SEEN_HOLDER_NOTE, false) === true) return false;
+  save(SEEN_HOLDER_NOTE, true); // when this fails, the next result explains again
+  return true;
 }
 
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -319,6 +336,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   row(SOMEONE_WHO_DID_NOTHING, result.holderFinal);
   row(PERFECT_TIMING, result.perfectFinal);
   page.appendChild(table);
+  if (model.holderNote) page.appendChild(h('p', 'es-note', HOLDER_NOTE));
 
   // Hidden until the reveal; it holds the final text so the layout does not jump.
   const lead = h('p', 'es-lead' + (behind ? ' es-behind' : ''), leadText(result.lead, result.lead));

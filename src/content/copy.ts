@@ -21,7 +21,34 @@ export const sellingAtTopLine = (n: number) => `Selling at the top would have sa
 export const daysInRowLine = (n: number) => `${n} days in a row`;
 export const leadLine = (lead: number) =>
   lead < 0 ? `${dollars(lead)} behind someone who did nothing` : `${dollars(lead)} ahead of someone who did nothing`;
-export const potLine = (n: number) => `Your pot: ${dollars(n)}`;
+// Time out of the market (result page, near-miss list), in plain words (R28).
+const SMALL = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+const count = (n: number, unit: string) => `${n <= 10 ? SMALL[n] : n} ${unit}${n === 1 ? '' : 's'}`;
+const YEAR = 365.25;
+const MONTH = YEAR / 12;
+/**
+ * A number of calendar days as "three years and five months", "two weeks and three days" or "one day":
+ * the two largest units, always rounded down (a 365-day year counts as a year).
+ */
+export function timeWords(days: number): string {
+  const d = Math.max(0, Math.floor(days));
+  const years = Math.floor((d + 1) / YEAR);
+  let rest = d - Math.round(years * YEAR);
+  const months = Math.max(0, Math.floor((rest + 1) / MONTH));
+  rest = Math.max(0, rest - Math.round(months * MONTH));
+  const weeks = Math.floor(rest / 7);
+  const left = rest % 7;
+  const pair = (a: string, b: string | null) => (b ? `${a} and ${b}` : a);
+  if (years) return pair(count(years, 'year'), months ? count(months, 'month') : null);
+  if (months) return pair(count(months, 'month'), weeks ? count(weeks, 'week') : null);
+  if (weeks) return pair(count(weeks, 'week'), left ? count(left, 'day') : null);
+  return count(left, 'day');
+}
+export const outOfMarketLine = (days: number) => `Out of the market for ${timeWords(days)}`;
+/** Under the result table, the first time a player sees a result. */
+export const HOLDER_NOTE = 'Someone who did nothing kept all their money in the market the whole time.';
+
+export const potLine =(n: number) => `Your pot: ${dollars(n)}`;
 export const PLAY_BORROWED = 'Play with borrowed money';
 export const BORROWED_OPENING = 'You have borrowed $20,000. Every move is three times bigger. Fall a third and you are wiped out.';
 

@@ -28,7 +28,7 @@ import { decodeChallenge, type Challenge } from './share/link';
 import { challengeLink, resultCard } from './share/result';
 import { copyText, shareResult } from './share/share';
 import { cell, save } from './store/store';
-import { mountEndScreen, type EndModel } from './ui/endscreen';
+import { holderNoteDue, mountEndScreen, type EndModel } from './ui/endscreen';
 import { mountCollection, mountPickCrash } from './ui/menus';
 import { paperFor } from './ui/paper';
 import { MYSTERY_LABEL, startPlay, type Play } from './ui/screen';
@@ -208,6 +208,7 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
     headlineOverride: s.bust ? BUST_HEADLINE : s.island ? ISLAND_HEADLINE : undefined,
     blackBorder: s.island,
     extraLines: days ? [days] : undefined,
+    holderNote: holderNoteDue(),
     sound: { on: soundOn() },
     sfx,
     vibration: { on: vibrationCell.get() !== false },
