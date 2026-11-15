@@ -179,6 +179,37 @@ describe('createSession', () => {
     s.destroy();
   });
 
+  it('R57 / smooth #4: a late day is caught up over the next several steps, never by squeezing one', () => {
+    // Twenty 8-frame steps; one timer fires 100 ms late (a long frame on a busy phone).
+    const hold = (8 * 1000) / 60;
+    const steps: Step[] = Array.from({ length: 20 }, (_, k) => ({ dayIndex: k, holdMs: hold, phase: 'fall' as const, slow: false }));
+    const r: RunData = { ...tiny, closes: steps.map((_, k) => 100 - k), dates: steps.map((_, k) => String(k)), fallEndIndex: 20, lowIndex: 19 };
+    let lag = 0;
+    const at: number[] = [];
+    const views: SessionView[] = [];
+    const now = () => performance.now() + lag;
+    const s = createSession(r, steps, {
+      start: 10000,
+      now,
+      onStep: (v) => {
+        at.push(now());
+        views.push(v);
+        if (v.stepIndex === 3) lag += 100;
+      },
+      onEnd: () => at.push(now()),
+    });
+    s.start();
+    vi.advanceTimersByTime(10_000);
+    expect(at.length).toBe(21);
+    // Step 3 ran 100 ms long; every later step still shows for at least 75% of its hold...
+    for (let k = 5; k < at.length; k++) expect(at[k] - at[k - 1], `step ${k - 1}`).toBeGreaterThanOrEqual(0.75 * hold - 1e-6);
+    // ...and stepMs says how long each will be shown (the chart grows over it).
+    for (let k = 4; k < views.length; k++) expect(Math.abs(at[k + 1] - at[k] - views[k].stepMs), `stepMs of step ${k}`).toBeLessThanOrEqual(1); // timers fire on whole ms
+    // The debt is paid within a few steps: from step 8 on the clock is back on schedule.
+    for (let k = 8; k < at.length; k++) expect(Math.abs(at[k] - at[0] - k * hold), `step ${k}`).toBeLessThanOrEqual(2); // whole-ms timers
+    s.destroy();
+  });
+
   it('no drift across a pause: the time left in the step is kept', () => {
     let lag = 0;
     const now = () => performance.now() + lag;
@@ -231,7 +262,18 @@ describe('createSession', () => {
 
   it('plays a real run through its real schedule to one consistent result', () => {
     const steps = buildSchedule(run, []);
-    const { s, views, ends } = make(run, steps);
+    const views: SessionView[] = [];
+    const ends: RunResult[] = [];
+    let endedAt = 0;
+    const s = createSession(run, steps, {
+      start: 10000,
+      onStep: (v) => views.push(v),
+      onEnd: (res) => {
+        ends.push(res);
+        endedAt = performance.now();
+      },
+    });
+    const t0 = performance.now();
     s.start();
     const pressAt = new Set([3, 4, 20, 21, 22, 50]);
     let step = 0;
@@ -239,7 +281,8 @@ describe('createSession', () => {
     while (ends.length === 0) {
       // R35: quiet fall steps entered in cash hold cashMs, so the clock runs by the view's stepMs.
       const hold = s.view().stepMs;
-      expect(hold).toBe(stepHold(steps[step], s.view().invested));
+      // Holds are whole 60 Hz frames (fractional ms); fake timers fire on whole ms and the clock catches up (R57).
+      expect(Math.abs(hold - stepHold(steps[step], s.view().invested))).toBeLessThanOrEqual(1.5);
       if (pressAt.has(step)) {
         s.press();
         s.press(); // a double tap
@@ -258,7 +301,9 @@ describe('createSession', () => {
     expect(shown).toEqual(steps.map((_, i) => i));
     // Sold on steps 3, 20 and 22, bought on 4, 21 and 50: steps 4, 21 and 23..50 begin in cash and run quicker.
     const inCash = (i: number) => i === 4 || i === 21 || (i >= 23 && i <= 50);
-    expect(t).toBe(steps.reduce((a, x, i) => a + stepHold(x, !inCash(i)), 0));
+    // The clock ends when the holds say, to the millisecond (whole-ms fake timers), however the steps were cut up.
+    const want = steps.reduce((a, x, i) => a + stepHold(x, !inCash(i)), 0);
+    expect(Math.abs(endedAt - t0 - want)).toBeLessThanOrEqual(2);
     expect(t).toBeLessThan(steps.reduce((a, x) => a + x.holdMs, 0));
   });
 

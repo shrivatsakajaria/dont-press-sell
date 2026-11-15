@@ -19,7 +19,7 @@ export interface SessionView {
   slow: boolean;
   /**
    * C1: how long the current step is shown, in ms: its hold for the player's position when it began
-   * (quiet fall days run quicker in cash, R35), plus any holdFor added since.
+   * (quiet fall days run quicker in cash, R35), less any catch-up for a late clock (R57), plus any holdFor added since.
    */
   stepMs: number;
 }
@@ -77,10 +77,13 @@ export interface Session {
 
 /** A timer this late or more (the page was frozen) restarts the step clock rather than racing to catch up. */
 const REBASE_MS = 250;
+/** R57: a step gives up at most this share of its hold to catch up on lateness (the rest carries over). */
+const CATCH_UP_SHARE = 0.25;
 
 /**
  * The running game. Steps advance with setTimeout using each step's holdMs, each armed against an
- * absolute deadline (the previous step's deadline + its hold), so late timers on a busy phone never add up.
+ * absolute deadline (the previous step's deadline + its hold), so late timers on a busy phone never add up;
+ * the lateness is paid back a little per step (R57).
  * When the page is hidden (phone locked, app switched) the clock pauses and
  * later resumes in the same step with the time that was left.
  */
@@ -109,6 +112,8 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
     opts.now ??
     (() => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()));
   let remaining = 0;
+  /** Lateness not yet caught up (ms). */
+  let debt = 0;
   /** How long the current step is shown: its hold when it began, plus holdFor. */
   let stepMs = steps.length ? stepHold(steps[0], true) : 0;
   let current: SessionView = compute();
@@ -140,17 +145,34 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
     timer = setTimeout(advance, Math.max(0, until - now()));
   }
 
-  /** `from`: the previous step's deadline when the clock ran straight on; null to start from now. */
+  /**
+   * `from`: the previous step's deadline when the clock ran straight on; null to start from now.
+   * R57 (smooth #4): a step that began late adds its lateness to `debt`, and each step pays back at most
+   * CATCH_UP_SHARE of its own hold, so a late day is caught up over the next several steps, not by
+   * squeezing one. stepMs is the time the step will really be shown.
+   */
   function enterStep(from: number | null) {
     const hold = stepHold(steps[stepIndex], invested);
-    stepMs = hold;
-    current = compute();
-    peak = current.peakBalance;
-    // Arm the clock before calling the UI, so a throwing onStep cannot freeze the run.
+    let ms = hold;
     if (!paused) {
       const t = now();
-      armUntil(from !== null && t - from < REBASE_MS ? from + hold : t + hold);
-    } else remaining = hold;
+      if (from !== null && t - from < REBASE_MS) {
+        // A timer that fired early (negative lateness) is made up at once.
+        debt = Math.min(REBASE_MS, debt + (t - from));
+        if (Math.abs(debt) < 0.01) debt = 0; // float noise
+        const pay = debt < 0 ? debt : Math.min(debt, CATCH_UP_SHARE * hold);
+        debt -= pay;
+        ms = hold - pay;
+      } else debt = 0;
+      stepMs = ms;
+      // Arm the clock before calling the UI, so a throwing onStep cannot freeze the run.
+      armUntil(t + ms);
+    } else {
+      stepMs = hold;
+      remaining = hold;
+    }
+    current = compute();
+    peak = current.peakBalance;
     opts.onStep({ ...current });
   }
 
