@@ -13,6 +13,7 @@ import { load, save } from '../store/store';
 import { announce, initAnnouncer } from './a11y';
 import { drawChart, extendChart, type ChartModel } from './chart';
 import { createRoll } from './digits';
+import { settleStep, wholeLines } from './fit';
 import { paperFor, type Paper } from './paper';
 
 // Strings this screen shows live in src/content/copy.ts; re-exported for existing importers.
@@ -27,8 +28,8 @@ import {
 const TOP_GAP = 500;
 const YEAR_MS = 365.25 * 24 * 3600 * 1000;
 const EASE = 'cubic-bezier(0.22,1,0.36,1)';
-/** R30: the headline's size steps (of its CSS size), its line limit, and the chart's least height. */
-const HEADLINE_STEPS = [1, 0.82, 0.68, 0.6, 0.52];
+/** R30: the headline's size steps (of its CSS size), its line limit, and the chart's least height. R64: a smaller floor step. */
+const HEADLINE_STEPS = [1, 0.82, 0.68, 0.6, 0.52, 0.46];
 const MAX_HEADLINE_LINES = 3;
 /** R55: a slow day is a red day only when the market fell at least this much since the step before. */
 export const RED_FALL = 0.02;
@@ -467,6 +468,9 @@ const STYLE = `
 .play{position:relative}
 .news-measure{position:absolute;left:0;right:0;top:0;visibility:hidden;pointer-events:none;contain:layout style}
 .news-measure>.news{height:auto;overflow:visible;display:flow-root}
+/* R64: at the smallest headline step the line under it shows only the whole lines that fit. */
+.standfirst.clamped{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:var(--clamp);overflow:hidden}
+.standfirst.clamped-none{display:none}
 /* The red day keeps the chart's inset and padding: same size, and the line never starts off the paper. */
 .is-worst .chart{margin-left:0;margin-right:0;padding:8px 0}
 /* R57: the balance and the figure beside it always share one line, so the block never changes height. */
@@ -616,47 +620,89 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
 
   /**
    * R30 + R57: the headline never runs past three lines, and it and the line under it fit the fixed news block.
-   * The headline steps down from its CSS size until both hold; the smallest step is the floor. Each new
-   * (headline, line, state, block size) is measured once, all steps in one layout pass, then cached.
+   * A hidden probe of every step guesses the largest that fits (one layout pass). R64: the guess is then
+   * checked on the real block (any engine, fonts loaded late): while it overflows or runs past three lines,
+   * the headline steps down further. Only a step that passed on the real block is cached. At the floor, still
+   * over, the line under the headline is clamped to the whole lines that fit (never cut mid-line).
+   * Web fonts finishing clear the cache and fit again; so does the news block changing size (resize watcher).
    */
+  let fontsHooked = false;
   function fitHeadline() {
+    if (!fontsHooked && typeof document !== 'undefined' && typeof document.fonts?.addEventListener === 'function') {
+      fontsHooked = true;
+      const fonts = document.fonts;
+      const refit = () => {
+        if (!page.isConnected) return fonts.removeEventListener('loadingdone', refit);
+        fitCache.clear();
+        if (last) fitHeadline();
+      };
+      fonts.addEventListener('loadingdone', refit);
+    }
     if (page.classList.contains('is-gate')) return;
+    clampStandfirst(null);
     const words = `${headline.textContent}\u0000${standfirst.textContent}\u0000${page.classList.contains('is-big')}${page.classList.contains('is-worst')}`;
-    const known = newsSize ? fitCache.get(`${words}\u0000${newsSize}`) : undefined;
-    if (known !== undefined) return setStep(known);
-    const box = h('div', 'news-measure');
-    const probes = HEADLINE_STEPS.map((k) => {
-      const wrap = h('div', 'news');
-      const hl = h('div', 'headline', headline.textContent ?? '');
-      hl.style.setProperty('--k', String(k));
-      wrap.append(hl, h('p', 'standfirst', standfirst.textContent ?? ''));
-      box.append(wrap);
-      return { wrap, hl };
-    });
-    // The probes take the news block's own width and place (the page's padding would make them wider and
-    // the text wrap less, so a headline that fits there could still cut off the line under it).
-    const width = news.clientWidth;
-    const height = news.clientHeight;
-    box.style.left = `${news.offsetLeft}px`;
-    box.style.right = 'auto';
-    box.style.width = `${width}px`;
-    page.append(box);
-    const results = probes.map(({ wrap, hl }) => {
-      let lh = 0;
-      try {
-        lh = parseFloat(getComputedStyle(hl).lineHeight);
-      } catch {
-        /* no layout */
-      }
-      const lines = lh > 0 ? Math.round(hl.getBoundingClientRect().height / lh) : 0;
-      return { lines, fits: wrap.scrollHeight <= height };
-    });
-    box.remove();
-    if (!(width > 0 && height > 0)) return setStep(0);
-    newsSize = `${width}x${height}`;
-    const i = chooseHeadlineStep(results);
-    fitCache.set(`${words}\u0000${newsSize}`, i);
-    setStep(i);
+    let start = newsSize ? fitCache.get(`${words}\u0000${newsSize}`) : undefined;
+    if (start === undefined) {
+      const box = h('div', 'news-measure');
+      const probes = HEADLINE_STEPS.map((k) => {
+        const wrap = h('div', 'news');
+        const hl = h('div', 'headline', headline.textContent ?? '');
+        hl.style.setProperty('--k', String(k));
+        wrap.append(hl, h('p', 'standfirst', standfirst.textContent ?? ''));
+        box.append(wrap);
+        return { wrap, hl };
+      });
+      // The probes take the news block's own width and place (the page's padding would make them wider and
+      // the text wrap less, so a headline that fits there could still cut off the line under it).
+      const width = news.clientWidth;
+      const height = news.clientHeight;
+      box.style.left = `${news.offsetLeft}px`;
+      box.style.right = 'auto';
+      box.style.width = `${width}px`;
+      page.append(box);
+      const results = probes.map(({ wrap, hl }) => {
+        const lh = px(hl, 'lineHeight');
+        const lines = lh > 0 ? Math.round(hl.getBoundingClientRect().height / lh) : 0;
+        return { lines, fits: wrap.scrollHeight <= height };
+      });
+      box.remove();
+      if (!(width > 0 && height > 0)) return setStep(0);
+      newsSize = `${width}x${height}`;
+      start = chooseHeadlineStep(results);
+    }
+    // R64: the real block decides. Layout sizes only (offsetHeight, rects of untransformed boxes), so the
+    // headline's press-in scale never reads as overflow.
+    const fit = settleStep(start, HEADLINE_STEPS.length, setStep, () => {
+      const top = news.getBoundingClientRect().top;
+      const bottom = standfirst.getBoundingClientRect().bottom - top;
+      const lh = px(headline, 'lineHeight');
+      return {
+        overflow: Math.max(news.scrollHeight - news.clientHeight, bottom - news.clientHeight),
+        lines: lh > 0 ? Math.round(headline.offsetHeight / lh) : 0,
+      };
+    }, MAX_HEADLINE_LINES);
+    if (fit.ok) {
+      fitCache.set(`${words}\u0000${newsSize}`, fit.step);
+      return;
+    }
+    const lh = px(standfirst, 'lineHeight') || px(standfirst, 'fontSize') * 1.3;
+    const room = news.clientHeight - (standfirst.getBoundingClientRect().top - news.getBoundingClientRect().top);
+    clampStandfirst(wholeLines(room, lh));
+  }
+  /** A computed length in px (0 without layout). */
+  function px(e: Element, prop: 'lineHeight' | 'fontSize'): number {
+    try {
+      return parseFloat(getComputedStyle(e)[prop]) || 0;
+    } catch {
+      return 0;
+    }
+  }
+  /** R64: the line under the headline shows only `n` whole lines (0: none); null takes the clamp away. */
+  function clampStandfirst(n: number | null) {
+    standfirst.classList.toggle('clamped', n !== null);
+    standfirst.classList.toggle('clamped-none', n === 0);
+    if (n === null) standfirst.style.removeProperty('--clamp');
+    else standfirst.style.setProperty('--clamp', String(n));
   }
   function setStep(i: number) {
     const k = HEADLINE_STEPS[i] ?? 1;
@@ -1080,7 +1126,7 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       screen.stamp(stamp.text, stamp.win, STAMP_MS);
       // C1: the day clock holds on each press (lane A's session; absent, the stamp still shows).
       (session as Session & { holdFor?(ms: number): void }).holdFor?.(PRESS_HOLD_MS);
-      screen.holdChart(PRESS_HOLD_MS); // K2: the chart's growth stretches over the same hold
+      screen.holdChart(PRESS_HOLD_MS); // R65: the line's tip catches up to today's close under the dot, then holds
     }
     const newStep = v.stepIndex !== lastFrameStep;
     lastFrameStep = v.stepIndex;
