@@ -67,6 +67,112 @@ for (const height of [660, 844]) {
   }
 }
 
+// R64 (SK, iPhone): on red days the headline and the line under it were cut off. On red-day heavy runs, at three
+// phone sizes, every day: the news block never overflows, the headline is three lines or fewer, and the line
+// under it ends inside the block (whole lines only: when it is clamped, its box is whole lines).
+for (const [w, h] of [[390, 660], [390, 844], [375, 667]]) {
+  for (const run of ['c2007', 'c2020', 'c1987']) {
+    test(`R64: headline and the line under it never cut off through ${run} at ${w} x ${h}`, async ({ page }) => {
+      test.setTimeout(240_000);
+      await page.setViewportSize({ width: w, height: h });
+      await page.clock.install();
+      await page.goto(`/?run=${run}`);
+      await pressStart(page);
+      let lastDay = '';
+      let red = 0;
+      let checked = 0;
+      let clamped = 0;
+      for (let t = 0; t < 200_000; t += 100) {
+        await page.clock.runFor(100);
+        const m = await page.evaluate(() => {
+          const play = document.querySelector('.play');
+          if (!play || document.querySelector('.es')) return null;
+          const n = document.querySelector('.news') as HTMLElement;
+          const hl = document.querySelector('.headline') as HTMLElement;
+          const sf = document.querySelector('.standfirst') as HTMLElement;
+          const lh = parseFloat(getComputedStyle(hl).lineHeight);
+          const slh = parseFloat(getComputedStyle(sf).lineHeight);
+          const nr = n.getBoundingClientRect();
+          const sr = sf.getBoundingClientRect();
+          return {
+            day: document.querySelector('.folio')!.textContent!,
+            worst: play.classList.contains('is-worst'),
+            overflow: n.scrollHeight - n.clientHeight,
+            lines: Math.round(hl.offsetHeight / lh),
+            sfBottom: sr.height > 0 ? sr.bottom - nr.top - n.clientHeight : -1,
+            sfLines: sr.height / slh,
+            clamped: sf.classList.contains('clamped'),
+          };
+        });
+        if (!m) break;
+        if (m.day === lastDay) continue;
+        lastDay = m.day;
+        checked++;
+        if (m.clamped) clamped++;
+        expect(m.overflow, `${m.day}: news block overflow`).toBeLessThanOrEqual(1);
+        expect(m.lines, `${m.day}: headline lines`).toBeLessThanOrEqual(3);
+        expect(m.sfBottom, `${m.day}: the line under the headline ends inside the block`).toBeLessThanOrEqual(1);
+        expect(Math.abs(m.sfLines - Math.round(m.sfLines)), `${m.day}: whole lines`).toBeLessThanOrEqual(0.05);
+        if (m.worst) {
+          red++;
+          if (red === 1) await page.screenshot({ path: `e2e/shots/T/r64-${run}-${w}x${h}-red1.png` });
+        }
+      }
+      expect(checked).toBeGreaterThan(5);
+      expect(red).toBeGreaterThan(0);
+      test.info().annotations.push({ type: 'r64', description: `${run} ${w}x${h}: ${checked} days, ${red} red, ${clamped} clamped` });
+    });
+  }
+}
+
+// R64: the hidden probe can disagree with the real block (SK's iPhone: WebKit, fonts arriving late). Here the
+// real headline and line set wider than the probe's copies, as an engine that disagrees would: the fit must
+// still correct itself on the real block every day (stepping down, and clamping to whole lines at the floor).
+for (const [w, h] of [[390, 660], [375, 667]]) {
+  for (const [run, spread] of [['c2020', '0.06em'], ['c1987', '0.06em'], ['c2020', '0.16em']] as const) {
+    test(`R64: the fit corrects itself when the probe disagrees with the real block (${run}, +${spread}) at ${w} x ${h}`, async ({ page }) => {
+      test.setTimeout(240_000);
+      await page.setViewportSize({ width: w, height: h });
+      await page.clock.install();
+      await page.goto(`/?run=${run}`);
+      await page.addStyleTag({ content: `.play > .news .headline, .play > .news .standfirst { letter-spacing: ${spread}; }` });
+      await pressStart(page);
+      let lastDay = '';
+      let checked = 0;
+      let red = 0;
+      for (let t = 0; t < 200_000; t += 100) {
+        await page.clock.runFor(100);
+        const m = await page.evaluate(() => {
+          const play = document.querySelector('.play');
+          if (!play || document.querySelector('.es')) return null;
+          const n = document.querySelector('.news') as HTMLElement;
+          const hl = document.querySelector('.headline') as HTMLElement;
+          const sf = document.querySelector('.standfirst') as HTMLElement;
+          const nr = n.getBoundingClientRect();
+          const sr = sf.getBoundingClientRect();
+          return {
+            day: document.querySelector('.folio')!.textContent!,
+            worst: play.classList.contains('is-worst'),
+            overflow: n.scrollHeight - n.clientHeight,
+            lines: Math.round(hl.offsetHeight / parseFloat(getComputedStyle(hl).lineHeight)),
+            sfBottom: sr.height > 0 ? sr.bottom - nr.top - n.clientHeight : -1,
+            sfLines: sr.height / parseFloat(getComputedStyle(sf).lineHeight),
+          };
+        });
+        if (!m) break;
+        if (m.day === lastDay) continue;
+        lastDay = m.day;
+        checked++;
+        if (m.worst && ++red === 1) await page.screenshot({ path: `e2e/shots/T/r64-disagree-${run}-${spread}-${w}x${h}.png` });
+        expect(m.overflow, `${m.day}: news block overflow`).toBeLessThanOrEqual(1);
+        expect(m.sfBottom, `${m.day}: the line under the headline ends inside the block`).toBeLessThanOrEqual(1);
+        expect(Math.abs(m.sfLines - Math.round(m.sfLines)), `${m.day}: whole lines`).toBeLessThanOrEqual(0.05);
+      }
+      expect(checked).toBeGreaterThan(5);
+    });
+  }
+}
+
 // The balance and the figure beside it ("down $1,450", "in cash") always fit inside the 24px gutters.
 for (const [w, h] of [[360, 780], [375, 812], [390, 660], [390, 844]]) {
   const edges = (page: import('@playwright/test').Page) =>

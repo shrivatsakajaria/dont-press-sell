@@ -209,8 +209,8 @@ interface State {
   /** Lowest and highest close from day 1 to each day of this step (index d - base), with the floor of the range. */
   lows: number[];
   highs: number[];
-  /** Dots and words in today's scale, moved with the scale each frame. */
-  marks: { x: number; y: number }[];
+  /** Dots and words in today's scale, moved with the scale each frame. A dot ahead of the tip rides on it (R65). */
+  marks: { x: number; y: number; day: number }[];
   words: { x: number; y: number }[];
   /** Each label's last spot, tried first so words do not hop between days. */
   spots: Map<string, number>;
@@ -218,6 +218,8 @@ interface State {
 
 /** The growth ends this long after the step, so a day that arrives a frame late never finds the line still. */
 const TRAIL_MS = 34;
+/** R65: on a press the growing segment finishes within this long, so the tip reaches today's close. */
+export const CATCH_UP_MS = 80;
 
 const states = new WeakMap<Element, State>();
 let clipIds = 0;
@@ -327,14 +329,43 @@ export function drawChart(
 }
 
 /**
- * K2: the step on screen was held `ms` longer (a press): the running growth stretches over it, from
- * where the tip is now, so the hold reads as slow motion rather than a stop.
+ * R65, a press (the clock holds `ms`, K2). The trade is the newest in the model the screen just drew.
+ * - A trade at today's close: the growing segment finishes at once (a catch-up of at most CATCH_UP_MS, none
+ *   with reduced motion), so the tip reaches today's close under the dot; it stays there through the hold
+ *   and the rest of the step, and the next day grows from there.
+ * - A trade pinned to the step before (the step painted when the finger went down): the tip goes back to
+ *   that day's close (it had only just left it) under the dot, stays there for the hold, then grows to
+ *   today over what was left of the step.
+ * Until the tip gets there, a trade dot ahead of it rides on the tip (frame), so it is never off the line.
  */
 export function extendChart(svg: SVGSVGElement | SVGElement, ms: number): void {
   const s = states.get(svg);
-  if (!s || !(ms > 0)) return;
-  if (s.at < s.target) stretch(s, ms, nowMs());
-  s.stepMs += ms;
+  if (!s) return;
+  const hold = ms > 0 && Number.isFinite(ms) ? ms : 0;
+  s.stepMs += hold;
+  const trades = s.m.trades;
+  const day = trades.length ? Math.min(trades[trades.length - 1].dayIndex, s.target) : s.target;
+  const ref = s.pausedAt ?? nowMs();
+  const left = Math.max(0, s.t0 + s.dur - ref);
+  if (day >= s.target) {
+    if (s.at >= s.target) return;
+    const catchUp = reducedMotion() ? 0 : Math.min(CATCH_UP_MS, left);
+    s.from = s.at;
+    s.t0 = ref;
+    s.dur = catchUp;
+    if (!(catchUp > 0)) s.at = s.target;
+    frame(s, ref);
+    loop(s);
+    return;
+  }
+  // Pinned to the day before: back to its close, still for the hold, then the rest of the step's growth.
+  s.at = day;
+  s.from = day;
+  s.t0 = ref + hold;
+  s.dur = Math.max(1, left);
+  layout(s);
+  frame(s, ref);
+  loop(s);
 }
 
 /** K2, the name lane FC's press handler calls: the same as extendChart. */
@@ -418,7 +449,8 @@ function layout(s: State) {
     if (mk.side === 'sell') set(c, { r: 6, fill: paper.accent, stroke: 'none', 'stroke-width': 0 });
     else set(c, { r: 5, fill: paper.bg, stroke: ink, 'stroke-width': 2 });
   });
-  s.marks = g.marks.map((mk) => ({ x: mk.x, y: mk.y }));
+  const markDays = m.trades.filter((tr) => tr.dayIndex <= s.target + 1e-9 && tr.dayIndex <= closes.length - 1).map((tr) => tr.dayIndex);
+  s.marks = g.marks.map((mk, i) => ({ x: mk.x, y: mk.y, day: markDays[i] ?? s.target }));
   s.words = placeLabels(s, g);
 }
 
@@ -462,7 +494,12 @@ function frame(s: State, now: number) {
 
   set(els.today, { cx: X(tx), cy: Y(tyv) });
   const dots = els.marks.children;
-  s.marks.forEach((mk, i) => dots[i] && set(dots[i], { cx: X(mk.x), cy: Y(mk.y) }));
+  // R65: a trade dot the tip has not reached yet rides on the tip, so it is always on the line.
+  s.marks.forEach((mk, i) => {
+    if (!dots[i]) return;
+    if (mk.day > s.at + 1e-9) set(dots[i], { cx: X(tx), cy: Y(tyv) });
+    else set(dots[i], { cx: X(mk.x), cy: Y(mk.y) });
+  });
   const texts = els.labels.children;
   s.words.forEach((wd, i) => texts[i] && set(texts[i], { x: X(wd.x), y: Y(wd.y) }));
 }
