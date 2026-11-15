@@ -4,7 +4,7 @@
 import {
   BEAT_ME, BOUGHT, CARD_GUESS, FOOTER_RESULT, LATE_EDITION, MASTHEAD, MYSTERY_LABEL, PERFECT_TIMING, SOLD, SOMEONE_WHO_DID_NOTHING, YOU,
   dailyLabel, dollars, leadLine, perfectLine, practiceFolio, practiceGo, shareAhead, shareAheadPractice, shareBehind, shareBehindPractice,
-  survivedLine,
+  SHARE_LEVEL, shareLevelPractice, survivedLine,
 } from '../content/copy';
 import type { Trade } from '../engine/types';
 import { paperFor } from '../ui/paper';
@@ -65,12 +65,13 @@ function ordinal(n: number): string {
 }
 
 export function shareLine(m: ResultCardModel): string {
-  const ahead = m.lead >= 0;
+  const level = Math.round(m.lead) === 0;
+  const ahead = m.lead > 0;
   if (m.practice) {
     const go = practiceGo(ordinal(Math.max(2, m.practice.attempt)), m.practice.crashName);
-    return ahead ? shareAheadPractice(m.lead, go) : shareBehindPractice(m.lead, go);
+    return level ? shareLevelPractice(go) : ahead ? shareAheadPractice(m.lead, go) : shareBehindPractice(m.lead, go);
   }
-  return ahead ? shareAhead(m.lead) : shareBehind(m.lead);
+  return level ? SHARE_LEVEL : ahead ? shareAhead(m.lead) : shareBehind(m.lead);
 }
 
 const DATED = /\b(1[89]\d\d|20\d\d)\b|\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i;
@@ -97,7 +98,7 @@ export function cardLines(m: ResultCardModel): CardLines {
       [PERFECT_TIMING, dollars(m.perfect)],
     ],
     lead: leadLine(m.lead),
-    leadBehind: m.lead < 0,
+    leadBehind: Math.round(m.lead) < 0,
     perfect: perfectLine(m.perfect, m.you),
     streak: !practice && m.streak !== undefined && m.streak >= 2 ? survivedLine(m.streak) : null,
     beatMe: BEAT_ME,

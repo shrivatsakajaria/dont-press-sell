@@ -23,6 +23,15 @@ describe('cardLines', () => {
     expect(l.folioLeft).toBe('Mystery crash');
     expect(all(base)).not.toMatch(/That was|19\d\d|20\d\d/);
   });
+  it('a level finish reads "Level with someone who did nothing", never "$0 ahead" (R32)', () => {
+    const l = cardLines({ ...base, lead: 0, you: 9450 });
+    expect(l.lead).toBe('Level with someone who did nothing');
+    expect(l.leadBehind).toBe(false);
+    expect(l.shareLine).toBe('Level with someone who did nothing in a crash I could not see coming. Beat me.');
+    expect(JSON.stringify(l)).not.toMatch(/\$0 ahead|by \$0/);
+    const p = cardLines({ ...base, lead: 0, practice: { crashName: '2008', attempt: 2 } });
+    expect(p.shareLine).toBe('Level with someone who did nothing on my second go at 2008. Beat me.');
+  });
   it('never says the holder and uses the plain lead line', () => {
     expect(all(base)).not.toMatch(/holder/i);
     expect(cardLines(base).lead).toBe('$2,300 behind someone who did nothing');

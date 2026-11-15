@@ -1,6 +1,6 @@
 import type { BorrowedResult, Trade } from './types';
 import { perfectTiming } from './perfect';
-import { orderedTrades } from './simulate';
+import { orderedTrades, shownLead } from './simulate';
 
 /**
  * Borrowed-money rules (spec 6.13). The loan is twice the balance at each
@@ -59,7 +59,7 @@ export function simulateBorrowed(closes: number[], trades: Trade[], start = 1000
     final,
     holderFinal,
     perfectFinal,
-    lead: final - holderFinal,
+    lead: shownLead(final, holderFinal),
     share: gap === 0 ? 0 : (final - holderFinal) / gap,
     balances,
     daysInCash,

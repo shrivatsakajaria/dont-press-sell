@@ -24,18 +24,26 @@ test('a challenge link plays that run blind with the score to beat, and the resu
   await page.goto(`/#c=${code(S2018, 11341, [10, 30])}`);
   await pressStart(page);
   await expect(page.locator('.folio')).toContainText('Mystery crash');
-  await expect(page.locator('.regret')).toHaveText('Score to beat: $11,341');
+  // The link's own final (11,341) is ignored: the trades make $11,804 (I5).
+  await expect(page.locator('.regret')).toHaveText('Score to beat: $11,804');
   await expect(page.locator('.standfirst')).toHaveText(OPENING);
   await page.clock.runFor(119_000); // R27: s2018 runs about 118 s
   await expect(page.getByText('Late edition')).toBeVisible();
   await expect(page.getByText('Tap to see what that was')).toBeVisible();
-  await expect(page.locator('.es-row').filter({ hasText: 'Your challenger' })).toContainText('$11,341');
+  await expect(page.locator('.es-row').filter({ hasText: 'Your challenger' })).toContainText('$11,804');
   await expect(page.locator('.es-vs')).toHaveText(/^(Your challenger beat you by|You beat your challenger by) \$[\d,]+$/);
   await expect(page.locator('[data-line="other"]')).toHaveCount(1);
   // A challenge never starts the countdown.
   await page.clock.runFor(15_000);
   await expect(page.getByText(/Next mystery crash/)).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+test('a hand-edited final is ignored: the score to beat comes from the trades (I5)', async ({ page }) => {
+  await page.goto(`/#c=${code(S2018, 1_000_000_000, [10, 30])}`);
+  await expect(page.locator('.intro .note')).toHaveText('Score to beat: $11,804');
+  await pressStart(page);
+  await expect(page.locator('.regret')).toHaveText('Score to beat: $11,804');
 });
 
 for (const [name, hash] of [

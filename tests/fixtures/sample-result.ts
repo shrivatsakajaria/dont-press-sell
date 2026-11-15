@@ -64,7 +64,7 @@ export function c2007Sample(): EndModel {
     flags: { showCountdown: true, blind: true },
   });
   // A winning mystery run, so double or nothing is offered (first win of a streak).
-  m.double = { lead: m.result.lead, final: m.result.final, wins: 1 };
+  m.double = { net: m.result.lead, final: m.result.final, wins: 1 };
   return m;
 }
 
@@ -75,7 +75,8 @@ export function winningSample(): EndModel {
     news: ['US stock market falls into a correction', 'Fed promises to buy as much as needed to steady markets'],
     flags: { showCountdown: true, blind: true },
   });
-  m.double = { lead: m.result.lead, final: m.result.final, wins: 2 };
+  // Second win in a row: the net counts an earlier $1,500 win too (what banking adds to the pot).
+  m.double = { net: m.result.lead + 1500, final: m.result.final, wins: 2 };
   m.pot = { pot: 16480, tonight: 5310 };
   return m;
 }

@@ -14,14 +14,15 @@ import { playCues } from './fx/cues';
 import { buzz, setHapticsEnabled } from './fx/haptics';
 import { createSfx } from './fx/sound';
 import {
-  bankPending, borrowedOn, borrowedUnlocked, challengeFits, currentStreak, doubleUp, setBorrowed, settle,
+  bankPending, borrowedOn, borrowedUnlocked, currentStreak, doubleUp, setBorrowed, settle, verifiedChallenge,
 } from './game/flow';
 import { createNarrator, tradeNews, type NarratorRun } from './game/narrator';
 import { dailyPick, pickMystery } from './game/picker';
 import { getPot } from './game/pot';
+import { saveResume, takeResume, type ResumeState } from './game/resume';
 import { hashString, mulberry32 } from './game/rng';
 import { buildSchedule } from './game/schedule';
-import { daysInRowText, getDailyResult, getLastRun, getRecord, type LastRun, type Mode } from './store/record';
+import { daysInRowText, getDailyResult, getRecord, scoreToBeatRun, type LastRun, type Mode } from './store/record';
 import { renderCard, shareLine } from './share/card';
 import { dailyText } from './share/dailytext';
 import { decodeChallenge, type Challenge } from './share/link';
@@ -29,6 +30,7 @@ import { challengeLink, resultCard } from './share/result';
 import { copyText, shareResult } from './share/share';
 import { cell, save } from './store/store';
 import { holderNoteDue, mountEndScreen, type EndModel } from './ui/endscreen';
+import { mountLoadError } from './ui/loaderror';
 import { mountCollection, mountPickCrash } from './ui/menus';
 import { paperFor } from './ui/paper';
 import { MYSTERY_LABEL, startPlay, type Play } from './ui/screen';
@@ -51,8 +53,9 @@ interface Game {
   previous?: LastRun | null;
   /** Borrowed money (mystery runs only, spec 6.13). */
   borrowed?: boolean;
-  /** A challenge from a link: the challenger's final and trades. */
+  /** A challenge from a link: the challenger's final and trades, and the link's code. */
   challenge?: Challenge;
+  code?: string;
 }
 
 const START = 10000;
@@ -123,12 +126,31 @@ const potNow = () => getPot().pot + currentStreak().net;
  * opts.gate: the start screen (R28). Only the first game of a fresh page load gets it; rematch, double
  * or nothing, the countdown's next game and a challenge link opened again in the visit start at once.
  */
-async function play(game: Game, opts: { double?: boolean; gate?: boolean } = {}) {
+async function play(game: Game, opts: { double?: boolean; gate?: boolean; retry?: boolean } = {}) {
   const mine = ++ticket;
   // Starting anything but the double banks a win that was waiting for a choice (spec 6.8).
   if (!opts.double) bankPending();
-  const { run, headlines } = await load(game.runId);
+  let data: Awaited<ReturnType<typeof load>>;
+  try {
+    data = await load(game.runId);
+  } catch {
+    // I6: no dead page and no unhandled rejection; a tap tries the same game again. Some browsers keep a
+    // failed module load for the page's life, so when the retry fails too the page reloads instead.
+    if (mine !== ticket) return;
+    if (opts.retry) {
+      // Same game after the reload: mode, run, start, and the challenge code (read once on boot).
+      saveResume({
+        mode: game.mode, runId: game.runId, start: game.start, date: game.date, dailyNumber: game.dailyNumber,
+        borrowed: game.borrowed, code: game.code, double: opts.double, gate: opts.gate,
+      });
+      return location.reload();
+    }
+    clear();
+    mountLoadError(root, () => void play(game, { ...opts, retry: true }));
+    return;
+  }
   if (mine !== ticket) return;
+  const { run, headlines } = data;
   clear();
   lastGame = game;
   const steps = buildSchedule(run, headlines);
@@ -311,11 +333,14 @@ function double() {
   return newMystery(s.start, { double: true });
 }
 
-/** Rematch: the same crash from the same start, as practice. Never borrowed; a borrowed go is not a fair score to beat. */
+/**
+ * Rematch: the same crash from the same start, as practice. Never borrowed. The score to beat comes only
+ * from an unborrowed go, scaled to this start (I2).
+ */
 function rematch(game: Game) {
   return play({
     mode: 'rematch', runId: game.runId, label: REMATCH_LABEL, start: game.start, real: true,
-    previous: game.borrowed ? null : getLastRun(game.runId),
+    previous: scoreToBeatRun(game.runId, game.start),
   });
 }
 
@@ -324,7 +349,7 @@ function daily() {
   const date = todayUtc();
   const { number, runId } = dailyPick(date);
   if (getDailyResult(date)) {
-    return play({ mode: 'rematch', runId, label: REMATCH_LABEL, start: START, real: true, previous: getLastRun(runId) });
+    return play({ mode: 'rematch', runId, label: REMATCH_LABEL, start: START, real: true, previous: scoreToBeatRun(runId, START) });
   }
   const n = Math.max(1, number);
   return play({ mode: 'daily', runId, label: dailyLabel(n), start: START, real: false, date, dailyNumber: n });
@@ -361,20 +386,34 @@ function collection() {
 
 /**
  * A challenge link (#c=<code>) opens that exact run, blind, with the score to beat (spec 6.7).
- * A code that does not decode, or whose trades fall outside the run, starts a fresh mystery with no error.
+ * A code that does not decode, or whose trades fall outside the run, starts a fresh mystery with no error;
+ * a run that will not load gets the "did not load" page and keeps the challenge (I6).
+ * The score to beat is recomputed from the trades; the final in the link is ignored (I5).
  */
-async function challenge(code: string) {
+async function challenge(code: string, retry = false) {
   history.replaceState(null, '', location.pathname + location.search);
   const gate = !challengeSeen(code);
   const c = decodeChallenge(code);
   if (c) {
+    const mine = ++ticket;
+    let run: RunData;
     try {
-      const run = await loadRun(c.runId);
-      if (challengeFits(c, run.closes.length)) {
-        return play({ mode: 'challenge', runId: c.runId, label: MYSTERY_LABEL, start: START, real: false, challenge: c }, { gate });
-      }
+      run = await loadRun(c.runId);
     } catch {
-      /* fall through to a mystery */
+      // I6: the run would not load. Say so and try again; a second failure reloads into the same challenge.
+      if (mine !== ticket) return;
+      if (retry) {
+        saveResume({ mode: 'challenge', runId: c.runId, start: START, code });
+        return location.reload();
+      }
+      clear();
+      mountLoadError(root, () => void challenge(code, true));
+      return;
+    }
+    if (mine !== ticket) return;
+    const checked = verifiedChallenge(c, run.closes);
+    if (checked) {
+      return play({ mode: 'challenge', runId: c.runId, label: MYSTERY_LABEL, start: START, real: false, challenge: checked, code }, { gate });
     }
   }
   return newMystery(START, { gate });
@@ -393,7 +432,26 @@ function challengeSeen(code: string): boolean {
   return false;
 }
 
+/** A game stored before a reload (a run that would not load): the same game again. */
+function resume(r: ResumeState) {
+  const opts = { double: r.double, gate: r.gate };
+  switch (r.mode) {
+    case 'challenge':
+      return challenge(r.code!);
+    case 'daily':
+      return play({ mode: 'daily', runId: r.runId, label: dailyLabel(r.dailyNumber ?? 1), start: START, real: false, date: r.date, dailyNumber: r.dailyNumber }, opts);
+    case 'picked':
+      return play({ mode: 'picked', runId: r.runId, label: shortName(r.runId), start: START, real: true }, opts);
+    case 'rematch':
+      return play({ mode: 'rematch', runId: r.runId, label: REMATCH_LABEL, start: r.start, real: true, previous: scoreToBeatRun(r.runId, r.start) }, opts);
+    default:
+      return play(mysteryGame(r.runId, r.start, !!r.borrowed), opts);
+  }
+}
+
 function boot() {
+  const stored = takeResume();
+  if (stored) return resume(stored);
   const hash = /^#c=(.*)$/.exec(location.hash);
   if (hash) return challenge(hash[1]);
   // ?run=<id> opens that run as a mystery (testing and screenshots).

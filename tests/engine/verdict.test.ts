@@ -143,7 +143,7 @@ describe('verdictCopy', () => {
     });
     expect(verdictCopy('shakenOut', r0, run())).toEqual({
       title: 'Shaken out',
-      line: 'Sold a dip that was back in months',
+      line: 'Sold a dip that bounced straight back',
       headline: 'Local investor flees a crash that never came',
     });
     expect(verdictCopy('cashGang', r0, run())).toEqual({
@@ -156,6 +156,23 @@ describe('verdictCopy', () => {
       line: 'Held most of the way down, then blinked',
       headline: 'Local investor blinks at the wrong moment',
     });
+  });
+  it('bagholder: an early first sale bought back higher reads "Sold early" (R34), headline kept', () => {
+    // run(): the low is day 20, so the first third of the fall is days 0 to 6.
+    const early = verdictCopy('bagholder', result({ trades: [sell(3), buy(40)], lead: -300 }), run());
+    expect(early).toEqual({
+      title: 'Bagholder',
+      line: 'Sold early, then bought back higher',
+      headline: 'Local investor blinks at the wrong moment',
+    });
+    // Sold later in the fall: the old line.
+    expect(verdictCopy('bagholder', result({ trades: [sell(10), buy(40)], lead: -300 }), run()).line).toBe(
+      'Held most of the way down, then blinked',
+    );
+    // Sold early but bought back lower: the old line.
+    expect(verdictCopy('bagholder', result({ trades: [sell(3), buy(15)], lead: -300 }), run()).line).toBe(
+      'Held most of the way down, then blinked',
+    );
   });
   it('paper headline counts days before the bottom in words', () => {
     const r = result({ trades: [sell(17), buy(30)], lead: -1 });

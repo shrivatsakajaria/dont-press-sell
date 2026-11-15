@@ -151,6 +151,50 @@ describe('createSession', () => {
     s.destroy();
   });
 
+  it('no drift: each step is armed against an absolute deadline, so late timers do not add up', () => {
+    // Every timer fires 10 ms late against the session clock (a busy phone): the steps after it are shortened to catch up.
+    let lag = 0;
+    const at: number[] = [];
+    const now = () => performance.now() + lag;
+    const s = createSession(tiny, tinySteps, {
+      start: 10000,
+      now,
+      onStep: () => {
+        at.push(now());
+        lag += 10;
+      },
+      onEnd: () => at.push(now()),
+    });
+    s.start();
+    vi.advanceTimersByTime(5000);
+    const total = tinySteps.reduce((a, st) => a + st.holdMs, 0);
+    // Step k starts at the sum of the earlier holds (plus at most one timer's lateness), never at k x 10 ms late.
+    let sum = 0;
+    tinySteps.forEach((st, k) => {
+      expect(at[k] - at[0]).toBeGreaterThanOrEqual(sum);
+      expect(at[k] - at[0]).toBeLessThanOrEqual(sum + 10);
+      sum += st.holdMs;
+    });
+    expect(at[at.length - 1] - at[0]).toBeLessThanOrEqual(total + 10);
+    s.destroy();
+  });
+
+  it('no drift across a pause: the time left in the step is kept', () => {
+    let lag = 0;
+    const now = () => performance.now() + lag;
+    const views: SessionView[] = [];
+    const s = createSession(tiny, tinySteps, { start: 10000, now, onStep: (v) => { views.push(v); lag += 10; }, onEnd: () => {} });
+    s.start();
+    vi.advanceTimersByTime(190); // step 0 deadline is 200 on the session clock; it reads 200 (10 ms late) already
+    expect(s.view().stepIndex).toBe(0);
+    s.pause();
+    vi.advanceTimersByTime(10_000);
+    s.resume(); // 0 ms left in step 0
+    vi.advanceTimersByTime(0);
+    expect(s.view().stepIndex).toBe(1);
+    s.destroy();
+  });
+
   it('ignores presses while paused', () => {
     const { s } = make(tiny, tinySteps);
     s.start();

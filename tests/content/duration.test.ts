@@ -36,3 +36,15 @@ it('never rounds up: the words are never longer than the time', () => {
 it('the line', () => {
   expect(outOfMarketLine(1257)).toBe('Out of the market for three years and five months');
 });
+
+it('words or digits, never both in one line: a pair with a number over ten is all digits', () => {
+  // 24 years and 10 months (c1929-style): digits for both.
+  expect(timeWords(Math.floor(24 * 365.25 + 10 * 30.44 + 2))).toBe('24 years and 10 months');
+  expect(timeWords(Math.floor(11 * 365.25 + 3 * 30.44 + 2))).toBe('11 years and 3 months');
+  expect(timeWords(Math.floor(11 * 365.25 + 2))).toBe('11 years');
+  expect(timeWords(1257)).toBe('three years and five months');
+  for (let d = 1; d < 12000; d += 7) {
+    const w = timeWords(d);
+    expect(/\d/.test(w) && /\b(one|two|three|four|five|six|seven|eight|nine|ten)\b/.test(w), `${d}: ${w}`).toBe(false);
+  }
+});

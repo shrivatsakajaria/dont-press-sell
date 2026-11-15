@@ -18,6 +18,7 @@ import {
   SHORT_QUIET_MS,
   SHORT_SLOW_MS,
   FIRST_SLOW_BY_MS,
+  FIRST_STEP_MAX_MS,
   fallBudgetFor,
   forwardBudgetFor,
   slowCountsFor,
@@ -137,12 +138,13 @@ describe('buildSchedule on every real run (no headlines)', () => {
         expect(fallBudgetFor(run)).toBe(isLong(run) ? LONG_FALL_BUDGET_MS : FALL_BUDGET_MS);
       });
 
-      it('ordinary fall steps: at most 1,500 ms, or exactly 3,000 ms in a short fall (R27)', () => {
-        for (const s of steps) {
-          if (s.phase !== 'fall' || s.slow) continue;
-          if (isShortFall(run)) expect(s.holdMs).toBe(SHORT_QUIET_MS);
+      it('ordinary fall steps: at most 1,500 ms, or exactly 3,000 ms in a short fall (R27); a quiet day 1 is short', () => {
+        steps.forEach((s, i) => {
+          if (s.phase !== 'fall' || s.slow) return;
+          if (i === 0) expect(s.holdMs).toBeLessThanOrEqual(FIRST_STEP_MAX_MS);
+          else if (isShortFall(run)) expect(s.holdMs).toBe(SHORT_QUIET_MS);
           else expect(s.holdMs).toBeLessThanOrEqual(MAX_QUIET_MS);
-        }
+        });
       });
 
       it('every slow step holds longer than every ordinary fall step', () => {
@@ -169,14 +171,19 @@ describe('buildSchedule on every real run (no headlines)', () => {
         expect(days.length).toBeLessThanOrEqual(MAX_SLOW);
         const truth = topMoves(run, want.truth);
         for (const d of truth) expect(days).toContain(d);
-        const { truth: t, decoys } = pickSlowDays(run, []);
+        const { truth: t, decoys, promoted } = pickSlowDays(run, []);
         expect(t).toEqual(truth);
         expect(decoys.length).toBeLessThanOrEqual(want.decoys);
-        if (!isShortFall(run)) {
+        expect(promoted.length).toBeLessThanOrEqual(1);
+        if (!isShortFall(run) && !promoted.length) {
           expect(days.length).toBe(MAX_SLOW);
           expect(decoys.length).toBe(DECOYS);
+        } else if (!isShortFall(run)) {
+          // A first red day promoted into the opening takes a decoy's place (and its neighbours').
+          expect(days.length).toBeGreaterThanOrEqual(MAX_SLOW - 2);
+          expect(decoys.length + promoted.length).toBeLessThanOrEqual(DECOYS);
         }
-        expect([...t, ...decoys].sort((a, b) => a - b)).toEqual(days);
+        expect([...t, ...decoys, ...promoted].sort((a, b) => a - b)).toEqual(days);
         checkDecoys(run, days, decoys);
       });
 
@@ -206,9 +213,9 @@ describe('buildSchedule on every real run (no headlines)', () => {
         const total = sum(steps);
         // R27: ceiling 150 s (long falls run about 140 s).
         expect(total).toBeLessThanOrEqual(150_000);
-        // A very short run simply finishes sooner (R22, R27): at least 25 s.
+        // A very short run simply finishes sooner (R22, R27): at least 25 s, less a short quiet day 1.
         if (isShortFall(run)) {
-          expect(total).toBeGreaterThanOrEqual(25_000);
+          expect(total).toBeGreaterThanOrEqual(25_000 - (SHORT_QUIET_MS - FIRST_STEP_MAX_MS));
           return;
         }
         // A fall the 1,500 ms cap cannot fill finishes sooner too: at least 60 s.
@@ -312,13 +319,57 @@ describe('buildSchedule with the real headline files (R22)', () => {
     it(`${run.id}: big days in the fall are slow, at most ten slow steps, first slow within 15 s, cap kept`, () => {
       const steps = buildSchedule(run, headlines);
       const slow = steps.filter((s) => s.slow).map((s) => s.dayIndex);
-      for (const h of headlines) if (h.big && h.dayIndex < run.fallEndIndex) expect(slow).toContain(h.dayIndex);
+      const bigDays = headlines.filter((h) => h.big && h.dayIndex < run.fallEndIndex).map((h) => h.dayIndex);
+      const notSlow = bigDays.filter((d) => !slow.includes(d));
+      // Every big day is slow, except that a first red day promoted into a full set of ten big days
+      // takes the place of the latest of them (MAX_SLOW wins).
+      if (pickSlowDays(run, headlines).promoted.length && bigDays.length >= MAX_SLOW) {
+        expect(notSlow).toEqual([Math.max(...bigDays.filter((d) => d !== pickSlowDays(run, headlines).promoted[0]))]);
+      } else expect(notSlow).toEqual([]);
       expect(slow.length).toBeLessThanOrEqual(MAX_SLOW);
       const first = steps.findIndex((s) => s.slow);
       expect(sum(steps.slice(0, first))).toBeLessThanOrEqual(FIRST_SLOW_BY_MS);
       const quietCap = run.fallEndIndex < SHORT_FALL_DAYS ? SHORT_QUIET_MS : MAX_QUIET_MS;
       for (const s of steps) if (s.phase === 'fall' && !s.slow) expect(s.holdMs).toBeLessThanOrEqual(quietCap);
       expect(sum(steps)).toBeLessThanOrEqual(150_000);
+    });
+  }
+});
+
+/** The close before day 1 (preCloses in the run file), for day 1's own move. */
+const preClose = (run: RunData) => {
+  const pre = (run as RunData & { preCloses?: number[] }).preCloses;
+  return pre && pre.length ? pre[pre.length - 1] : undefined;
+};
+const dayMove = (run: RunData, d: number) => {
+  if (d >= 1) return run.closes[d] / run.closes[d - 1] - 1;
+  const p = preClose(run);
+  return p === undefined ? 0 : run.closes[0] / p - 1;
+};
+
+describe('first red day and a prompt start, on every run with its real headlines', () => {
+  for (const run of runs) {
+    const file = join(DIR, `${run.id}.headlines.csv`);
+    const headlines = existsSync(file) ? toHeadlines(parseHeadlineRows(readFileSync(file, 'utf8')).rows, run) : [];
+    const steps = buildSchedule(run, headlines);
+    const starts: number[] = [];
+    steps.reduce((t, s) => (starts.push(t), t + s.holdMs), 0);
+
+    it(`${run.id}: a quiet day 1 holds at most ${FIRST_STEP_MAX_MS} ms, so a new game visibly starts at once`, () => {
+      if (!steps[0].slow) expect(steps[0].holdMs).toBeLessThanOrEqual(FIRST_STEP_MAX_MS);
+    });
+
+    it(`${run.id}: a falling day of 1% or more in the first 15 s means a red (slow, falling) step in them`, () => {
+      const inWindow = steps.map((_, i) => i).filter((i) => starts[i] < FIRST_SLOW_BY_MS);
+      const lastDay = steps[inWindow[inWindow.length - 1]].dayIndex;
+      const bigFall = Array.from({ length: lastDay + 1 }, (_, d) => d).some((d) => dayMove(run, d) <= -0.01);
+      // A slow step's previous step is the day before it, so red = slow and below the day before.
+      const red = inWindow.some((i) => steps[i].slow && dayMove(run, steps[i].dayIndex) < 0);
+      if (bigFall) expect(red).toBe(true);
+      const slow = steps.filter((s) => s.slow).map((s) => s.dayIndex);
+      expect(slow.length).toBeLessThanOrEqual(MAX_SLOW);
+      const { decoys } = pickSlowDays(run, headlines);
+      checkDecoys(run, slow, decoys);
     });
   }
 });

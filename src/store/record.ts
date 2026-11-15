@@ -19,6 +19,9 @@ export interface LastRun {
   balances: number[];
   trades: Trade[];
   final: number;
+  /** What the go started with ($10,000, or a carried amount), and whether it used borrowed money. */
+  start?: number;
+  borrowed?: boolean;
 }
 
 /**
@@ -29,6 +32,9 @@ export interface LastRun {
 export interface RunContext {
   lowIndex?: number;
   date?: string;
+  /** What the go started with (default $10,000) and whether it used borrowed money; kept with the last run. */
+  start?: number;
+  borrowed?: boolean;
 }
 
 const EMPTY: RecordData = { games: 0, wins: 0, soldTooEarly: 0, played: [], titles: [], bestStreak: 0 };
@@ -79,7 +85,8 @@ export function isBlind(mode: Mode, opts: { repeatDaily?: boolean } = {}): boole
  *
  * Blind runs are mystery, the first play of a daily date and challenge. Only they add titles,
  * games, wins (lead > 0) and "sold too early" (first sale before `ctx.lowIndex` and finished
- * behind). Every mode adds the run to `played` and stores it as the last run for that crash.
+ * behind) and add the run to `played` (R33: practice runs do not count). Every mode stores it as the
+ * last run for that crash.
  */
 export function recordRun(
   mode: Mode,
@@ -103,9 +110,9 @@ export function recordRun(
 
   const blind = isBlind(mode, { repeatDaily });
   const rec = currentRecord();
-  const played = rec.played.includes(runId) ? rec.played : [...rec.played, runId];
-  const next: RecordData = { ...rec, played };
+  const next: RecordData = { ...rec };
   if (blind) {
+    if (!rec.played.includes(runId)) next.played = [...rec.played, runId];
     next.games = rec.games + 1;
     if (result.lead > 0) next.wins = rec.wins + 1;
     if (!rec.titles.includes(verdict)) next.titles = [...rec.titles, verdict];
@@ -123,6 +130,8 @@ export function recordRun(
       balances: result.balances.map((b) => Math.round(b)),
       trades: result.trades.map((t) => ({ dayIndex: t.dayIndex, side: t.side })),
       final: Math.round(result.final),
+      start: ctx.start ?? 10000,
+      borrowed: !!ctx.borrowed,
     },
   });
   return { blind };
@@ -139,6 +148,23 @@ export function getLastRun(runId: string): LastRun | null {
   const r = isObj(all) ? all[runId] : null;
   if (!isObj(r) || !Array.isArray(r.balances) || !Array.isArray(r.trades) || typeof r.final !== 'number') return null;
   return r as unknown as LastRun;
+}
+
+/**
+ * The previous go to show as "Score to beat" and the dashed line (I2): only an unborrowed go whose start
+ * was kept, scaled to `start` (balances are linear in the start). Null otherwise.
+ */
+export function scoreToBeatRun(runId: string, start: number): LastRun | null {
+  const r = getLastRun(runId);
+  if (!r || r.borrowed !== false || typeof r.start !== 'number' || !(r.start > 0)) return null;
+  const k = start / r.start;
+  return {
+    balances: r.balances.map((b) => Math.round(b * k)),
+    trades: r.trades.map((t) => ({ dayIndex: t.dayIndex, side: t.side })),
+    final: Math.round(r.final * k),
+    start,
+    borrowed: false,
+  };
 }
 
 /** The first result stored for a daily date, or null. */

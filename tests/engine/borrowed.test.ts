@@ -50,3 +50,11 @@ describe('simulateBorrowed', () => {
     expect(r.share).toBeCloseTo((12250 - 10750) / (13437.5 - 10750));
   });
 });
+
+describe('simulateBorrowed lead', () => {
+  it('is the rounded final minus the rounded holder, like simulate', () => {
+    const r = simulateBorrowed([100, 108, 87.825], [{ dayIndex: 1, side: 'sell' }]);
+    expect(r.lead).toBe(Math.round(r.final) - Math.round(r.holderFinal));
+    expect(Number.isInteger(r.lead)).toBe(true);
+  });
+});

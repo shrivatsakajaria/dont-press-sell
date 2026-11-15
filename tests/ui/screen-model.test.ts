@@ -62,6 +62,17 @@ describe('screenModel', () => {
     expect(m.deltaLabel).toBe('level');
   });
 
+  it('a slow day 1 that fell from the close before the run (preCloses) is a red day', () => {
+    const slow0 = steps.map((st, i) => (i === 0 ? { ...st, slow: true } : st));
+    const v = { ...view(0), slow: true };
+    const red = screenModel(state(v, { steps: slow0, run: { closes, dates, preCloses: [104, 103] } }));
+    expect(red.worst).toBe(true);
+    expect(red.paper).toEqual(paperFor({ lossFrac: 0, inCash: false, worstDay: true }));
+    // Rose from the close before, or no closes before in the file: not red.
+    expect(screenModel(state(v, { steps: slow0, run: { closes, dates, preCloses: [98] } })).worst).toBe(false);
+    expect(screenModel(state(v, { steps: slow0 })).worst).toBe(false);
+  });
+
   it('opening line stays up for the first four seconds of play, however short the steps', () => {
     expect(screenModel(state(view(3))).standfirst).toBe(OPENING_LINE);
     expect(screenModel(state(view(6))).standfirst).toBe(OPENING_LINE);

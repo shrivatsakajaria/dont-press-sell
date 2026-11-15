@@ -38,3 +38,9 @@ test('ends with the url and names no crash', () => {
   expect(t.endsWith(url)).toBe(true);
   expect(t).not.toMatch(/19\d\d|20\d\d|Black|Lehman|pandemic/i);
 });
+
+test('a level finish reads "Level with someone who did nothing" (R32)', () => {
+  const t = dailyText(3, 'Diamond hands', 0, balances, url, 1);
+  expect(t).toContain('Diamond hands. Level with someone who did nothing.');
+  expect(t).not.toContain('$0');
+});

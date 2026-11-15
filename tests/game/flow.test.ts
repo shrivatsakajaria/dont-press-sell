@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { RunResult } from '../../src/engine/types';
-import { bankPending, borrowedUnlocked, challengeFits, currentStreak, doubleUp, settle } from '../../src/game/flow';
+import { bankPending, borrowedUnlocked, challengeFits, currentStreak, doubleUp, settle, verifiedChallenge } from '../../src/game/flow';
 import { getPot, resetPot } from '../../src/game/pot';
 import { getRecord } from '../../src/store/record';
 import { resetCells } from '../../src/store/store';
@@ -48,7 +48,7 @@ for (const [name, make] of [['with storage', memoryStorage], ['with storage thro
 
     test('a mystery win offers double or nothing; the pot shows the win but settles only when banked', () => {
       const s = settle({ ...base, mode: 'mystery', result: result(1640, 12390) });
-      expect(s.double).toEqual({ lead: 1640, final: 12390, wins: 1 });
+      expect(s.double).toEqual({ net: 1640, final: 12390, wins: 1 });
       expect(s.pot).toEqual({ pot: 11640, tonight: 1640 });
       expect(getPot().pot).toBe(10000);
       expect(bankPending()).toEqual({ pot: 11640, tonight: 1640, bust: false });
@@ -63,6 +63,8 @@ for (const [name, make] of [['with storage', memoryStorage], ['with storage thro
       expect(currentStreak().start).toBe(12390);
       const two = settle({ ...base, start: 12390, mode: 'mystery', result: result(1000, 14000) });
       expect(two.double?.wins).toBe(2);
+      // I1: "Bank $N" banks the whole streak's net, so the figure is the net, not this run's lead.
+      expect(two.double?.net).toBe(2640);
       doubleUp();
       const lost = settle({ ...base, start: 14000, mode: 'mystery', result: result(-3000, 12000) });
       expect(lost.double).toBeNull();
@@ -141,5 +143,22 @@ describe('challengeFits', () => {
     expect(challengeFits(c([3, 99]), 100)).toBe(true);
     expect(challengeFits(c([3, 100]), 100)).toBe(false);
     expect(challengeFits(c([3, 5000]), 100)).toBe(false);
+  });
+});
+
+describe('verifiedChallenge (I5)', () => {
+  const closes = [100, 90, 80, 100, 107.5];
+  const c = (final: number, days: number[]) => ({
+    runId: 'c2007', final, trades: days.map((d, i) => ({ dayIndex: d, side: (i % 2 ? 'buy' : 'sell') as 'buy' | 'sell' })),
+  });
+  test('the score to beat is recomputed from the run and the trades; the encoded final is ignored', () => {
+    // Sold at 90, back in at 80: 9,000 -> 12,093.75 at the end.
+    const forged = verifiedChallenge(c(1_000_000_000, [1, 2]), closes)!;
+    expect(forged.final).toBe(12094);
+    expect(forged.trades).toEqual([{ dayIndex: 1, side: 'sell' }, { dayIndex: 2, side: 'buy' }]);
+    expect(verifiedChallenge(c(5, []), closes)!.final).toBe(10750);
+  });
+  test('a code whose trades do not fit the run is rejected', () => {
+    expect(verifiedChallenge(c(9000, [1, 5]), closes)).toBeNull();
   });
 });

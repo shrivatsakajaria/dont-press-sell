@@ -8,16 +8,17 @@
 <link rel="icon" href="data:,">
 <meta name="description" content="A one-button game played over real US stock market falls. You have $10,000 of play money. Hold your nerve or bail.">
 <meta property="og:type" content="website">
+<meta property="og:url" content="%SITE_URL%/">
 <meta property="og:title" content="Don't Press Sell">
 <meta property="og:description" content="A one-button game played over real US stock market falls. You have $10,000 of play money. Hold your nerve or bail.">
-<meta property="og:image" content="/og.png">
+<meta property="og:image" content="%SITE_URL%/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="627">
 <meta property="og:image:alt" content="A red newspaper front page: the market's worst day, and a button that reads Sell for $6,245">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Don't Press Sell">
 <meta name="twitter:description" content="A one-button game played over real US stock market falls. Hold your nerve or bail.">
-<meta name="twitter:image" content="/og.png">
+<meta name="twitter:image" content="%SITE_URL%/og.png">
 <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/libre-franklin-700.woff2" as="font" type="font/woff2" crossorigin>
 <style>
@@ -29,11 +30,11 @@
 html,body{margin:0;background:var(--bg);color:var(--ink);transition:background-color var(--fade) var(--ease)}
 body{font-family:'Newsreader',Georgia,serif;min-height:100vh;min-height:100dvh;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
 ::selection{background:var(--ink);color:var(--bg)}
-#app{box-sizing:border-box;max-width:440px;margin:0 auto;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;
+#app{box-sizing:border-box;max-width:440px;margin:0 auto;overflow:clip;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;
   padding:max(24px,env(safe-area-inset-top)) max(24px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(24px,env(safe-area-inset-left))}
 .masthead{border-top:4px solid currentColor;border-bottom:1px solid currentColor;padding:8px 0 4px;text-align:center;font-weight:700;font-size:30px;line-height:1;letter-spacing:-0.02em}
 /* The menus bring their own column; inside #app they take its margins instead. */
-#app>.dps-menu{padding:0;min-height:0;flex:1 0 auto}
+#app>.dps-menu{padding:0;min-height:0;flex:1 0 auto;width:100%;margin:0}
 
 .play{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;background:var(--bg);color:var(--ink);
   transition:background-color var(--fade) var(--ease),color var(--fade) var(--ease)}
@@ -48,36 +49,41 @@ body{font-family:'Newsreader',Georgia,serif;min-height:100vh;min-height:100dvh;-
 .is-gate .intro{display:block;margin-top:20px}
 .is-gate .headline,.is-gate .standfirst{display:none}
 .is-gate .pause{visibility:hidden}
-.is-gate .chart{min-height:48px}
+.is-gate .chart,.is-gate .delta{display:none}
+/* With no chart yet, the balance sits over the button and the space stays above it. */
+.is-gate .spacer{flex-grow:0}
+.is-gate .figures{margin-top:auto}
 .intro p{margin:12px 0 0;font-size:20px;line-height:1.3;text-wrap:pretty}
 .intro .lead{margin:0;font-weight:700;font-size:28px;line-height:1.08;letter-spacing:-0.02em;text-wrap:balance}
 .intro .extra{font-size:18px;color:var(--sec)}
 .intro .note{font-family:var(--sans);font-weight:700;font-size:16px;line-height:1.3;font-variant-numeric:tabular-nums}
-.chart{flex:3 1 0;min-height:72px;max-height:288px;margin-top:16px;padding:8px 0;border-top:1px solid currentColor;border-bottom:1px solid currentColor;overflow:hidden}
+/* R30: the chart takes (and gives back) every change of height above the button, so the button never moves. */
+.chart{flex:100 1 0;min-height:0;max-height:288px;margin-top:16px;padding:8px 0;border-top:1px solid currentColor;border-bottom:1px solid currentColor;overflow:hidden}
 .chart svg{display:block;width:100%;overflow:visible}
 .is-worst .chart{margin-left:-24px;margin-right:-24px;padding:0;border-color:transparent}
-.figures{margin-top:16px;display:flex;align-items:baseline;justify-content:space-between;gap:12px}
-.balance{font-weight:700;font-size:72px;line-height:1;letter-spacing:-0.03em;font-variant-numeric:lining-nums tabular-nums;white-space:nowrap}
+/* The figure beside the balance moves under it when both do not fit (wide balances, narrow phones). */
+.figures{margin-top:16px;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;column-gap:12px}
+.balance{font-weight:700;font-size:min(72px,18.5vw);line-height:1;letter-spacing:-0.03em;font-variant-numeric:lining-nums tabular-nums;white-space:nowrap}
 .slot{display:inline-block;vertical-align:bottom;line-height:inherit}
 .slot>span{display:inline-block}
-.delta{font-family:var(--sans);font-weight:700;font-size:16px;line-height:1.25;text-align:right;font-variant-numeric:tabular-nums;max-width:5.5em}
+.delta{font-family:var(--sans);font-weight:700;font-size:16px;line-height:1.25;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;margin-left:auto}
 .delta.loss{color:var(--accent)}
 .regret{margin:8px 0 0;font-family:var(--sans);font-weight:700;font-size:16px;line-height:1.3;font-variant-numeric:tabular-nums}
 .regret.rose{color:var(--accent)}
 .regret[hidden]{display:none}
 .spacer{flex:1 0 16px}
-.act{display:block;width:100%;min-height:72px;margin:0;padding:8px 12px;border:0;border-radius:0;background:var(--btn-bg);color:var(--btn-ink);
+.act{display:block;flex:none;width:100%;height:72px;margin:0;padding:8px 12px;border:0;border-radius:0;background:var(--btn-bg);color:var(--btn-ink);
   font-family:var(--sans);font-weight:700;font-size:24px;line-height:1.15;font-variant-numeric:tabular-nums;cursor:pointer;touch-action:manipulation;
   transition:background-color var(--fade) var(--ease),color var(--fade) var(--ease)}
 .act.long{font-size:20px;padding:8px}
 .act:active{transform:translateY(1px)}
 .act[aria-disabled="true"]{cursor:default}
 .act:focus-visible,.quiet:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
-.under{margin:12px 0 0;min-height:16px;font-family:var(--sans);font-weight:500;font-size:12px;line-height:1.35;color:var(--sec);font-variant-numeric:tabular-nums}
-.foot{display:flex;align-items:center;gap:16px;margin-top:4px;border-top:1px solid currentColor;font-family:var(--sans);font-weight:500;font-size:12px;line-height:1;color:var(--sec);font-variant-numeric:tabular-nums}
+.under{flex:none;height:32px;overflow:hidden;margin:12px 0 0;font-family:var(--sans);font-weight:500;font-size:12px;line-height:16px;color:var(--sec);font-variant-numeric:tabular-nums}
+.foot{flex:none;display:flex;align-items:center;gap:16px;margin-top:4px;border-top:1px solid currentColor;font-family:var(--sans);font-weight:500;font-size:12px;line-height:1;color:var(--sec);font-variant-numeric:tabular-nums}
 .pot{margin-right:auto}
 .quiet{min-height:44px;min-width:44px;margin:0;padding:0;border:0;background:none;color:inherit;font:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer;touch-action:manipulation}
-.quiet:hover{color:var(--ink)}
+@media (hover:hover){.quiet:hover{color:var(--ink)}}
 @media (max-height:760px){
   .headline{margin-top:16px;font-size:34px}
   .is-big .headline{font-size:38px}
@@ -90,10 +96,14 @@ body{font-family:'Newsreader',Georgia,serif;min-height:100vh;min-height:100dvh;-
   .intro .note{font-size:14px}
   .chart{margin-top:12px}
   .figures{margin-top:12px}
-  .balance{font-size:56px}
-  .act{min-height:64px}
+  .balance{font-size:min(56px,15vw)}
+  .act{height:64px}
   .under{margin-top:8px}
 }
+/* A run that did not load (I6): one line on the paper; the whole column is the retry button. */
+.retry{flex:1 1 auto;display:flex;align-items:flex-start;width:100%;margin:20px 0 0;padding:0 0 24px;border:0;border-radius:0;background:none;color:var(--ink);
+  font-family:'Newsreader',Georgia,serif;font-weight:700;font-size:34px;line-height:1.05;letter-spacing:-0.02em;text-align:left;vertical-align:top;cursor:pointer;touch-action:manipulation}
+.retry:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){.act:active{transform:none}}
 </style>
 </head>

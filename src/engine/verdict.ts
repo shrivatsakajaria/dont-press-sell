@@ -41,6 +41,15 @@ function paperSale(result: RunResult, run: RunData): { dayIndex: number; distanc
   return best;
 }
 
+/** R34: the first sale came in the first third of the fall (to the low) and a later buy was at a higher close. */
+function soldEarlyBoughtHigher(result: RunResult, run: RunData): boolean {
+  const i = result.trades.findIndex((t) => t.side === 'sell');
+  if (i < 0) return false;
+  const sale = result.trades[i];
+  if (!(sale.dayIndex < run.lowIndex / 3)) return false;
+  return result.trades.slice(i + 1).some((u) => u.side === 'buy' && run.closes[u.dayIndex] > run.closes[sale.dayIndex]);
+}
+
 export function verdictFor(result: RunResult, run: RunData): VerdictId {
   if (isWiped(result)) return 'marginCalled';
   // R9: a borrowed run that never traded always ends ahead of the holder; it is still diamond hands.
@@ -106,7 +115,7 @@ export function verdictCopy(
     case 'shakenOut':
       return {
         title: 'Shaken out',
-        line: 'Sold a dip that was back in months',
+        line: 'Sold a dip that bounced straight back',
         headline: 'Local investor flees a crash that never came',
       };
     case 'paper':
@@ -130,7 +139,7 @@ export function verdictCopy(
     case 'bagholder':
       return {
         title: 'Bagholder',
-        line: 'Held most of the way down, then blinked',
+        line: soldEarlyBoughtHigher(result, run) ? 'Sold early, then bought back higher' : 'Held most of the way down, then blinked',
         headline: 'Local investor blinks at the wrong moment',
       };
   }

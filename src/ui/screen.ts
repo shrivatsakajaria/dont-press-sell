@@ -32,6 +32,10 @@ const TOP_GAP = 500;
 const YEAR_MS = 365.25 * 24 * 3600 * 1000;
 const EASE = 'cubic-bezier(0.22,1,0.36,1)';
 const SEEN_FIRST_SALE = 'seenFirstSale';
+/** R30: the headline's size steps (of its CSS size), its line limit, and the chart's least height. */
+const HEADLINE_STEPS = [1, 0.82, 0.68, 0.6, 0.52];
+const MAX_HEADLINE_LINES = 3;
+const MIN_CHART = 120;
 
 export interface ScreenModel {
   runLabel: string;
@@ -66,7 +70,7 @@ export interface DayPoint {
 
 /** Everything screenModel needs: the session's view plus what the screen has seen so far. */
 export interface PlayState {
-  run: Pick<RunData, 'closes' | 'dates'>;
+  run: Pick<RunData, 'closes' | 'dates' | 'preCloses'>;
   steps: Step[];
   start: number;
   view: SessionView;
@@ -100,7 +104,11 @@ export function screenModel(s: PlayState): ScreenModel {
   const d = v.dayIndex;
   const prevStep = v.stepIndex > 0 ? steps[v.stepIndex - 1] : undefined;
   const prevDay = prevStep ? prevStep.dayIndex : d;
-  const fell = prevStep !== undefined && closes[d] < closes[prevDay];
+  // Day 1 has no step before it: it fell if it closed below the close before the run (preCloses).
+  const pre = run.preCloses;
+  const fell = prevStep !== undefined
+    ? closes[d] < closes[prevDay]
+    : !!pre && pre.length > 0 && closes[d] < pre[pre.length - 1];
   const inCash = !v.invested;
   const worst = v.slow && fell;
   const forward = v.phase === 'forward';
@@ -226,6 +234,8 @@ function chartModel(s: PlayState, worst: boolean, inCash: boolean): ChartModel {
 export interface ScreenHandlers {
   /** The finger (or Enter/Space key) went down on the main button. */
   onPressStart?(): void;
+  /** The press was cancelled, or the finger left the button while still down. */
+  onPressCancel?(): void;
   onPress?(): void;
   /** The frame showing the latest render is about to be painted. */
   onPainted?(): void;
@@ -315,6 +325,11 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   const actRoll = createRoll(actFig);
 
   act.addEventListener('pointerdown', () => handlers.onPressStart?.());
+  act.addEventListener('pointercancel', () => handlers.onPressCancel?.());
+  // Touch fires pointerleave after the finger lifts (before the click): only a leave with a button still down cancels.
+  act.addEventListener('pointerleave', (e) => {
+    if ((e as PointerEvent).buttons) handlers.onPressCancel?.();
+  });
   act.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') handlers.onPressStart?.();
   });
@@ -344,6 +359,29 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
     if (meta) meta.setAttribute('content', p.bg);
   }
 
+  /**
+   * R30: the headline never runs past three lines and the chart keeps at least MIN_CHART px. The headline
+   * steps down from its CSS size (82%, 68%, then 60% and 52% for the longest lines) until both hold; the smallest step is the floor.
+   */
+  function fitHeadline() {
+    headline.style.fontSize = '';
+    if (page.classList.contains('is-gate') || chartWrap.getBoundingClientRect().height === 0) return;
+    let base = 0;
+    try {
+      base = parseFloat(getComputedStyle(headline).fontSize);
+    } catch {
+      return;
+    }
+    if (!(base > 0)) return;
+    for (const k of HEADLINE_STEPS) {
+      const px = Math.round(base * k);
+      headline.style.fontSize = k === 1 ? '' : `${px}px`;
+      const lh = parseFloat(getComputedStyle(headline).lineHeight) || px;
+      const lines = Math.round(headline.getBoundingClientRect().height / lh);
+      if (lines <= MAX_HEADLINE_LINES && chartWrap.getBoundingClientRect().height >= MIN_CHART) return;
+    }
+  }
+
   function drawChartNow(m: ScreenModel) {
     const r = chartWrap.getBoundingClientRect();
     const w = Math.round(r.width) || 342;
@@ -367,6 +405,7 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       const key = `${Math.round(r.width)}x${Math.round(r.height)}`;
       if (key !== lastSize && last) {
         lastSize = key;
+        fitHeadline();
         drawChartNow(last);
       }
     });
@@ -423,6 +462,7 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       pot.textContent = m.pot;
       pause.textContent = m.paused ? RESUME : PAUSE;
       pause.setAttribute('aria-pressed', String(m.paused));
+      fitHeadline();
       drawChartNow(m);
       cancelRaf(paintFrame);
       paintFrame = raf(() => handlers.onPainted?.());
@@ -522,6 +562,9 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
     onPressStart() {
       capturedStep = paintedStep ?? rendered?.stepIndex ?? null;
     },
+    onPressCancel() {
+      capturedStep = null;
+    },
     onPainted() {
       if (rendered) paintedStep = rendered.stepIndex;
     },
@@ -567,7 +610,7 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
   function draw(raw: SessionView) {
     if (ended) return;
     // Borrowed money: leadAt measures an unborrowed player, so the counter is taken from the view itself.
-    const v = opts.borrowed ? { ...raw, leadNow: raw.balance - raw.marketBalance } : raw;
+    const v = opts.borrowed ? { ...raw, leadNow: Math.round(raw.balance) - Math.round(raw.marketBalance) } : raw;
     rendered = v;
     history.set(v.dayIndex, { balance: v.balance, invested: v.invested });
     let traded: Trade['side'] | null = null;
@@ -641,7 +684,13 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       pot: opts.pot ?? start, headline: '', commentary: '', other: opts.other,
     });
     screen.setGate(g);
-    screen.render({ ...m, buttonLabel: START_LABEL, longLabel: false, regret: null, underButton: FOOTER_PLAY });
+    // Nothing has happened yet: calm paper and the default status even when day 1 is a slow or red day,
+    // no "level" beside the balance, and (CSS) no chart band.
+    screen.render({
+      ...m, status: STATUS_DEFAULT, big: false, worst: false, paper: paperFor({ lossFrac: 0, inCash: false, worstDay: false }),
+      chart: { ...m.chart, worst: false }, deltaLabel: '',
+      buttonLabel: START_LABEL, longLabel: false, regret: null, underButton: FOOTER_PLAY,
+    });
   }
 
   return {

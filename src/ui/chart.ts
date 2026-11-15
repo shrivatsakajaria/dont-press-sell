@@ -37,8 +37,12 @@ export interface ChartGeometry {
 const MIN_SPAN_DAYS = 40;
 /** Today's dot sits at most this far across, leaving the right edge as "the future". */
 const TODAY_AT = 0.9;
-const PAD_Y = 12;
+/** Room above the highest point, and below the lowest for a label under it ("Sold" at the low). */
+const PAD_TOP = 12;
+const PAD_BOTTOM = 24;
 const PAD_RIGHT = 8;
+/** Least vertical range, as a share of the start, either side of the start line. */
+export const MIN_RANGE = 0.02;
 
 /** Worst-day fill beneath the cream line (mock-up 2). */
 const WORST_FILL = '#96102a';
@@ -73,14 +77,10 @@ export function chartGeometry(m: ChartModel, w: number, h: number): ChartGeometr
       hi = Math.max(hi, m.other[d]);
     }
   }
-  // A minimum vertical range of 4% of the start, so small wobbles do not look like cliffs.
-  const minRange = m.start * 0.04;
-  if (hi - lo < minRange) {
-    const mid = (hi + lo) / 2;
-    lo = mid - minRange / 2;
-    hi = mid + minRange / 2;
-  }
-  const yOf = (v: number) => PAD_Y + ((hi - v) / (hi - lo)) * (h - 2 * PAD_Y);
+  // The range always spans 2% of the start either side of it, so small wobbles never look like cliffs.
+  lo = Math.min(lo, m.start * (1 - MIN_RANGE));
+  hi = Math.max(hi, m.start * (1 + MIN_RANGE));
+  const yOf = (v: number) => PAD_TOP + ((hi - v) / (hi - lo)) * (h - PAD_TOP - PAD_BOTTOM);
 
   const line = pts.map((p) => [xOf(p.dayIndex), yOf(p.balance)] as [number, number]);
   const ghosts: [number, number][][] = [];
@@ -166,55 +166,88 @@ export function drawChart(svg: SVGSVGElement | SVGElement, m: ChartModel, paper:
 interface Box { x0: number; x1: number; y0: number; y1: number }
 interface Spot { x: number; y: number; anchor: 'start' | 'end' }
 
-/** Rough width of a 12px Libre Franklin label. */
-const CHAR_W = 6.5;
+/** Generous width of a 12px Libre Franklin label, per character. */
+const CHAR_W = 7.2;
+/** Labels keep this far from the chart's sides (on red days the chart bleeds to the screen edge). */
+const INSET = 12;
+/** Space kept between two labels. */
+const GAP = 4;
 
 function boxOf(s: Spot, text: string): Box {
   const wd = text.length * CHAR_W;
   const x0 = s.anchor === 'end' ? s.x - wd : s.x;
   return { x0, x1: x0 + wd, y0: s.y - 11, y1: s.y + 3 };
 }
-const overlaps = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+const overlaps = (a: Box, b: Box, gap = 0) =>
+  a.x0 < b.x1 + gap && b.x0 < a.x1 + gap && a.y0 < b.y1 + gap && b.y0 < a.y1 + gap;
 
-/** True when any line passes through the box (sampled every 2px, with room for the stroke). */
-function crossesLine(b: Box, lines: [number, number][][]): boolean {
-  const pad = 2;
-  for (const pl of lines) {
-    for (let i = 0; i < pl.length; i++) {
-      const [x1, y1] = pl[Math.max(0, i - 1)];
-      const [x2, y2] = pl[i];
-      const n = Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 2));
-      for (let k = 0; k <= n; k++) {
-        const x = x1 + ((x2 - x1) * k) / n;
-        const y = y1 + ((y2 - y1) * k) / n;
-        if (x >= b.x0 - pad && x <= b.x1 + pad && y >= b.y0 - pad && y <= b.y1 + pad) return true;
-      }
-    }
+/** Points along a polyline about every pixel. */
+function samples(pl: [number, number][]): [number, number][] {
+  const out: [number, number][] = [];
+  for (let i = 0; i < pl.length; i++) {
+    const [x1, y1] = pl[Math.max(0, i - 1)];
+    const [x2, y2] = pl[i];
+    const n = Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1)));
+    for (let k = 0; k <= n; k++) out.push([x1 + ((x2 - x1) * k) / n, y1 + ((y2 - y1) * k) / n]);
   }
-  return false;
+  return out;
+}
+
+/** True when any line passes through the box (with room for the stroke). */
+function crossesLine(b: Box, lines: [number, number][][]): boolean {
+  const pad = 3;
+  return lines.some((pl) => samples(pl).some(([x, y]) => x >= b.x0 - pad && x <= b.x1 + pad && y >= b.y0 - pad && y <= b.y1 + pad));
+}
+
+/** Distance from the box's centre to the nearest point of a line. */
+function distTo(b: Box, pl: [number, number][]): number {
+  const cx = (b.x0 + b.x1) / 2;
+  const cy = (b.y0 + b.y1) / 2;
+  let best = Infinity;
+  for (const [x, y] of samples(pl)) best = Math.min(best, Math.hypot(x - cx, y - cy));
+  return best;
 }
 
 /**
- * The chart's words, each placed at the first of its candidate spots that stays inside
- * the chart, clear of the other labels, the dots and the lines, in this order: "Sold",
- * the start label, "The market". "Sold" and "The market" fall back to a spot clear of
- * other labels only; the start label is dropped rather than drawn across a line.
+ * The chart's words, each at the first of its candidate spots that is inside the chart (12px from its
+ * sides), clear of the other labels, the dots, every line (the start line included) and, on a red day,
+ * the fill under the line. A word with no such spot is left out. "The market" must also sit nearer the
+ * dashed market line than the player's line. Order: "Sold", "The market", then the start label.
  */
 function placeLabels(m: ChartModel, g: ChartGeometry, paper: Paper, w: number, h: number): SVGElement[] {
-  const lines = [g.line, ...g.ghosts];
+  const startLine: [number, number][] = [[0, g.startY], [w, g.startY]];
+  const lines = [g.line, ...g.ghosts, g.other, startLine].filter((pl) => pl.length > 1);
   const taken: Box[] = [];
   const dot = (x: number, y: number, r: number): Box => ({ x0: x - r - 2, x1: x + r + 2, y0: y - r - 2, y1: y + r + 2 });
   const dots = [dot(g.today[0], g.today[1], 8), ...g.marks.map((mk) => dot(mk.x, mk.y, 6))];
   const out: SVGElement[] = [];
-  const inside = (b: Box) => b.x0 >= 0 && b.x1 <= w && b.y0 >= 0 && b.y1 <= h;
+  const inside = (b: Box) => b.x0 >= INSET && b.x1 <= w - INSET && b.y0 >= 0 && b.y1 <= h;
+  // Red day: the area under the player's line is filled.
+  const lineY = (x: number): number | null => {
+    const pl = g.line;
+    if (!pl.length || x < pl[0][0] || x > pl[pl.length - 1][0]) return null;
+    for (let i = 1; i < pl.length; i++) {
+      const [x1, y1] = pl[i - 1];
+      const [x2, y2] = pl[i];
+      if (x <= x2) return x2 === x1 ? Math.min(y1, y2) : y1 + ((y2 - y1) * (x - x1)) / (x2 - x1);
+    }
+    return pl[0][1];
+  };
+  const inFill = (b: Box) => {
+    if (!m.worst) return false;
+    for (let x = b.x0; x <= b.x1; x += 2) {
+      const y = lineY(x);
+      if (y !== null && b.y1 > y) return true;
+    }
+    return false;
+  };
 
-  function place(text: string, spots: Spot[], strict: boolean, fill: string, weight: number) {
-    const fits = (s: Spot, avoidLines: boolean) => {
+  function place(text: string, spots: Spot[], fill: string, weight: number, also?: (b: Box) => boolean) {
+    const spot = spots.find((s) => {
       const b = boxOf(s, text);
-      return inside(b) && !taken.some((t) => overlaps(t, b)) && !dots.some((d) => overlaps(d, b)) &&
-        (!avoidLines || !crossesLine(b, lines));
-    };
-    const spot = spots.find((s) => fits(s, true)) ?? (strict ? undefined : spots.find((s) => fits(s, false)));
+      return inside(b) && !taken.some((t) => overlaps(t, b, GAP)) && !dots.some((d) => overlaps(d, b)) &&
+        !crossesLine(b, lines) && !inFill(b) && (!also || also(b));
+    });
     if (!spot) return;
     taken.push(boxOf(spot, text));
     out.push(
@@ -225,40 +258,40 @@ function placeLabels(m: ChartModel, g: ChartGeometry, paper: Paper, w: number, h
     );
   }
 
-  const around = (x: number, y: number): Spot[] => [
-    { x: x - 10, y: y + 18, anchor: 'end' },
-    { x: x - 10, y: y - 10, anchor: 'end' },
-    { x: x + 10, y: y + 18, anchor: 'start' },
-    { x: x + 10, y: y - 10, anchor: 'start' },
-    { x: x - 12, y: y + 4, anchor: 'end' },
-  ];
+  const around = (x: number, y: number): Spot[] => {
+    const spots: Spot[] = [];
+    for (const [dx, dy] of [[10, 18], [10, -10], [14, 28], [14, -20], [12, 4], [24, 36], [24, -30]]) {
+      spots.push({ x: x - dx, y: y + dy, anchor: 'end' }, { x: x + dx, y: y + dy, anchor: 'start' });
+    }
+    return spots;
+  };
 
   const sale = [...g.marks].reverse().find((mk) => mk.side === 'sell');
-  if (sale) place(SOLD, around(sale.x, sale.y), false, paper.ink, 700);
+  if (sale) place(SOLD, around(sale.x, sale.y), paper.ink, 700);
 
-  const sy = g.startY;
-  // Along the dotted line from the right, above then below it, then from the left edge.
-  const startSpots: Spot[] = [];
-  for (const shift of [0, 60, 120, 180]) {
-    startSpots.push({ x: w - shift, y: sy - 6, anchor: 'end' }, { x: w - shift, y: sy + 16, anchor: 'end' });
-  }
-  startSpots.push({ x: 0, y: sy - 6, anchor: 'start' }, { x: 0, y: sy + 16, anchor: 'start' });
-  place(STARTED_AT(m.start), startSpots, true, paper.secondary, 500);
   if (m.inCash && g.ghosts.length) {
-    const last = g.ghosts[g.ghosts.length - 1];
-    const [gx, gy] = last[last.length - 1];
+    const ghost = g.ghosts[g.ghosts.length - 1];
+    const [gx, gy] = ghost[ghost.length - 1];
     const up = gy <= g.today[1];
-    // Close to the end of the dashed line first, then further out, on the side away from the player's line.
-    const dys = up ? [-10, 18, -24, 32] : [18, -10, 32, -24];
+    // Close to the end of the dashed line first, then further back along it, on the side away from the player's line.
+    const dys = up ? [-10, -18, 18, -28, 28] : [18, 26, -10, 34, -20];
     const spots: Spot[] = [];
-    for (const dx of [0, 40, 80]) {
-      for (const dy of dys) {
-        spots.push({ x: gx - 10 - dx, y: gy + dy, anchor: 'end' });
-      }
+    for (let back = 0; back < ghost.length; back = back ? back * 2 : 1) {
+      const [px, py] = ghost[ghost.length - 1 - back];
+      for (const dy of dys) spots.push({ x: px - 6, y: py + dy, anchor: 'end' }, { x: px + 6, y: py + dy, anchor: 'start' });
     }
     spots.push(...around(gx, gy));
-    place(THE_MARKET, spots, false, paper.secondary, 500);
+    place(THE_MARKET, spots, paper.secondary, 500, (b) => distTo(b, ghost) < distTo(b, g.line));
   }
+
+  const sy = g.startY;
+  // Last, and only where it has clear space: along the dotted line from the right, above then below it, then from the left.
+  const startSpots: Spot[] = [];
+  for (let shift = 0; shift <= w - 2 * INSET; shift += 30) {
+    startSpots.push({ x: w - INSET - shift, y: sy - 6, anchor: 'end' }, { x: w - INSET - shift, y: sy + 16, anchor: 'end' });
+  }
+  place(STARTED_AT(m.start), startSpots, paper.secondary, 500);
+
 
   return out;
 }

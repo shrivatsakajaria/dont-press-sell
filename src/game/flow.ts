@@ -1,7 +1,8 @@
 // Settling a finished run (spec 6.8, 6.11, 6.12): the record, the pot and the double-or-nothing
 // streak in one place, so the page code only draws. Storage may be missing: every value lives
 // in memory for the visit and is written through when it can be.
-import type { BorrowedResult, RunResult, VerdictId } from '../engine/types';
+import { simulate } from '../engine/simulate';
+import type { BorrowedResult, RunResult, Trade, VerdictId } from '../engine/types';
 import { dailyStreak, recordRun, recordStreak, type Mode } from '../store/record';
 import { cell } from '../store/store';
 import { applyToPot, getPot } from './pot';
@@ -56,8 +57,11 @@ export interface Settled {
   /** For the result page; while a win waits for a choice it includes that win. */
   pot: { pot: number; tonight: number };
   bust: boolean;
-  /** Present when double or nothing is offered; `wins` counts this win. */
-  double: { lead: number; final: number; wins: number } | null;
+  /**
+   * Present when double or nothing is offered; `wins` counts this win. `net` is the whole streak's
+   * win so far (this run included): what "Bank" adds to the pot (I1).
+   */
+  double: { net: number; final: number; wins: number } | null;
   /** The eighth win in a row. */
   island: boolean;
   /** Days in a row of daily crashes, on a first daily; else null. */
@@ -69,7 +73,9 @@ export interface Settled {
  * double-or-nothing choice and settled once the streak ends (bank, a loss, or leaving).
  */
 export function settle(i: SettleInput): Settled {
-  const { blind } = recordRun(i.mode, i.runId, i.result, i.verdict, { lowIndex: i.lowIndex, date: i.date });
+  const { blind } = recordRun(i.mode, i.runId, i.result, i.verdict, {
+    lowIndex: i.lowIndex, date: i.date, start: i.start, borrowed: i.borrowed,
+  });
   const daysInRow = i.mode === 'daily' && blind && i.date ? dailyStreak(i.date) : null;
   if (blind && i.result.lead > 0 && !borrowedUnlocked()) unlockedCell.set(true);
   const out = (p: { pot: number; tonight: number; bust: boolean }, double: Settled['double'] = null): Settled => ({
@@ -88,7 +94,7 @@ export function settle(i: SettleInput): Settled {
       const now = getPot();
       return out(
         { pot: now.pot + ar.state.net, tonight: now.tonight + ar.state.net, bust: false },
-        { lead: i.result.lead, final: i.result.final, wins: ar.state.wins },
+        { net: ar.state.net, final: i.result.final, wins: ar.state.wins },
       );
     }
     streakCell.set(ar.state);
@@ -121,4 +127,13 @@ export function doubleUp(): StreakState {
 /** A decoded challenge can be played only if every trade falls inside the run (spec 6.7). */
 export function challengeFits(c: { trades: { dayIndex: number }[] }, runLength: number): boolean {
   return c.trades.every((t) => Number.isInteger(t.dayIndex) && t.dayIndex >= 0 && t.dayIndex < runLength);
+}
+
+/**
+ * A challenge as it may be played (I5): the trades must fit the run, and the score to beat is
+ * recomputed from the run and the trades from $10,000. The final carried in the link is never trusted.
+ */
+export function verifiedChallenge<C extends { final: number; trades: Trade[] }>(c: C, closes: number[]): C | null {
+  if (!challengeFits(c, closes.length)) return null;
+  return { ...c, final: Math.round(simulate(closes, c.trades, 10000).final) };
 }

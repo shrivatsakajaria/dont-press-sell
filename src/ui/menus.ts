@@ -15,7 +15,7 @@ export const VERDICT_TITLES: Record<VerdictId, { title: string; line: string }> 
   bigShort: { title: 'Big Short energy', line: 'Out before the fall and back in near the low' },
   nerves: { title: 'Nerves of steel', line: 'Traded, and still came out in front' },
   diamond: { title: 'Diamond hands', line: 'Did nothing at all' },
-  shakenOut: { title: 'Shaken out', line: 'Sold a dip that was back in months' },
+  shakenOut: { title: 'Shaken out', line: 'Sold a dip that bounced straight back' },
   paper: { title: 'Paper hands', line: 'Sold near the low, then bought back higher' },
   cashGang: { title: 'Cash gang', line: 'Sold, and watched the whole recovery from the sidelines' },
   overtrader: { title: 'Overtrader', line: 'In and out, and behind for it' },
@@ -52,12 +52,11 @@ const CSS = `
 .dps-row{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;min-height:52px;padding:8px 0;margin:0;border:0;border-radius:0;background:none;color:var(--ink);text-align:left;font:inherit;cursor:pointer}
 .dps-row .n{font-weight:700;font-size:20px;line-height:1.15}
 .dps-row .k{flex:none;font-family:'Libre Franklin',Arial,sans-serif;font-weight:500;font-size:12px;color:var(--sec)}
-.dps-row:hover .n{text-decoration:underline;text-underline-offset:3px}
-.dps-item{display:flex;justify-content:space-between;align-items:baseline;gap:16px;min-height:44px;padding:10px 0}
+.dps-item{display:flex;justify-content:space-between;align-items:baseline;gap:16px;min-height:44px;padding:8px 0}
 .dps-item .n{font-weight:700;font-size:20px;line-height:1.15}
 .dps-item .l{font-size:16px;line-height:1.25;color:var(--sec);text-align:right}
 .dps-item.t{display:block;padding:8px 0}
-.dps-item.t .l{display:block;margin-top:2px;text-align:left;font-size:16px}
+.dps-item.t .l{display:block;margin-top:4px;text-align:left;font-size:16px}
 .dps-item.dash-row{min-height:32px;padding:4px 0}
 .dps-item .dash{color:var(--sec);font-size:16px;line-height:1.25}
 .dps-item .n.sec{color:var(--sec)}
@@ -75,6 +74,7 @@ const CSS = `
 .dps-back{display:block;width:100%;min-height:48px;margin:24px 0 0;padding:0;border:1px solid var(--ink);border-radius:0;background:none;color:var(--ink);font-family:'Libre Franklin',Arial,sans-serif;font-weight:700;font-size:16px;cursor:pointer}
 .dps-foot{margin-top:12px;font-family:'Libre Franklin',Arial,sans-serif;font-weight:500;font-size:12px;line-height:1.35;color:var(--sec)}
 .dps-menu button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+@media (hover:hover){.dps-row:hover .n{text-decoration:underline;text-underline-offset:3px}}
 @media (prefers-reduced-motion:reduce){.dps-switch .track i{transition:none}}
 `;
 

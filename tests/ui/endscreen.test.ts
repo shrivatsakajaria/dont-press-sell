@@ -82,15 +82,25 @@ describe('the reveal', () => {
     mount(m);
     const el = root.querySelector('[data-lead]') as HTMLElement;
     const lead = () => el.textContent;
-    expect(el.style.visibility).toBe('hidden');
+    const score = el.closest('.es-score') as HTMLElement;
+    expect(score.hidden).toBe(true);
     expect(lead()).not.toContain('$0');
     revealButton()!.click();
-    expect(el.style.visibility).toBe('');
+    expect(score.hidden).toBe(false);
     vi.advanceTimersByTime(700);
     const mid = lead();
     expect(mid).not.toBe('$0 ahead of someone who did nothing');
     vi.advanceTimersByTime(900);
     expect(lead()).toBe('$3,719 ahead of someone who did nothing');
+  });
+
+  test('a level finish reads "Level with someone who did nothing" (R32)', () => {
+    const m = c2007Sample();
+    m.result = { ...m.result, trades: [], lead: 0, final: m.result.holderFinal };
+    mount(m);
+    vi.advanceTimersByTime(4000 + 1600);
+    expect(root.querySelector('[data-lead]')!.textContent).toBe('Level with someone who did nothing');
+    expect(root.textContent).not.toContain('$0 ahead');
   });
 
   test('a loss counts down and reads "behind"', () => {
@@ -248,6 +258,105 @@ describe('the front page', () => {
     expect(t).toContain('Mystery crash');
   });
 
+  test('before the reveal the score block is out of the page: no "Perfect timing made" line and no blank gap', () => {
+    mount(c2007Sample());
+    const score = root.querySelector('.es-score') as HTMLElement;
+    expect(score.hidden).toBe(true);
+    expect(score.querySelector('.es-perfect')!.textContent).toBe('Perfect timing made $24,188. You made $14,513.');
+    expect(root.querySelector('.es-newsbox')!.getAttribute('style') ?? '').not.toContain('--news-h');
+    vi.advanceTimersByTime(4000);
+    expect(score.hidden).toBe(false);
+  });
+
+  test('the result chart draws the market as a dashed line while the player was out', () => {
+    mount(c2007Sample());
+    const svg = root.querySelector('svg[role="img"]')!;
+    expect(svg.querySelector('[data-line="market"]')).not.toBeNull();
+    expect(svg.getAttribute('aria-label')).toContain('the market while you were out');
+    mount(losingSample());
+    // losingSample sold near the low and bought back higher: the dashed line shows the bounce it missed.
+    expect(root.querySelector('svg [data-line="market"]')).not.toBeNull();
+  });
+
+  test('before the reveal the table figures and the "Keep your $N win" line keep their space but are hidden', () => {
+    const m = winningSample();
+    m.actions = { ...m.actions, onDouble: () => {}, onBank: () => {} };
+    mount(m);
+    const money = Array.from(root.querySelectorAll('.es-row span:last-child')) as HTMLElement[];
+    expect(money.length).toBe(3);
+    for (const e of money) expect(e.style.visibility).toBe('hidden');
+    expect(root.querySelector('.es-stake')).toBeNull(); // the double block comes at the reveal
+    expect(money[0].textContent).toMatch(/^\$[\d,]+$/); // the text is there, so nothing moves at the reveal
+    revealButton()!.click();
+    for (const e of money) expect(e.style.visibility).toBe('');
+    expect(root.querySelector('.es-stake')).not.toBeNull();
+  });
+
+  test('before the reveal the double block (with "Bank $N"), the pot line and money near misses keep their space, hidden', () => {
+    const m = winningSample();
+    m.nearMisses = [...m.nearMisses, 'One trade from perfect: perfect timing made $15,160'];
+    m.actions = { ...m.actions, onDouble: () => {}, onBank: () => {}, onRematch: () => {} };
+    mount(m);
+    // Rematch looks as it does on a loss until the reveal (R24 outlines it only beside the red double button).
+    const rematch = () => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === 'Rematch this crash')!;
+    expect(rematch().className).toBe('es-main');
+    // No double block, and no space for one, before the reveal: a gap only wins have would be a tell.
+    expect(root.querySelector('.es-double')).toBeNull();
+    expect(root.textContent).not.toMatch(/Bank \$|Keep your/);
+    const pot = root.querySelector('.es-pot') as HTMLElement;
+    const money = Array.from(root.querySelectorAll('.es-misses li')).filter((li) => li.textContent!.includes('$')) as HTMLElement[];
+    expect(money.length).toBeGreaterThan(0);
+    const held = [pot, ...money];
+    for (const e of held) expect(e.style.visibility).toBe('hidden');
+    // Plain near misses (no figure) show at once.
+    const plain = Array.from(root.querySelectorAll('.es-misses li')).filter((li) => !li.textContent!.includes('$')) as HTMLElement[];
+    for (const e of plain) expect(e.style.visibility).toBe('');
+    revealButton()!.click();
+    for (const e of held) expect(e.style.visibility).toBe('');
+    // Inserted at the reveal, in its place: after the score, before the other buttons.
+    const block = root.querySelector('.es-double') as HTMLElement;
+    expect(block.querySelector('.es-out')!.textContent).toMatch(/^Bank \$/);
+    expect(block.nextElementSibling!.className).toMatch(/^es-(pair|link)$/);
+    expect(rematch().className).toBe('es-out');
+    expect(block.previousElementSibling!.className).toBe('es-score');
+  });
+
+  test('the count-up never shows "$0" for a frame', () => {
+    for (const lead of [3719, 3, -2]) {
+      const m = c2007Sample();
+      m.result = { ...m.result, lead, final: m.result.holderFinal + lead };
+      handle?.destroy();
+      mount(m);
+      const el = root.querySelector('[data-lead]') as HTMLElement;
+      const seen = new Set<string>();
+      const watch = new MutationObserver(() => seen.add(el.textContent ?? ''));
+      watch.observe(el, { childList: true, characterData: true, subtree: true });
+      revealButton()!.click();
+      seen.add(el.textContent ?? '');
+      for (let t = 0; t < 1700; t += 10) {
+        vi.advanceTimersByTime(10);
+        seen.add(el.textContent ?? '');
+      }
+      watch.disconnect();
+      expect([...seen].filter((x) => /^\$0 /.test(x)), `lead ${lead}`).toEqual([]);
+    }
+  });
+
+  test('for 350 ms after the score appears, a tap on a moved button does nothing', () => {
+    const m = losingSample();
+    const onRematch = vi.fn();
+    m.actions = { ...m.actions, onRematch };
+    mount(m);
+    revealButton()!.click();
+    const rematch = Array.from(root.querySelectorAll('button')).find((b) => b.textContent === 'Rematch this crash')!;
+    vi.advanceTimersByTime(340);
+    rematch.click();
+    expect(onRematch).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(20);
+    rematch.click();
+    expect(onRematch).toHaveBeenCalledTimes(1);
+  });
+
   test('trade headlines appear only after the reveal', () => {
     mount(c2007Sample());
     expect(root.textContent).not.toContain('House rejects');
@@ -260,6 +369,7 @@ describe('the front page', () => {
     const m = winningSample();
     m.actions = { ...m.actions, onRematch: () => {}, onChallenge: () => {}, onDouble: () => {}, onBank: () => {} };
     mount(m);
+    revealButton()?.click(); // a blind page puts the double block in at the reveal
     const byText = (s: string) => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === s)!;
     expect(byText('Double or nothing').className).toBe('es-dbl');
     expect(byText('Rematch this crash').className).toBe('es-out');
@@ -276,6 +386,7 @@ describe('the front page', () => {
 
   test('the c2007 sample is a winning mystery run with a double block', () => {
     mount(c2007Sample());
+    revealButton()?.click(); // a blind page puts the double block in at the reveal
     expect(root.querySelector('h2')!.textContent).toBe('Double or nothing');
   });
 
@@ -309,10 +420,11 @@ describe('the front page', () => {
     const onBank = vi.fn();
     m.actions = { ...m.actions, onDouble, onBank };
     mount(m);
+    revealButton()?.click(); // a blind page puts the double block in at the reveal
     const t = root.textContent!;
     expect(root.querySelector('h2')!.textContent).toBe('Double or nothing');
     expect(t).toContain(
-      'Keep your $3,591 win, or take all $14,427 into another mystery game. Finish behind and the run is over.',
+      'Keep your $5,091 win, or take all $14,427 into another mystery game. Finish behind and the run is over.',
     );
     expect(t).toContain('Wins in a row');
     // Compact ladder: one line, titles printed only for the rung just reached and the next one;
@@ -338,8 +450,9 @@ describe('the front page', () => {
       'ahead',
     ]);
     const byText = (s: string) => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === s)!;
+    vi.advanceTimersByTime(400); // past the tap guard after the reveal
     byText('Double or nothing').click();
-    byText('Bank $3,591').click();
+    byText('Bank $5,091').click();
     expect(onDouble).toHaveBeenCalledTimes(1);
     expect(onBank).toHaveBeenCalledTimes(1);
   });
@@ -458,7 +571,10 @@ describe('result page order (R28)', () => {
     const m = { ...c2007Sample(), holderNote: true, flags: { showCountdown: true, blind: false } };
     mount(m);
     vi.advanceTimersByTime(2000);
-    const order = Array.from(root.querySelector('main.es')!.children).map((e) => e.className.split(' ')[0]);
+    // The score block's own lines count in place (it is one box so it can wait for the reveal).
+    const order = Array.from(root.querySelector('main.es')!.children)
+      .flatMap((e) => (e.classList.contains('es-score') ? Array.from(e.children) : [e]))
+      .map((e) => e.className.split(' ')[0]);
     const at = (c: string) => order.indexOf(c);
     expect(at('es-lead')).toBeGreaterThan(at('es-h1'));
     expect(at('es-count')).toBe(at('es-perfect') + 1);
