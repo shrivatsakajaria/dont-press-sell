@@ -2,6 +2,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Step } from '../../src/game/schedule';
 import { END_HOLD_MS, startPlay } from '../../src/ui/screen';
+import { createNarrator } from '../../src/game/narrator';
+import { mulberry32 } from '../../src/game/rng';
+import { FIRST_SALE_LINE, soldLines } from '../../src/content/copy';
 
 const closes = [100, 101, 99, 100, 90, 92, 95, 100, 104, 108];
 const dates = closes.map((_, i) => `2007-11-${String(10 + i).padStart(2, '0')}`);
@@ -13,10 +16,15 @@ it('renders the play screen, sells on a tap, pauses, and ends', async () => {
   const root = document.createElement('div');
   document.body.appendChild(root);
   const onEnd = vi.fn();
-  startPlay(root, run, steps, { runLabel: 'Mystery crash', onEnd });
+  // Wired as main.ts wires it today: only `narrate` (a press calls it again for the same step, K1).
+  const n = createNarrator(run, [], { real: false, rng: mulberry32(1), start: 10000, steps, firstSale: true });
+  startPlay(root, run, steps, { runLabel: 'Mystery crash', onEnd, narrate: (d, p, b, t) => n.step(d, p, b, t) });
   const btn = root.querySelector('button.act') as HTMLButtonElement;
   expect(btn.textContent).toBe('Sell for $10,000');
-  expect(root.querySelector('h1')?.textContent).toBe('Headline for day 1');
+  expect(root.querySelector('h1')?.textContent).toBe('Shares are down from their recent high');
+  // R51: no opening line; the narrator's own line from day 1.
+  expect(root.querySelector('.standfirst')?.textContent).not.toMatch(/play money|Hold your nerve/);
+  expect(root.querySelector('.standfirst')?.textContent).not.toBe('');
   // R39: no "Price: your nerve" in the folio.
   expect(root.querySelector('.folio')?.textContent).toBe('Mystery crashDay 1');
 
@@ -25,7 +33,8 @@ it('renders the play screen, sells on a tap, pauses, and ends', async () => {
   btn.click();
   // R38: sold at this close, so buying back now is the same price.
   expect(btn.textContent).toBe('Buy back at the same price');
-  expect(root.querySelector('.standfirst')?.textContent).toBe('You are out. To win, buy back in for less than you sold.');
+  // R52: the line changes at the press, through the narrator (this phone's first sale).
+  expect(root.querySelector('.standfirst')?.textContent).toBe(FIRST_SALE_LINE);
 
   const pause = root.querySelector('button.pause') as HTMLButtonElement;
   pause.click();
@@ -40,7 +49,26 @@ it('renders the play screen, sells on a tap, pauses, and ends', async () => {
   vi.useRealTimers();
 });
 
-it('borrowed money: its opening line, the counter against the unborrowed market, and a wipe-out ends the run at once', async () => {
+it('K1: with narrateTrade wired, a press shows narrator.trade\'s line at once', () => {
+  vi.useFakeTimers();
+  document.body.innerHTML = '';
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  const n = createNarrator(run, [], { real: false, rng: mulberry32(2), start: 10000, steps, firstSale: false });
+  const trade = vi.fn((d: number, t: Parameters<typeof n.trade>[1], b: number) => n.trade(d, t, b));
+  const play = startPlay(root, run, steps, {
+    runLabel: 'Mystery crash', onEnd: () => {}, narrate: (d, p, b, t) => n.step(d, p, b, t), narrateTrade: trade,
+  });
+  vi.advanceTimersByTime(100); // day 2
+  (root.querySelector('button.act') as HTMLButtonElement).click();
+  expect(trade).toHaveBeenCalledTimes(1);
+  expect(trade.mock.calls[0][1]).toEqual([{ dayIndex: 1, side: 'sell' }]);
+  expect(root.querySelector('.standfirst')?.textContent).toBe(soldLines(10100)[0]);
+  play.teardown();
+  vi.useRealTimers();
+});
+
+it('borrowed money: no opening line on the play screen (R51), the counter against the unborrowed market, and a wipe-out ends the run at once', async () => {
   const { simulateBorrowed } = await import('../../src/engine/borrowed');
   vi.useFakeTimers();
   document.body.innerHTML = '';
@@ -52,7 +80,8 @@ it('borrowed money: its opening line, the counter against the unborrowed market,
     runLabel: 'Borrowed money', onEnd, simulateFn: simulateBorrowed, borrowed: true,
     opening: 'You have borrowed $20,000. Every move is three times bigger. Fall a third and you are wiped out.',
   });
-  expect(root.querySelector('.standfirst')?.textContent).toMatch(/^You have borrowed \$20,000/);
+  // The Start screen says it (flow.ts); the play screen does not lay it over the narrator's line.
+  expect(root.querySelector('.standfirst')?.textContent).not.toMatch(/^You have borrowed/);
   const btn = root.querySelector('button.act') as HTMLButtonElement;
   vi.advanceTimersByTime(100); // day 2: 3 x 10,000 x 0.95 - 20,000 = 8,500
   expect(btn.textContent).toBe('Sell for $8,500');
@@ -229,9 +258,8 @@ it('start screen: the front page stands still with the start lines until Start i
   btn.click();
   expect(page.classList.contains('is-gate')).toBe(false);
   expect(btn.textContent).toBe('Sell for $10,000');
-  expect(root.querySelector('.standfirst')?.textContent).toBe(
-    'You have $10,000 of play money in the stock market. Hold your nerve or bail.',
-  );
+  // R51: no opening line after Start (the start text already said it).
+  expect(root.querySelector('.standfirst')?.textContent).not.toMatch(/play money|\$10,000/);
   vi.advanceTimersByTime(100);
   expect(root.querySelector('.folio')?.textContent).toContain('Day 2');
   vi.advanceTimersByTime(5000);

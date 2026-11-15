@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { pressStart } from './start';
 
-const OPENING = 'You have $10,000 of play money in the stock market. Hold your nerve or bail.';
+/** R51: no opening line on the play screen (the Start screen says it); the narrator's own line from day 1. */
+const OPENING = /play money|Hold your nerve/;
 const S2018 = 9; // index in RUN_IDS
 
 /** The link format of src/share/link.ts (version 1), built here so the test does not import Vite-only modules. */
@@ -26,7 +27,8 @@ test('a challenge link plays that run blind with the score to beat, and the resu
   await expect(page.locator('.folio')).toContainText('Mystery crash');
   // The link's own final (11,341) is ignored: the trades make $11,804 (I5).
   await expect(page.locator('.regret')).toHaveText('Score to beat: $11,804');
-  await expect(page.locator('.standfirst')).toHaveText(OPENING);
+  await expect(page.locator('.standfirst')).not.toHaveText(OPENING);
+  await expect(page.locator('.standfirst')).not.toHaveText('');
   await page.clock.runFor(119_000); // R27: s2018 runs about 118 s
   await expect(page.getByText('Late edition')).toBeVisible();
   await expect(page.getByText('Tap to see what that was')).toBeVisible();
@@ -58,7 +60,8 @@ for (const [name, hash] of [
     const errors = watchErrors(page);
     await page.goto(`/${hash}`);
     await pressStart(page);
-    await expect(page.locator('.standfirst')).toHaveText(OPENING);
+    await expect(page.locator('.standfirst')).not.toHaveText(OPENING);
+  await expect(page.locator('.standfirst')).not.toHaveText('');
     await expect(page.locator('.regret')).not.toContainText('Score to beat');
     await expect(page.locator('body')).not.toContainText(/error|invalid/i);
     expect(errors).toEqual([]);

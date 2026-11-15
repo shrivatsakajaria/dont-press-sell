@@ -57,9 +57,9 @@ for (const height of [660, 844]) {
     await button.click();
     await expect(button).toHaveText(/^Sell for \$[\d,]+$/);
     await expect(page.locator('.intro')).toBeHidden();
-    await expect(page.locator('.standfirst')).toHaveText(
-      'You have $10,000 of play money in the stock market. Hold your nerve or bail.',
-    );
+    // R51: no opening line after Start; the narrator's line for day 1.
+    await expect(page.locator('.standfirst')).not.toHaveText(/play money|Hold your nerve/);
+    await expect(page.locator('.standfirst')).not.toHaveText('');
     await expect(page.locator('.folio span').nth(1)).not.toHaveText('Day 1', { timeout: 5000 });
     await page.screenshot({ path: `e2e/shots/S/started-${height}.png` });
   });

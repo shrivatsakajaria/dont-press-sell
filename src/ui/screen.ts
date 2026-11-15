@@ -2,10 +2,11 @@
 // screenModel() turns the session's view into what the page shows (pure, tested);
 // mountScreen() draws it; startPlay() runs one session on it.
 import {
-  FIRST_SALE_LINE, FOOTER_PLAY, MASTHEAD, OPENING_LINE, SOLD_LAST_TIME, START_LABEL, boughtStamp, buyBackLabel, dollars, marketChartLabel, potLine,
+  FOOTER_PLAY, MASTHEAD, START_LABEL, boughtStamp, buyBackLabel, dollars, marketChartLabel, potLine,
   scoreToBeatLine, sellLabel, sellingAtTopLine, soldStamp,
 } from '../content/copy';
 import type { RunData, RunResult, Trade } from '../engine/types';
+import { SEEN_FIRST_SALE } from '../game/narrator';
 import type { Step } from '../game/schedule';
 import { createSession, type Session, type SessionView, type SimulateFn } from '../game/session';
 import { load, save } from '../store/store';
@@ -22,16 +23,10 @@ import {
   STATUS_CASH, STATUS_FORWARD, STATUS_PAUSED, PAUSE, RESUME, SOUND_ON, SOUND_OFF, IN_CASH, LEVEL, dayLabel, yearLabel, youHadLine, upLabel, downLabel, placeholderHeadline, placeholderStandfirst,
 } from '../content/copy';
 
-/** How long the opening line stays up, and the first-sale line after a first sale (clock time). */
-const OPENING_MS = 4000;
-const FIRST_SALE_MS = 4000;
-/** How long "This is the day you sold last time." stays up (clock time). */
-const SOLD_LAST_TIME_MS = 3000;
 /** Gap from the peak at which the "Selling at the top" line appears (spec 6.4). */
 const TOP_GAP = 500;
 const YEAR_MS = 365.25 * 24 * 3600 * 1000;
 const EASE = 'cubic-bezier(0.22,1,0.36,1)';
-const SEEN_FIRST_SALE = 'seenFirstSale';
 /** R30: the headline's size steps (of its CSS size), its line limit, and the chart's least height. */
 const HEADLINE_STEPS = [1, 0.82, 0.68, 0.6, 0.52];
 const MAX_HEADLINE_LINES = 3;
@@ -98,7 +93,7 @@ export interface PlayState {
   /** Balance at the close of every day shown so far, keyed by day index. */
   history: Map<number, DayPoint>;
   trades: Trade[];
-  /** Step index at which this phone's first-ever sale happened in this run, or null. */
+  /** Step index at which this phone's first-ever sale happened in this run, or null (the narrator shows its line, R51). */
   firstSaleStep: number | null;
   paused: boolean;
   pot: number;
@@ -109,7 +104,7 @@ export interface PlayState {
   soldLastTime?: number | null;
   scoreToBeat?: number | null;
   other?: number[] | null;
-  /** The line under the headline for the first seconds (borrowed money has its own). */
+  /** No longer shown (R51: no opening line on the play screen; the Start screen says it). Kept so callers compile. */
   opening?: string;
 }
 
@@ -145,23 +140,9 @@ export function screenModel(s: PlayState): ScreenModel {
     ? yearLabel(yearsSince(run.dates[0], run.dates[d]) + 1)
     : dayLabel(d + 1);
 
-  // Clock time between the start of two steps.
-  const msBetween = (a: number, b: number) => {
-    let t = 0;
-    for (let i = a; i < b; i++) t += steps[i]?.holdMs ?? 0;
-    return t;
-  };
-  // The first step that shows the day the player sold last time (a step may cover several days).
-  const soldIdx = s.soldLastTime == null ? -1 : steps.findIndex((st) => st.dayIndex >= s.soldLastTime!);
-  const soldStep = soldIdx >= 0 ? soldIdx : null;
-  let standfirst = s.commentary ?? placeholderStandfirst(d + 1);
-  if (s.firstSaleStep !== null && v.stepIndex >= s.firstSaleStep && msBetween(s.firstSaleStep, v.stepIndex) < FIRST_SALE_MS) {
-    standfirst = FIRST_SALE_LINE;
-  } else if (soldStep !== null && v.stepIndex >= soldStep && msBetween(soldStep, v.stepIndex) < SOLD_LAST_TIME_MS) {
-    standfirst = SOLD_LAST_TIME;
-  } else if (msBetween(0, v.stepIndex) < OPENING_MS) {
-    standfirst = s.opening ?? OPENING_LINE;
-  }
+  // R51: the narrator owns every line under the headline (its first-sale and rematch lines included), so its
+  // holds and truth checks cover them; nothing here lays another line over it.
+  const standfirst = s.commentary ?? placeholderStandfirst(d + 1);
 
   let underButton = FOOTER_PLAY;
   if (!inCash) {
@@ -609,8 +590,13 @@ export interface PlayOpts {
   start?: number;
   pot?: number;
   onEnd(r: RunResult): void;
-  /** The headline and commentary for each new step (src/game/narrator.ts). */
+  /**
+   * The headline and commentary for each new step (src/game/narrator.ts: narrator.step). Without narrateTrade it is
+   * also called again for the same step after a press, which the narrator treats as narrator.trade.
+   */
   narrate?(dayIndex: number, prevDay: number | null, balance: number, trades: Trade[]): { headline: string; commentary: string };
+  /** K1, R52: the words at a press (narrator.trade): the line changes at once to one about the trade. */
+  narrateTrade?(dayIndex: number, trades: Trade[], balance: number): { headline: string; commentary: string };
   /** Rematch and challenge extras (spec 6.7). */
   soldLastTime?: number | null;
   scoreToBeat?: number | null;
@@ -631,7 +617,7 @@ export interface PlayOpts {
   /** The sound switch: its first state, and the toggle (returns the new state). */
   soundOn?: boolean;
   onSoundToggle?(): boolean;
-  /** After every render: whether it is a new step, the trade just made, and the step's hold (for sound and vibration). */
+  /** After every render: whether it is a new step, the trade just made, and how long the step is shown (session stepMs; for sound and vibration). */
   onFrame?(v: SessionView, m: ScreenModel, e: { newStep: boolean; trade: Trade['side'] | null; win: boolean; holdMs: number }): void;
   /** The clock paused (Pause button or the page hidden): stop sound here. */
   onPause?(): void;
@@ -747,10 +733,15 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       announce(stamp.text);
     }
     pendingStep = null;
+    const prevDay = v.stepIndex > 0 ? steps[v.stepIndex - 1].dayIndex : null;
     if (opts.narrate && v.stepIndex !== wordsStep) {
       wordsStep = v.stepIndex;
-      const prevDay = v.stepIndex > 0 ? steps[v.stepIndex - 1].dayIndex : null;
       words = opts.narrate(v.dayIndex, prevDay, v.balance, trades);
+    } else if (traded) {
+      // K1, R52: at the press the line changes to one about the trade (narrator.trade; the old wiring calls
+      // narrate again for the same step, which the narrator reads as a press).
+      if (opts.narrateTrade) words = opts.narrateTrade(v.dayIndex, trades, v.balance);
+      else if (opts.narrate) words = opts.narrate(v.dayIndex, prevDay, v.balance, trades);
     }
     const m = screenModel({
       run, steps, start, view: v, runLabel: opts.runLabel, history, trades, firstSaleStep, paused, pot: opts.pot ?? start,
@@ -766,7 +757,7 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
     const newStep = v.stepIndex !== lastFrameStep;
     lastFrameStep = v.stepIndex;
     try {
-      opts.onFrame?.(v, m, { newStep, trade: traded, win: !!stamp?.win, holdMs: steps[v.stepIndex]?.holdMs ?? 0 });
+      opts.onFrame?.(v, m, { newStep, trade: traded, win: !!stamp?.win, holdMs: v.stepMs ?? steps[v.stepIndex]?.holdMs ?? 0 });
     } catch {
       /* sound and vibration are optional */
     }

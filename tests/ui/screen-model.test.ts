@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FIRST_SALE_LINE, FOOTER_PLAY, OPENING_LINE } from '../../src/content/copy';
+import { FOOTER_PLAY } from '../../src/content/copy';
 import type { Trade } from '../../src/engine/types';
 import type { Step } from '../../src/game/schedule';
 import type { SessionView } from '../../src/game/session';
@@ -47,10 +47,11 @@ function state(v: SessionView, over: Partial<PlayState> = {}): PlayState {
 }
 
 describe('screenModel', () => {
-  it('day 1 while holding: sell label, opening line, default status, footer under the button', () => {
-    const m = screenModel(state(view(0)));
+  it('day 1 while holding: sell label, the narrator\'s line (no opening line, R51), default status, footer under the button', () => {
+    const m = screenModel(state(view(0), { commentary: 'On day one the market closed more than 6% below the peak.' }));
     expect(m.buttonLabel).toBe('Sell for $10,000');
-    expect(m.standfirst).toBe(OPENING_LINE);
+    expect(m.standfirst).toBe('On day one the market closed more than 6% below the peak.');
+    expect(m.standfirst).not.toMatch(/play money|\$10,000/);
     // R39: no "Price: your nerve".
     expect(m.status).toBe('');
     expect(m.dayLabel).toBe('Day 1');
@@ -75,14 +76,11 @@ describe('screenModel', () => {
     expect(screenModel(state(v, { steps: slow0 })).worst).toBe(false);
   });
 
-  it('opening line stays up for the first four seconds of play, however short the steps', () => {
-    expect(screenModel(state(view(3))).standfirst).toBe(OPENING_LINE);
-    expect(screenModel(state(view(6))).standfirst).toBe(OPENING_LINE);
-    const fast = steps.map((s) => ({ ...s, holdMs: 125 }));
-    expect(screenModel(state(view(6), { steps: fast })).standfirst).toBe(OPENING_LINE);
-    const slow = steps.map((s) => ({ ...s, holdMs: 1000 }));
-    expect(screenModel(state(view(3), { steps: slow })).standfirst).toBe(OPENING_LINE);
-    expect(screenModel(state(view(4), { steps: slow })).standfirst).not.toBe(OPENING_LINE);
+  it('R51: the line under the headline is always the narrator\'s, from the first step on (no opening line on top of it)', () => {
+    for (const d of [0, 1, 3, 4, 6]) {
+      expect(screenModel(state(view(d), { commentary: `Line ${d}` })).standfirst).toBe(`Line ${d}`);
+      expect(screenModel(state(view(d), { commentary: `Line ${d}`, opening: 'Old opening line.' })).standfirst).toBe(`Line ${d}`);
+    }
   });
 
   it('a slow falling day is the worst day: red paper, you had $N yesterday (no "Time slowed", R39)', () => {
@@ -126,7 +124,6 @@ describe('screenModel', () => {
     expect(m.inCash).toBe(true);
     expect(m.status).toBe('You are in cash');
     expect(m.paper.bg).toBe('#ebe4d6');
-    expect(m.standfirst).toBe(FIRST_SALE_LINE);
     expect(m.regret).toBeNull();
     expect(m.deltaLabel).toBe('in cash');
     // R42: the chart is the market price from day 1 to today, with the sale close as the "Sold at" level.
@@ -161,12 +158,10 @@ describe('screenModel', () => {
     expect(screenModel(sameDay).buttonLabel).toBe('Buy back at the same price');
   });
 
-  it('first-sale line lasts about four seconds from the sale', () => {
-    const slow = steps.map((s) => ({ ...s, holdMs: 1000 }));
-    const v = view(7, { invested: false, balance: 9000 });
-    expect(screenModel(state(v, { steps: slow, firstSaleStep: 4 })).standfirst).toBe(FIRST_SALE_LINE);
-    const later = view(8, { invested: false, balance: 9000 });
-    expect(screenModel(state(later, { steps: slow, firstSaleStep: 4 })).standfirst).not.toBe(FIRST_SALE_LINE);
+  it('R51: after a first sale the line is still the narrator\'s (it shows the first-sale line itself, with its holds)', () => {
+    const v = view(5, { invested: false, balance: 9000 });
+    const m = screenModel(state(v, { trades: [{ dayIndex: 4, side: 'sell' }], firstSaleStep: 4, commentary: 'From the narrator.' }));
+    expect(m.standfirst).toBe('From the narrator.');
   });
 
   it('every buy-back label is set at the long size and every sell label at full size (R26)', () => {
@@ -219,16 +214,16 @@ describe('screenModel', () => {
     const slow = steps.map((x) => ({ ...x, holdMs: 1000 }));
     const words = { headline: 'A big bank fails', commentary: 'Down two days in a row.' };
     expect(screenModel(state(view(0), words)).headline).toBe('A big bank fails');
-    expect(screenModel(state(view(0), words)).standfirst).toBe(OPENING_LINE);
+    expect(screenModel(state(view(0), words)).standfirst).toBe('Down two days in a row.');
     expect(screenModel(state(view(6), { ...words, steps: slow })).standfirst).toBe('Down two days in a row.');
   });
 
-  it('a rematch: "This is the day you sold last time." on that day, and the score to beat under the balance while invested', () => {
+  it('a rematch: the narrator names the day sold last time (R51); the score to beat under the balance while invested', () => {
     const slow = steps.map((x) => ({ ...x, holdMs: 1000 }));
     const words = { commentary: 'Commentary.', soldLastTime: 5, scoreToBeat: 7150, other: [10000, 9000] };
     expect(screenModel(state(view(4), { ...words, steps: slow })).standfirst).toBe('Commentary.');
     const m = screenModel(state(view(5), { ...words, steps: slow }));
-    expect(m.standfirst).toBe('This is the day you sold last time.');
+    expect(m.standfirst).toBe('Commentary.');
     expect(m.regret).toEqual({ text: 'Score to beat: $7,150', rose: false });
     // No money line on the chart (R42): the previous go is not drawn.
     expect('other' in m.chart).toBe(false);

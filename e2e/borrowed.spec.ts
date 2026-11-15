@@ -14,11 +14,12 @@ test('borrowed money on a known crash with no taps is wiped out on the margin-ca
   await unlockBorrowed(page);
   await page.clock.install();
   await page.goto('/?run=c2007');
+  // R51: the warning is on the Start screen; the play screen does not lay it over the narrator's line.
+  const warning = 'You have borrowed $20,000. Every move is three times bigger. Fall a third and you are wiped out.';
+  await expect(page.locator('.intro')).toContainText(warning);
   await pressStart(page);
   await expect(page.locator('.folio')).toContainText('Borrowed money');
-  await expect(page.locator('.standfirst')).toHaveText(
-    'You have borrowed $20,000. Every move is three times bigger. Fall a third and you are wiped out.',
-  );
+  await expect(page.locator('.standfirst')).not.toHaveText(warning);
   // Run the clock a second at a time until the front page prints (the wipe-out comes mid-fall).
   for (let i = 0; i < 150 && (await page.locator('.es-h1').count()) === 0; i++) await page.clock.runFor(1000);
   await expect(page.locator('.es-folio span').first()).toHaveText('Borrowed money');

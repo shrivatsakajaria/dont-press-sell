@@ -58,6 +58,11 @@ export interface MarketState {
   allBelowHigh: boolean;
   /** Trading days since the run's lowest close so far (0 when today is it). */
   lowAge: number;
+  /**
+   * Trading days without a new high: since the last close at or above both the reference high and every
+   * earlier close in the run (0 when today is one); day + 1 when no close in the run has been one.
+   */
+  highAge: number;
 }
 
 /** A day's market facts plus the player's position on it. */
@@ -118,6 +123,12 @@ export function marketState(closes: number[], preCloses: number[], high: number,
   const prevDn = idx >= 1 ? streak(idx - 1, -1) : 0;
   const dn = streak(idx, -1);
   const runHigh = Math.max(...runCloses);
+  let lastHigh = -1;
+  let best = high;
+  for (let k = 0; k <= i; k++) {
+    if (closes[k] >= best) lastHigh = k;
+    best = Math.max(best, closes[k]);
+  }
   return {
     day: i,
     chg,
@@ -147,6 +158,7 @@ export function marketState(closes: number[], preCloses: number[], high: number,
     swings: idx >= 5 && ch.slice(-5).some((x) => x >= 1) && ch.slice(-5).some((x) => x <= -1),
     allBelowHigh: runHigh < high,
     lowAge: i - runCloses.lastIndexOf(low),
+    highAge: lastHigh < 0 ? i + 1 : i - lastHigh,
   };
 }
 
@@ -179,6 +191,8 @@ interface Template {
   must?: boolean;
   /** Most uses in one game (default 2). */
   max?: number;
+  /** R51: a plain line used only when nothing else fresh is true, so the line is never blank for long. */
+  fallback?: boolean;
   w?: number;
   when: (s: State) => boolean;
   /** The words, true for every state given (event: just the first); null when no true wording exists. */
@@ -208,6 +222,9 @@ const peakFloor = (ss: State[], least: number) => {
   const n = under(minOf(ss, (s) => s.dd), 5);
   return n >= least ? n : null;
 };
+
+/** Trading days as words: "nine days", "412 days"; from 1,000 on in weeks (five trading days make at least a week), so no count reads like a year. */
+const daysOrWeeks = (n: number) => (n < 1000 ? `${word(n)} days` : `${Math.floor(n / 5)} weeks`);
 
 const TEMPLATES: Template[] = [
   // ---- Events: the day the line goes up.
@@ -278,13 +295,14 @@ const TEMPLATES: Template[] = [
     },
   },
 
-  // ---- Streaks (counted back through the pre-run closes; never cut off by the data start).
-  { key: 'down-fine', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices down ${word(ss[0].dn)} days in a row, and counting. This is fine.` },
-  { key: 'down-habit', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices down ${word(ss[0].dn)} days in a row, and counting. A habit is forming.` },
-  { key: 'down-gravity', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 5 && !s.dnCut, text: (ss) => `Prices down ${word(ss[0].dn)} days in a row, and counting. Gravity is working as intended.` },
-  { key: 'down-plain', kind: 'state', dir: 'down', plain: true, w: 2, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices have fallen at least ${word(Math.min(...ss.map((s) => s.dn)))} days in a row.` },
-  { key: 'up-mood', kind: 'state', dir: 'up', w: 3, when: (s) => s.up >= 3, text: (ss) => `Prices up ${word(ss[0].up)} days in a row, and counting. The mood is improving.` },
-  { key: 'up-catch', kind: 'state', dir: 'up', w: 3, when: (s) => s.up >= 3, text: (ss) => `Prices up ${word(ss[0].up)} days in a row, and counting. Everyone is waiting for the catch.` },
+  // ---- Streaks (counted back through the pre-run closes; never cut off by the data start). R53: a line held over
+  // several days names the shortest streak in its window ("at least"), so the count never goes stale.
+  { key: 'down-fine', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices down at least ${word(minOf(ss, (s) => s.dn))} days in a row. This is fine.` },
+  { key: 'down-habit', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices down at least ${word(minOf(ss, (s) => s.dn))} days in a row. A habit is forming.` },
+  { key: 'down-gravity', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 5 && !s.dnCut, text: (ss) => `Prices down at least ${word(minOf(ss, (s) => s.dn))} days in a row. Gravity is working as intended.` },
+  { key: 'down-plain', kind: 'state', dir: 'down', plain: true, w: 2, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices have fallen at least ${word(minOf(ss, (s) => s.dn))} days in a row.` },
+  { key: 'up-mood', kind: 'state', dir: 'up', w: 3, when: (s) => s.up >= 3, text: (ss) => `Prices up at least ${word(minOf(ss, (s) => s.up))} days in a row. The mood is improving.` },
+  { key: 'up-catch', kind: 'state', dir: 'up', w: 3, when: (s) => s.up >= 3, text: (ss) => `Prices up at least ${word(minOf(ss, (s) => s.up))} days in a row. Everyone is waiting for the catch.` },
   { key: 'down-again', kind: 'state', dir: 'down', max: 1, when: (s) => down(s) && s.prevDn >= 1, text: fixed('Another down day. The ledger records it without comment.') },
   { key: 'up-again', kind: 'state', dir: 'up', max: 1, when: (s) => up(s) && s.prevUp >= 1, text: fixed('Up again. Noted, cautiously.') },
   { key: 'barely', kind: 'state', dir: null, max: 1, when: (s) => s.chg !== null && Math.abs(s.chg) < 0.25 && s.dd >= 3, text: fixed('Barely moved. A pause, after all that.') },
@@ -355,6 +373,28 @@ const TEMPLATES: Template[] = [
       return 'No new low for months.';
     },
   },
+  // ---- Day one (R51: no opening line any more, so the first step has a true line of its own; it is about
+  // day one by name, so it stays true while the window runs on).
+  {
+    key: 'day-one-close', kind: 'state', dir: null, plain: true, max: 1, when: () => true,
+    text: (ss) => {
+      if (ss[0].day !== 0) return null;
+      const dd = ss[0].dd;
+      if (dd <= 0) return 'On day one the market closed at its peak.';
+      const n = under(dd, 1);
+      return n >= 1 ? `On day one the market closed more than ${n}% below the peak.` : 'On day one the market closed within one percent of the peak.';
+    },
+  },
+  // ---- Fallbacks (R51: never a blank line for more than one step). The count grows day by day, so a new
+  // window almost always gives new words; "at least" keeps it true on every day of the window.
+  {
+    key: 'fb-high', kind: 'state', dir: null, plain: true, fallback: true, max: 1000, when: (s) => s.highAge >= 3,
+    text: (ss) => `No new high for at least ${daysOrWeeks(minOf(ss, (s) => s.highAge))}.`,
+  },
+  {
+    key: 'fb-low', kind: 'state', dir: null, plain: true, fallback: true, max: 1000, when: (s) => s.lowAge >= 3,
+    text: (ss) => `No new low for at least ${daysOrWeeks(minOf(ss, (s) => s.lowAge))}.`,
+  },
   // ---- The player's position (constant inside a window: a trade brings a new line).
   { key: 'all-shares', kind: 'state', dir: null, max: 1, when: (s) => s.invested && s.neverSold && s.day >= 3, text: fixed('You still hold every share you started with.') },
   { key: 'back-in', kind: 'state', dir: null, max: 1, when: (s) => s.invested && !s.neverSold, text: fixed('You are back in the market, for better or worse.') },
@@ -397,6 +437,8 @@ export interface LineCandidate {
   must: boolean;
   /** About the day the line goes up (a big day's own news). */
   event: boolean;
+  /** Only when nothing else fresh fits (R51). */
+  fallback: boolean;
   w: number;
   max: number;
 }
@@ -418,7 +460,9 @@ export function lineCandidates(states: State[], opts: { exactMoney?: boolean } =
     } else if (!states.every(t.when)) continue;
     const text = t.text(t.kind === 'event' ? [s0] : states);
     if (text === null) continue;
-    out.push({ text, key: t.key, dir: t.dir, plain: !!t.plain, must: !!t.must, event: t.kind === 'event', w: t.w ?? 1, max: t.max ?? 2 });
+    out.push({
+      text, key: t.key, dir: t.dir, plain: !!t.plain, must: !!t.must, event: t.kind === 'event', fallback: !!t.fallback, w: t.w ?? 1, max: t.max ?? 2,
+    });
   }
   return out;
 }
@@ -448,6 +492,10 @@ export function isPlainLine(text: string): boolean {
     /^The market has (fallen|risen) on at least \w+ of the last ten days\.$/.test(text) ||
     /^The market is within \w+ percent of its lowest close so far\.$/.test(text) ||
     /^No new low for (at least \w+ (days|weeks)|months)\.$/.test(text) ||
+    /^No new high for at least \w+ (days|weeks)\.$/.test(text) ||
+    /^On day one the market closed /.test(text) ||
+    // The narrator's lines at a press and in a rematch (copy.ts): plain statements of fact.
+    /^(You are out\. To win, buy back in|You sold\. Your \$|Out of the market, with \$|\$[\d,]+ in cash\. Prices can move|You bought back in|Back in the market,|In again,|Last time, you sold on day)/.test(text) ||
     NEUTRAL_LINES.includes(text)
   );
 }
@@ -488,7 +536,8 @@ export interface CommentaryCtx {
 export function commentaryFor(ctx: CommentaryCtx): string {
   const m = marketState(ctx.closes, ctx.preCloses, ctx.high, ctx.dayIndex);
   const s = withPlayer(m, { held: ctx.invested, neverSold: ctx.neverSold, balance: ctx.balance, start: ctx.start });
-  const all = lineCandidates([s], { exactMoney: true }).filter((c) => !ctx.sombre || c.plain);
+  const any = lineCandidates([s], { exactMoney: true }).filter((c) => !ctx.sombre || c.plain);
+  const all = any.some((c) => !c.fallback) ? any.filter((c) => !c.fallback) : any;
   const fresh = all.filter((c) => c.text !== ctx.previous);
   const from = fresh.length ? fresh : all;
   return from.length ? pickLine(from, ctx.rng).text : '';
