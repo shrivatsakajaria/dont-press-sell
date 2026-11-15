@@ -16,6 +16,8 @@ export interface RunData {
   closes: number[];
   lowIndex: number;
   fallEndIndex: number;
+  /** The closes before day 1 (in the run files), so day 1 has a move of its own. */
+  preCloses?: number[];
 }
 
 export interface Headline {

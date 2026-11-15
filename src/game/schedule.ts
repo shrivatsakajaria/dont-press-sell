@@ -72,6 +72,14 @@ const DAYS_PER_TRUE_SLOW = 4;
 const DAYS_PER_DECOY = 8;
 const DECOY_HIGH_PCT = 0.85;
 
+/**
+ * The first step (day 1) of a quiet start holds at most this long, so a new game visibly starts at once
+ * (a tap on the end screen used to sit on day 1 for up to 3 s before anything moved).
+ */
+export const FIRST_STEP_MAX_MS = 500;
+/** A falling day of at least this much in the first FIRST_SLOW_BY_MS must reach a red (slow, falling) step. */
+export const RED_FALL = 0.01;
+
 /** Opening days are squeezed to begin the first slow step by this time (margin under FIRST_SLOW_BY_MS for rounding and floors). */
 const OPENING_TARGET_MS = FIRST_SLOW_BY_MS - 1_500;
 /** Days in the trailing window that measures the recent swing. */
@@ -134,7 +142,7 @@ function fillCapped(days: number[], weight: (d: number) => number, budget: numbe
  * rising and one falling when such days exist, never next to another slow day, and never
  * taking the total above MAX_SLOW. Same run id, same decoys.
  */
-export function pickSlowDays(run: RunData, headlines: Headline[]): { truth: number[]; decoys: number[] } {
+function basePick(run: RunData, headlines: Headline[]): { truth: number[]; decoys: number[] } {
   const closes = run.closes;
   const n = closes.length;
   const fe = Math.min(Math.max(run.fallEndIndex, 1), n);
@@ -181,6 +189,64 @@ export function pickSlowDays(run: RunData, headlines: Headline[]): { truth: numb
   return { truth, decoys: decoys.sort((a, b) => a - b) };
 }
 
+/** The run's own move on day d; day 0 uses the close before the run (preCloses), when the file has it. */
+export function dayMove(run: RunData, d: number): number {
+  if (d >= 1) return run.closes[d] / run.closes[d - 1] - 1;
+  const pre = run.preCloses;
+  return pre && pre.length ? run.closes[0] / pre[pre.length - 1] - 1 : 0;
+}
+
+/**
+ * The slow-motion days (R20), plus the first-red-day rule: when a day falling RED_FALL or more is shown
+ * in the first FIRST_SLOW_BY_MS and no slow falling (red) step is, the largest such fall from day 2 on
+ * becomes slow (`promoted`), keeping at most MAX_SLOW slow steps and the decoy rules. Same run, same days.
+ */
+export function pickSlowDays(run: RunData, headlines: Headline[]): { truth: number[]; decoys: number[]; promoted: number[] } {
+  const base = basePick(run, headlines);
+  const fe = Math.min(Math.max(run.fallEndIndex, 1), run.closes.length);
+  const steps = layoutFall(run, new Set([...base.truth, ...base.decoys]), fe);
+  let t = 0;
+  let lastDay = 0;
+  let red = false;
+  for (const st of steps) {
+    if (t >= FIRST_SLOW_BY_MS) break;
+    lastDay = st.dayIndex;
+    // A slow step's previous step shows the day before it, so its colour follows the day's own move.
+    if (st.slow && dayMove(run, st.dayIndex) < 0) red = true;
+    t += st.holdMs;
+  }
+  if (red) return { ...base, promoted: [] };
+  let best = -1;
+  for (let d = 1; d <= lastDay && d < fe; d++) {
+    if (dayMove(run, d) <= -RED_FALL && (best < 0 || dayMove(run, d) < dayMove(run, best))) best = d;
+  }
+  // No real fall in the opening (a shallow run): exempt. Also exempt when only day 1 fell that far.
+  if (best < 0) return { ...base, promoted: [] };
+
+  const big = new Set(headlines.filter((h) => h.big).map((h) => h.dayIndex));
+  let decoys = base.decoys.filter((d) => Math.abs(d - best) > 1);
+  let truth = base.truth.slice();
+  const rising = (d: number) => run.closes[d] > run.closes[d - 1];
+  while (truth.length + decoys.length + 1 > MAX_SLOW && decoys.length) {
+    // Drop the latest decoy, keeping one rising and one falling while two or more remain.
+    const r = decoys.filter(rising).length;
+    const f = decoys.length - r;
+    const pool = decoys.length > 2 ? decoys : decoys.filter((d) => (rising(d) ? r > 1 : f > 1));
+    const drop = (pool.length ? pool : decoys)[(pool.length ? pool : decoys).length - 1];
+    decoys = decoys.filter((d) => d !== drop);
+  }
+  while (truth.length + decoys.length + 1 > MAX_SLOW) {
+    // The latest day that is only a big move; if every slow day is a big headline day, the latest of
+    // those keeps its headline at ordinary speed (MAX_SLOW wins, by ruling).
+    const drop = [...truth].reverse().find((d) => !big.has(d)) ?? truth[truth.length - 1];
+    if (drop === undefined) break;
+    truth = truth.filter((d) => d !== drop);
+  }
+  // Two decoys left must still be one rising and one falling.
+  if (decoys.length === 2 && rising(decoys[0]) === rising(decoys[1])) decoys = decoys.slice(0, 1);
+  return { truth, decoys, promoted: [best] };
+}
+
 interface Group {
   dayIndex: number;
   ms: number;
@@ -194,20 +260,26 @@ export function buildSchedule(run: RunData, headlines: Headline[]): Step[] {
   // Fall days are 0 .. fe - 1 (at least day 0); forward days are fe .. n - 1.
   const fe = Math.min(Math.max(run.fallEndIndex, 1), n);
 
+  // --- Slow days: the true ones, the seeded decoys (R20) and the first red day.
+  const picked = pickSlowDays(run, headlines);
+  const slow = new Set<number>([...picked.truth, ...picked.decoys, ...picked.promoted]);
+  return appendForward(layoutFall(run, slow, fe), run, fe);
+}
+
+/** The fall's steps for a set of slow days (days 0 .. fe - 1). */
+function layoutFall(run: RunData, slow: Set<number>, fe: number): Step[] {
+  const closes = run.closes;
   const move = (d: number) => (d >= 1 ? Math.abs(closes[d] / closes[d - 1] - 1) : 0);
 
-  // --- Slow days: the true ones, then the seeded decoys (R20).
-  const picked = pickSlowDays(run, headlines);
-  const slow = new Set<number>([...picked.truth, ...picked.decoys]);
-
-  // --- A very short fall (R23): one step a day at fixed holds, then the fast-forward.
+  // --- A very short fall (R23): one step a day at fixed holds (a quiet day 1 is short: a prompt start).
   if (fe < SHORT_FALL_DAYS) {
     const steps: Step[] = [];
     for (let d = 0; d < fe; d++) {
       const isSlow = slow.has(d);
-      steps.push({ dayIndex: d, holdMs: isSlow ? SHORT_SLOW_MS : SHORT_QUIET_MS, phase: 'fall', slow: isSlow });
+      const hold = isSlow ? SHORT_SLOW_MS : d === 0 ? FIRST_STEP_MAX_MS : SHORT_QUIET_MS;
+      steps.push({ dayIndex: d, holdMs: hold, phase: 'fall', slow: isSlow });
     }
-    return appendForward(steps, run, fe);
+    return steps;
   }
 
   // --- Per-day hold for the other fall days: shorter as the recent swing grows.
@@ -285,14 +357,14 @@ export function buildSchedule(run: RunData, headlines: Headline[]): Step[] {
     for (const g of flexible) g.ms -= (g.ms - MIN_STEP_MS) * take;
   }
 
-  const steps: Step[] = groups.map((g) => ({
+  return groups.map((g, i) => ({
     dayIndex: g.dayIndex,
-    holdMs: g.slow ? SLOW_MS : Math.min(MAX_QUIET_MS, Math.max(MIN_STEP_MS, Math.round(g.ms))),
-    phase: 'fall',
+    holdMs: g.slow
+      ? SLOW_MS
+      : Math.min(i === 0 ? FIRST_STEP_MAX_MS : MAX_QUIET_MS, Math.max(MIN_STEP_MS, Math.round(g.ms))),
+    phase: 'fall' as const,
     slow: g.slow,
   }));
-
-  return appendForward(steps, run, fe);
 }
 
 /** Fast-forward: sample the days after the fall evenly, ending on the last day, sharing forwardBudgetFor(run). */
