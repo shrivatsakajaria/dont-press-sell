@@ -26,8 +26,11 @@ import {
   buildSchedule,
   stepHold,
   CASH_FACTOR,
-  RAMP_UP,
   RAMP_DOWN,
+  MAX_STEP_RATIO,
+  FRAME_MS,
+  MIN_STEP_FRAMES,
+  END_HOLD_MS,
   type Step,
 } from '../../src/game/schedule';
 import { parseHeadlineRows, toHeadlines } from '../../scripts/lib/headlines';
@@ -145,8 +148,10 @@ describe('buildSchedule on every real run (no headlines)', () => {
       it('ordinary fall steps: at most 1,500 ms (3,000 ms in a short fall), or a ramp down from a slow day (R27, R35); a quiet day 1 is short', () => {
         steps.forEach((s, i) => {
           if (s.phase !== 'fall' || s.slow) return;
-          if (i === 0) expect(s.holdMs).toBeLessThanOrEqual(FIRST_STEP_MAX_MS);
-          else {
+          if (i === 0) {
+            const climb = Math.ceil(steps[1].holdMs / MAX_STEP_RATIO / FRAME_MS - 1e-9) * FRAME_MS;
+            expect(s.holdMs).toBeLessThanOrEqual(Math.max(FIRST_STEP_MAX_MS, climb) + 1e-6);
+          } else {
             const cap = isShortFall(run) ? SHORT_QUIET_MS : MAX_QUIET_MS;
             expect(s.holdMs).toBeLessThanOrEqual(Math.max(cap, Math.ceil(RAMP_DOWN * steps[i - 1].holdMs) + 1));
           }
@@ -207,11 +212,12 @@ describe('buildSchedule on every real run (no headlines)', () => {
       it('the forward phase totals 10,000 ms; after a short fall max(5,000, 400 ms a day) up to 10,000 (R27)', () => {
         const fwd = sum(steps.filter((s) => s.phase === 'forward'));
         const days = run.closes.length - run.fallEndIndex;
-        expect(fwd).toBe(forwardBudgetFor(run));
+        // Whole frames: within one frame of the budget.
+        expect(Math.abs(fwd - forwardBudgetFor(run))).toBeLessThanOrEqual(FRAME_MS);
         if (isShortFall(run)) {
-          expect(fwd).toBe(Math.min(FORWARD_BUDGET_MS, Math.max(SHORT_FORWARD_MIN_MS, days * SHORT_FORWARD_MS_PER_DAY)));
+          expect(forwardBudgetFor(run)).toBe(Math.min(FORWARD_BUDGET_MS, Math.max(SHORT_FORWARD_MIN_MS, days * SHORT_FORWARD_MS_PER_DAY)));
         } else {
-          expect(fwd).toBe(10_000);
+          expect(forwardBudgetFor(run)).toBe(10_000);
         }
       });
 
@@ -366,8 +372,9 @@ describe('first red day and a prompt start, on every run with its real headlines
     const starts: number[] = [];
     steps.reduce((t, s) => (starts.push(t), t + s.holdMs), 0);
 
-    it(`${run.id}: a quiet day 1 holds at most ${FIRST_STEP_MAX_MS} ms, so a new game visibly starts at once`, () => {
-      if (!steps[0].slow) expect(steps[0].holdMs).toBeLessThanOrEqual(FIRST_STEP_MAX_MS);
+    it(`${run.id}: a quiet day 1 holds at most ${FIRST_STEP_MAX_MS} ms (or the least the R54 climb into a slow day 2 needs), so a new game visibly starts at once`, () => {
+      const climb = steps.length > 1 ? Math.ceil(steps[1].holdMs / MAX_STEP_RATIO / FRAME_MS - 1e-9) * FRAME_MS : 0;
+      if (!steps[0].slow) expect(steps[0].holdMs).toBeLessThanOrEqual(Math.max(FIRST_STEP_MAX_MS, climb) + 1e-6);
     });
 
     it(`${run.id}: a falling day of 1% or more in the first 15 s means a red (slow, falling) step in them`, () => {
@@ -395,21 +402,45 @@ describe('smooth pacing (R35): one step a day, gradual changes, quicker quiet da
     const inCash = steps.map((s, i) => stepHold(s, i === 0));
 
     for (const [name, holds] of [['in the market', inMarket], ['in cash', inCash]] as const) {
-      it(`${run.id} ${name}: no step under 0.6x or over 1.6x the step before, except the jump into a slow day`, () => {
+      it(`${run.id} ${name}: no step under RAMP_DOWN x the step before (the slow-down out of a slow day is gradual)`, () => {
         for (let i = 1; i < steps.length; i++) {
           const r = `step ${i} (day ${steps[i].dayIndex}): ${holds[i - 1]} -> ${holds[i]}`;
-          expect(holds[i], r).toBeGreaterThanOrEqual(RAMP_DOWN * holds[i - 1] - 1);
-          if (!steps[i].slow) expect(holds[i], r).toBeLessThanOrEqual(RAMP_UP * holds[i - 1] + 1);
+          expect(holds[i], r).toBeGreaterThanOrEqual(RAMP_DOWN * holds[i - 1] - 1e-6);
+        }
+      });
+
+      it(`${run.id} ${name}: the steps before a slow day climb into it (each at least 1 / ${MAX_STEP_RATIO} of the next)`, () => {
+        for (let i = 1; i < steps.length; i++) {
+          if (!steps[i].slow || steps[i - 1].slow) continue;
+          expect(holds[i - 1], `before slow step ${i}`).toBeGreaterThanOrEqual(holds[i] / MAX_STEP_RATIO - 1e-6);
+          if (i >= 2 && !steps[i - 2].slow) expect(holds[i - 2]).toBeGreaterThanOrEqual(holds[i - 1] / MAX_STEP_RATIO - 1e-6);
         }
       });
     }
 
-    it(`${run.id}: the one or two quiet steps before a slow day ramp up (as far as the quiet cap allows)`, () => {
-      const cap = run.fallEndIndex < SHORT_FALL_DAYS ? SHORT_QUIET_MS : MAX_QUIET_MS;
-      for (let i = 2; i < steps.length; i++) {
-        if (!steps[i].slow || steps[i - 1].slow || steps[i - 2].slow) continue;
-        const want = Math.min(cap, RAMP_UP * inMarket[i - 2]);
-        expect(inMarket[i - 1], `before slow step ${i}`).toBeGreaterThanOrEqual(want - 1);
+    it(`${run.id}: R54, every step is at most ${MAX_STEP_RATIO}x longer or shorter than the one before, into and out of slow days, in or out of the market, across a trade and into the fast-forward and the end hold`, () => {
+      expect(MAX_STEP_RATIO).toBe(2.2);
+      for (let i = 1; i < steps.length; i++) {
+        for (const a of [true, false]) {
+          for (const b of [true, false]) {
+            const x = stepHold(steps[i - 1], a);
+            const y = stepHold(steps[i], b);
+            const r = `step ${i} (day ${steps[i].dayIndex}): ${x.toFixed(1)} -> ${y.toFixed(1)}`;
+            expect(Math.max(x / y, y / x), r).toBeLessThanOrEqual(MAX_STEP_RATIO + 1e-9);
+          }
+        }
+      }
+      // The run brakes into the 1.2 s end hold (R49) rather than hitting it from a 125 ms step.
+      expect(steps[steps.length - 1].holdMs * MAX_STEP_RATIO).toBeGreaterThanOrEqual(END_HOLD_MS - 1e-6);
+    });
+
+    it(`${run.id}: every hold is a whole number of 60 Hz frames, at least ${MIN_STEP_FRAMES} of them (smooth #4)`, () => {
+      for (const s of steps) {
+        for (const ms of [s.holdMs, stepHold(s, false)]) {
+          const frames = ms / FRAME_MS;
+          expect(Math.abs(frames - Math.round(frames)), `${ms} ms`).toBeLessThan(1e-6);
+          expect(Math.round(frames)).toBeGreaterThanOrEqual(MIN_STEP_FRAMES);
+        }
       }
     });
 
@@ -422,12 +453,12 @@ describe('smooth pacing (R35): one step a day, gradual changes, quicker quiet da
         if (s.slow || s.phase === 'forward' || i === 0) expect(c).toBe(s.holdMs);
       });
       // In all, about 20% off the quiet days, less what the 125 ms floor and the gentle slow-down after
-      // slow days hold up. Falls pinned near the floor (quiet steps averaging 250 ms or less) are exempt.
+      // slow days hold up. Falls pinned near the floor (quiet steps averaging 250 ms or less) are exempt. R54: the climb into each slow day is the same in cash (it is set by the 3 s day), so allow 0.93.
       const quiet = steps.map((_, i) => i).filter((i) => i > 0 && !steps[i].slow && steps[i].phase === 'fall');
       const usual = quiet.reduce((a, i) => a + steps[i].holdMs, 0);
       const cash = quiet.reduce((a, i) => a + stepHold(steps[i], false), 0);
       if (quiet.length && usual / quiet.length > 250) {
-        expect(cash / usual).toBeLessThan(0.91);
+        expect(cash / usual).toBeLessThan(0.93);
         expect(cash / usual).toBeGreaterThanOrEqual(CASH_FACTOR - 0.01);
       }
       // Never quicker than 80% of the usual hold, except where the gentle ramp (R35) carries it.

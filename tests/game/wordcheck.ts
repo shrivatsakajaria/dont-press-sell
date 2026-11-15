@@ -179,6 +179,7 @@ export function checkLine(t: string, f: Facts, first: Facts, ctx: { bal: number;
     if (!c) fail(why);
   };
   let r: RegExpMatchArray | null;
+  if (/days in a row/.test(t) && !/at least/i.test(t)) fail('a streak count held over several days must say "at least" (R53)');
   // Event lines: about the first day, and only for a few days after it.
   const event = (c: boolean, why: string) => {
     need(f.day - first.day <= 4, 'event line shown too long after its day');
@@ -216,8 +217,8 @@ export function checkLine(t: string, f: Facts, first: Facts, ctx: { bal: number;
   if (/^Above the old peak/.test(t)) need(f.aboveHigh, 'above peak');
   if ((r = t.match(/more than (\d+)% up from its lowest close/)) || (r = t.match(/^More than (\d+)% up from the lowest close/))) need(f.fromLow > Number(r[1]), 'from low');
   if ((r = t.match(/still more than (\d+)% below the peak/))) need(f.dd > Number(r[1]), 'still below');
-  if ((r = t.match(/^Prices (?:down|have fallen at least) (\w+) days in a row/))) need(f.dn >= num(r[1]) && !f.dnCut, 'down streak');
-  if ((r = t.match(/^Prices up (\w+) days in a row/))) need(f.up >= num(r[1]), 'up streak');
+  if ((r = t.match(/^Prices (?:down at least|have fallen at least) (\w+) days in a row/))) need(f.dn >= num(r[1]) && !f.dnCut, 'down streak');
+  if ((r = t.match(/^Prices up at least (\w+) days in a row/))) need(f.up >= num(r[1]), 'up streak');
   if (/^Another down day/.test(t)) need(f.m < 0 && (f.prev ?? 0) < 0, 'another down');
   if (/^Up again/.test(t)) need(f.m > 0 && (f.prev ?? 0) > 0, 'up again');
   if (/^Barely moved/.test(t)) need(Math.abs(f.m) < 0.25 && f.dd >= 3, 'barely');

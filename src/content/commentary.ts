@@ -278,13 +278,14 @@ const TEMPLATES: Template[] = [
     },
   },
 
-  // ---- Streaks (counted back through the pre-run closes; never cut off by the data start).
-  { key: 'down-fine', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices down ${word(ss[0].dn)} days in a row, and counting. This is fine.` },
-  { key: 'down-habit', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices down ${word(ss[0].dn)} days in a row, and counting. A habit is forming.` },
-  { key: 'down-gravity', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 5 && !s.dnCut, text: (ss) => `Prices down ${word(ss[0].dn)} days in a row, and counting. Gravity is working as intended.` },
-  { key: 'down-plain', kind: 'state', dir: 'down', plain: true, w: 2, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices have fallen at least ${word(Math.min(...ss.map((s) => s.dn)))} days in a row.` },
-  { key: 'up-mood', kind: 'state', dir: 'up', w: 3, when: (s) => s.up >= 3, text: (ss) => `Prices up ${word(ss[0].up)} days in a row, and counting. The mood is improving.` },
-  { key: 'up-catch', kind: 'state', dir: 'up', w: 3, when: (s) => s.up >= 3, text: (ss) => `Prices up ${word(ss[0].up)} days in a row, and counting. Everyone is waiting for the catch.` },
+  // ---- Streaks (counted back through the pre-run closes; never cut off by the data start). R53: a line held over
+  // several days names the shortest streak in its window ("at least"), so the count never goes stale.
+  { key: 'down-fine', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices down at least ${word(minOf(ss, (s) => s.dn))} days in a row. This is fine.` },
+  { key: 'down-habit', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices down at least ${word(minOf(ss, (s) => s.dn))} days in a row. A habit is forming.` },
+  { key: 'down-gravity', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 5 && !s.dnCut, text: (ss) => `Prices down at least ${word(minOf(ss, (s) => s.dn))} days in a row. Gravity is working as intended.` },
+  { key: 'down-plain', kind: 'state', dir: 'down', plain: true, w: 2, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices have fallen at least ${word(minOf(ss, (s) => s.dn))} days in a row.` },
+  { key: 'up-mood', kind: 'state', dir: 'up', w: 3, when: (s) => s.up >= 3, text: (ss) => `Prices up at least ${word(minOf(ss, (s) => s.up))} days in a row. The mood is improving.` },
+  { key: 'up-catch', kind: 'state', dir: 'up', w: 3, when: (s) => s.up >= 3, text: (ss) => `Prices up at least ${word(minOf(ss, (s) => s.up))} days in a row. Everyone is waiting for the catch.` },
   { key: 'down-again', kind: 'state', dir: 'down', max: 1, when: (s) => down(s) && s.prevDn >= 1, text: fixed('Another down day. The ledger records it without comment.') },
   { key: 'up-again', kind: 'state', dir: 'up', max: 1, when: (s) => up(s) && s.prevUp >= 1, text: fixed('Up again. Noted, cautiously.') },
   { key: 'barely', kind: 'state', dir: null, max: 1, when: (s) => s.chg !== null && Math.abs(s.chg) < 0.25 && s.dd >= 3, text: fixed('Barely moved. A pause, after all that.') },

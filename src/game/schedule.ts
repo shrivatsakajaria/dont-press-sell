@@ -18,12 +18,30 @@ export interface Step {
   cashMs?: number;
 }
 
-/** R35: a step holds at most RAMP_UP times the step before (except the jump into a slow day)... */
+/**
+ * R54: a step is never more than MAX_STEP_RATIO times longer or shorter than the step before: into and
+ * out of slow days, in or out of the market, into the fast-forward and into the end hold.
+ */
+export const MAX_STEP_RATIO = 2.2;
+/** R35: a quiet step holds at most RAMP_UP times the step before (the climb into a slow day may use MAX_STEP_RATIO)... */
 export const RAMP_UP = 1.6;
-/** ...and at least RAMP_DOWN times it. */
-export const RAMP_DOWN = 0.6;
+/** ...and at least RAMP_DOWN times it (R54: the slow-down out of a slow day takes the full ratio). */
+export const RAMP_DOWN = 1 / MAX_STEP_RATIO;
+/** One frame at 60 Hz. Every hold is a whole number of frames, so a day never alternates 7 and 8 frames (smooth #4). */
+export const FRAME_MS = 1000 / 60;
+/** The shortest step: 8 frames (133 ms), so the screen never changes more than eight times a second. */
+export const MIN_STEP_FRAMES = 8;
+/** R49: the last day stays on screen this long before the result (the play screen's end hold); the run brakes into it. */
+export const END_HOLD_MS = 1_200;
 /** R35: quiet fall days while the player is in cash hold this fraction of their usual time. */
 export const CASH_FACTOR = 0.8;
+
+/** ms rounded to whole frames: to the nearest, or up / down. */
+function frames(ms: number, how: 'round' | 'ceil' | 'floor' = 'round'): number {
+  const f = ms / FRAME_MS;
+  const n = how === 'ceil' ? Math.ceil(f - 1e-9) : how === 'floor' ? Math.floor(f + 1e-9) : Math.round(f);
+  return n * FRAME_MS;
+}
 
 /** How long a step holds for a player in the market (`invested`) or in cash. */
 export function stepHold(step: Step, invested: boolean): number {
@@ -289,9 +307,9 @@ function layoutFall(run: RunData, slow: Set<number>, fe: number): Step[] {
   if (fe < SHORT_FALL_DAYS) {
     // R35: the quiet days after a quick day 1, and after each slow day, ramp gently to SHORT_QUIET_MS.
     const flags = Array.from({ length: fe }, (_, d) => slow.has(d));
-    const holds = smooth(flags.map(() => SHORT_QUIET_MS), flags, SHORT_QUIET_MS, SHORT_SLOW_MS);
+    const holds = smooth(flags.map(() => SHORT_QUIET_MS), flags, SHORT_SLOW_MS);
     const cash = smooth(
-      flags.map((_, d) => SHORT_QUIET_MS * (d === 0 ? 1 : CASH_FACTOR)), flags, SHORT_QUIET_MS * CASH_FACTOR, SHORT_SLOW_MS,
+      flags.map((_, d) => SHORT_QUIET_MS * (d === 0 ? 1 : CASH_FACTOR)), flags, SHORT_SLOW_MS,
     );
     return flags.map((isSlow, d) => {
       const step: Step = { dayIndex: d, holdMs: holds[d], phase: 'fall', slow: isSlow };
@@ -366,7 +384,7 @@ function layoutFall(run: RunData, slow: Set<number>, fe: number): Step[] {
     g.slow ? SLOW_MS : Math.min(MAX_QUIET_MS, Math.max(MIN_STEP_MS, g.ms)) * factor;
   // The first step is always in the market (nobody has sold yet), so it keeps its hold in both.
   const holdsFor = (groups: Group[], factor: number) =>
-    smooth(groups.map((g, i) => ideal(g, i === 0 ? 1 : factor)), groups.map((g) => g.slow), MAX_QUIET_MS * factor);
+    smooth(groups.map((g, i) => ideal(g, i === 0 ? 1 : factor)), groups.map((g) => g.slow));
   const total = (scale: number) => holdsFor(layout(scale), 1).reduce((a, x) => a + x, 0);
 
   // --- Smoothing (R35) adds time after and before slow days; shrink the quiet days until the fall
@@ -393,71 +411,76 @@ function layoutFall(run: RunData, slow: Set<number>, fe: number): Step[] {
 }
 
 /**
- * R35: steps change pace gradually. One pass from the first step: a quiet step holds between RAMP_DOWN
- * and RAMP_UP times the step before (so the steps after a slow day slow down step by step), and the one
- * or two quiet steps before a slow day ramp up by RAMP_UP each (to at most `cap`); the slow day itself
- * may then begin with a jump. A quiet first step holds at most FIRST_STEP_MAX_MS. Whole milliseconds.
+ * R35, R54: steps change pace gradually. A pass from the first step keeps each quiet step between RAMP_DOWN
+ * and RAMP_UP times the step before (so the steps after a slow day slow down step by step); a pass back from
+ * the last makes every step at least 1 / MAX_STEP_RATIO of the step after it (so the steps before a slow day
+ * climb into it). A quiet first step holds at most FIRST_STEP_MAX_MS unless the climb needs more. Every hold
+ * is a whole number of frames, at least MIN_STEP_FRAMES.
  */
-function smooth(ideal: number[], slow: boolean[], cap: number, slowMs = SLOW_MS): number[] {
+function smooth(ideal: number[], slow: boolean[], slowMs = SLOW_MS): number[] {
+  const least = MIN_STEP_FRAMES * FRAME_MS;
   const out: number[] = [];
   for (let j = 0; j < ideal.length; j++) {
     if (slow[j]) {
       out.push(slowMs);
       continue;
     }
-    let x = ideal[j];
-    if (j === 0) x = Math.min(x, FIRST_STEP_MAX_MS);
+    let x = Math.max(least, frames(ideal[j]));
+    if (j === 0) x = Math.max(least, Math.min(x, frames(FIRST_STEP_MAX_MS, 'floor')));
     else {
       const prev = out[j - 1];
-      const lo = Math.ceil(RAMP_DOWN * prev);
-      const hi = Math.floor(RAMP_UP * prev);
-      x = Math.min(Math.max(x, lo), hi);
-      if (slow[j + 1] || slow[j + 2]) x = Math.max(x, Math.min(cap, hi));
+      x = Math.min(Math.max(x, frames(RAMP_DOWN * prev, 'ceil')), Math.max(least, frames(RAMP_UP * prev, 'floor')));
     }
-    out.push(Math.max(MIN_STEP_MS, Math.round(x)));
+    out.push(x);
+  }
+  for (let j = out.length - 2; j >= 0; j--) {
+    if (!slow[j]) out[j] = Math.max(out[j], frames(out[j + 1] / MAX_STEP_RATIO, 'ceil'));
   }
   return out;
 }
 
 /**
  * Fast-forward: sample the days after the fall evenly, ending on the last day, sharing forwardBudgetFor(run)
- * exactly. R35: the first forward steps slow down gently from the last fall step (each at least RAMP_DOWN
- * times the one before), then the rest share what is left; fewer steps are used when the ramp needs it.
+ * (to the frame). R35, R54: the first forward steps slow down gently from the last fall step (each at least
+ * RAMP_DOWN times the one before), the last ones brake into the END_HOLD_MS end hold (the last at least
+ * END_HOLD_MS / MAX_STEP_RATIO, each before it at least 1 / RAMP_UP of the next), and the rest share what is
+ * left; fewer steps are used when the ramps need it. Whole frames.
  */
 function appendForward(steps: Step[], run: RunData, fe: number): Step[] {
   const days = run.closes.length - fe;
   if (days <= 0) return steps;
-  const fwd = forwardBudgetFor(run);
-  const last = steps.length ? steps[steps.length - 1].holdMs : MIN_STEP_MS;
+  const budget = Math.round(forwardBudgetFor(run) / FRAME_MS);
+  const last = steps.length ? steps[steps.length - 1].holdMs / FRAME_MS : MIN_STEP_FRAMES;
+  /** k steps in frames around a flat base of `base` frames. */
   const shape = (k: number, base: number) => {
     const out: number[] = [];
     let ramp = last;
     for (let j = 0; j < k; j++) {
-      ramp *= RAMP_DOWN;
+      ramp = Math.ceil(ramp * RAMP_DOWN - 1e-9);
       out.push(Math.max(base, ramp));
+    }
+    let brake = Math.ceil(END_HOLD_MS / MAX_STEP_RATIO / FRAME_MS - 1e-9);
+    for (let j = k - 1; j >= 0; j--) {
+      out[j] = Math.max(out[j], brake);
+      brake = Math.ceil(out[j] / RAMP_UP - 1e-9);
     }
     return out;
   };
   const sumOf = (xs: number[]) => xs.reduce((a, x) => a + x, 0);
-  let k = Math.min(days, Math.floor(fwd / MIN_STEP_MS));
-  while (k > 1 && sumOf(shape(k, MIN_STEP_MS)) > fwd) k--;
-  // The base hold that makes the k steps add up to the budget.
-  let lo = MIN_STEP_MS;
-  let hi = fwd;
-  for (let it = 0; it < 50; it++) {
-    const mid = (lo + hi) / 2;
-    if (sumOf(shape(k, mid)) > fwd) hi = mid;
-    else lo = mid;
-  }
-  let holds = shape(k, lo).map((x) => Math.max(MIN_STEP_MS, Math.floor(x)));
-  // Hand out the leftover milliseconds one at a time from the last step back, so the total is exact.
-  let left = fwd - sumOf(holds);
-  for (let j = k - 1; left > 0; j = j > 0 ? j - 1 : k - 1, left--) holds[j]++;
-  holds = holds.slice(0, k);
+  let k = Math.min(days, Math.floor(budget / MIN_STEP_FRAMES));
+  while (k > 1 && sumOf(shape(k, MIN_STEP_FRAMES)) > budget) k--;
+  // The largest flat base that fits; the frames left over go one at a time to the flat steps, from the middle out.
+  let base = MIN_STEP_FRAMES;
+  while (sumOf(shape(k, base + 1)) <= budget) base++;
+  const n = shape(k, base);
+  const flat = n.map((_, j) => j).filter((j) => n[j] === base);
+  flat.sort((a, b) => Math.abs(a - (k - 1) / 2) - Math.abs(b - (k - 1) / 2) || a - b);
+  let left = budget - sumOf(n);
+  for (let r = 0; left > 0 && flat.length; r = (r + 1) % flat.length, left--) n[flat[r]]++;
   for (let j = 1; j <= k; j++) {
     steps.push({
       dayIndex: fe - 1 + Math.ceil((j * days) / k),
-      holdMs: holds[j - 1],
+      holdMs: n[j - 1] * FRAME_MS,
       phase: 'forward',
       slow: false,
     });

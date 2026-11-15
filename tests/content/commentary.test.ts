@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { commentaryFor, isPlainLine, NEUTRAL_LINES } from '../../src/content/commentary';
+import { commentaryFor, isPlainLine, lineCandidates, marketState, NEUTRAL_LINES, withPlayer } from '../../src/content/commentary';
 
 type Ctx = Parameters<typeof commentaryFor>[0];
 
@@ -67,6 +67,22 @@ function randomCtx(rand: () => number, previous?: string): Ctx {
     previous,
   };
 }
+
+describe('streak lines held over several days (R53: no count that goes stale)', () => {
+  it('a line held while the streak grows from three to six says "at least three", never a count that is wrong later', () => {
+    const closes = [99, 100, 101, 102, 103, 104, 105];
+    const pc = pre(98.5, 108);
+    const states = [3, 4, 5, 6].map((d) =>
+      withPlayer(marketState(closes, pc, 108, d), { held: true, neverSold: true, balance: 10_000, start: 10_000 }),
+    );
+    const streak = lineCandidates(states).filter((c) => /days in a row/.test(c.text));
+    expect(streak.length).toBeGreaterThan(0);
+    for (const c of streak) {
+      expect(c.text).not.toMatch(/and counting/);
+      expect(c.text).toMatch(/at least (three|four) days in a row/);
+    }
+  });
+});
 
 describe('commentaryFor', () => {
   it('names a streak of seven falling days', () => {
@@ -297,7 +313,7 @@ describe('commentaryFor', () => {
         expect(m[1] === 'Down' ? r < 0 : r > 0).toBe(true);
         checked++;
       }
-      if ((m = l.match(/(?:Prices )?(down|up) (\w+) days in a row/i))) {
+      if ((m = l.match(/(?:Prices )?(down|up)(?: at least)? (\w+) days in a row/i))) {
         const dir = m[1].toLowerCase() === 'down' ? -1 : 1;
         let run = 0;
         for (let j = n; j >= 1 && (series[j] - series[j - 1]) * dir > 0; j--) run++;
