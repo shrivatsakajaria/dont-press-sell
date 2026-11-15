@@ -136,18 +136,21 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-misses{list-style:none;padding:0;margin-top:16px;border-top:1px solid var(--soft)}
 .es-misses li{padding:8px 0;border-bottom:1px solid var(--soft);font-family:${SANS};font-weight:500;font-size:14px;line-height:1.3}
 .es-grow{flex-grow:1;min-height:16px}
-.es-double{margin-top:16px;border-top:4px solid var(--ink);padding-top:12px;margin-bottom:8px}
-.es-double h2{font-weight:700;font-size:28px;line-height:1.05;letter-spacing:-0.02em}
-.es-stake{margin-top:8px;font-size:16px;line-height:1.35;color:var(--sec)}
-.es-ladder-label{margin-top:16px;font-family:${SANS};font-weight:700;font-size:12px;line-height:1}
-.es-ladder{list-style:none;padding:0;margin-top:8px;display:grid;grid-template-columns:repeat(5,1fr);column-gap:4px}
-.es-rung{font-family:${SANS};font-weight:500;font-size:12px;line-height:1.2;color:var(--sec)}
-.es-rung i{font-style:normal;display:flex;align-items:center;justify-content:center;width:28px;height:28px;margin-bottom:4px;box-sizing:border-box;font-family:'Newsreader',Georgia,serif;font-weight:500;font-size:18px;color:var(--sec)}
+.es-double{margin-top:12px;border-top:4px solid var(--ink);padding-top:8px;margin-bottom:4px}
+.es-double h2{font-weight:700;font-size:24px;line-height:1.05;letter-spacing:-0.02em}
+.es-stake{margin-top:4px;font-size:16px;line-height:1.3;color:var(--sec)}
+.es-ladder-label{margin-top:12px;font-family:${SANS};font-weight:700;font-size:12px;line-height:1}
+.es-ladder{list-style:none;padding:0;margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.es-rung{display:flex;align-items:center;gap:4px;font-family:${SANS};font-weight:500;font-size:12px;line-height:1;color:var(--sec);white-space:nowrap}
+.es-rung b{font-weight:inherit}
+.es-rung i{font-style:normal;display:flex;align-items:center;justify-content:center;width:24px;height:24px;box-sizing:border-box;font-family:'Newsreader',Georgia,serif;font-weight:500;font-size:16px;color:var(--sec)}
 .es-rung[data-rung=reached]{color:var(--ink)}
 .es-rung[data-rung=reached] i{background:var(--ink);color:var(--bg);font-weight:700}
 .es-rung[data-rung=next]{color:var(--ink);font-weight:700}
 .es-rung[data-rung=next] i{color:var(--ink);font-weight:700;border-bottom:2px solid var(--ink)}
 .es-pair{display:flex;gap:12px;margin-top:16px}
+.es-double .es-pair{margin-top:12px}
+.es-count-gap{margin-top:4px}
 .es-pair button{flex:1 1 0;min-height:56px;padding:0 4px;font-family:${SANS};font-weight:700;font-size:16px;line-height:1.1;letter-spacing:-0.01em}
 .es-main{background:var(--ink);color:var(--bg)}
 .es-main:hover{background:#3a362f}
@@ -368,7 +371,8 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       li.setAttribute('data-rung', state);
       li.setAttribute('aria-label', `${r} ${r === 1 ? 'win' : 'wins'}: ${title}${state === 'reached' ? ', reached' : state === 'next' ? ', next' : ''}`);
       li.appendChild(h('i', '', String(r)));
-      li.appendChild(document.createTextNode(title));
+      // One line: only the rung just reached and the next one print their titles.
+      if (r === lad.reached || r === lad.next) li.appendChild(h('b', '', title));
       ul.appendChild(li);
     });
     block.appendChild(ul);
@@ -483,7 +487,13 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       if (interval !== null) clearInterval(interval);
       interval = null;
       for (const e of events) document.removeEventListener(e, stopCountdown, true);
-      line.remove();
+      // The line sits above the buttons: keep its space, so a tap that stops it does not move them under the finger.
+      if (line.isConnected) {
+        const gap = h('div', 'es-count-gap');
+        gap.setAttribute('aria-hidden', 'true');
+        gap.style.height = `${line.offsetHeight}px`;
+        line.replaceWith(gap);
+      }
       stopCountdown = () => {};
     };
     for (const e of events) document.addEventListener(e, stopCountdown, true);

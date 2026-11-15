@@ -165,6 +165,21 @@ describe('the countdown', () => {
     expect(onNewMystery).not.toHaveBeenCalled();
   });
 
+  test('stopping it keeps its space, so the buttons under it do not jump under the finger', () => {
+    mount(c2007Sample());
+    revealButton()!.click();
+    vi.advanceTimersByTime(1500 + 2000);
+    const line = root.querySelector('.es-count') as HTMLElement;
+    const next = line.nextElementSibling;
+    root.querySelector('h1')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(root.querySelector('.es-count')).toBeNull();
+    const gap = root.querySelector('.es-count-gap') as HTMLElement;
+    expect(gap).not.toBeNull();
+    expect(gap.nextElementSibling).toBe(next);
+    expect(gap.getAttribute('aria-hidden')).toBe('true');
+    expect(gap.textContent).toBe('');
+  });
+
   test('never runs without showCountdown', () => {
     const m = losingSample();
     const onNewMystery = vi.fn();
@@ -300,7 +315,20 @@ describe('the front page', () => {
       'Keep your $3,591 win, or take all $14,427 into another mystery game. Finish behind and the run is over.',
     );
     expect(t).toContain('Wins in a row');
-    for (const title of ["Beginner's luck", 'Hot hand', 'Shark', 'Whale', 'Untouchable']) expect(t).toContain(title);
+    // Compact ladder: one line, titles printed only for the rung just reached and the next one;
+    // every rung keeps its full name for screen readers.
+    const shown = Array.from(root.querySelectorAll('.es-rung b')).map((b) => b.textContent);
+    expect(shown).toEqual(['Hot hand', 'Shark']);
+    expect(t).not.toContain("Beginner's luck");
+    expect(t).not.toContain('Untouchable');
+    const labels = Array.from(root.querySelectorAll('[data-rung]')).map((r) => r.getAttribute('aria-label'));
+    expect(labels).toEqual([
+      "1 win: Beginner's luck, reached",
+      '2 wins: Hot hand, reached',
+      '3 wins: Shark, next',
+      '5 wins: Whale',
+      '8 wins: Untouchable',
+    ]);
     const rungs = root.querySelectorAll('[data-rung]');
     expect(Array.from(rungs).map((r) => r.getAttribute('data-rung'))).toEqual([
       'reached',
