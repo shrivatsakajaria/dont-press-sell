@@ -278,6 +278,55 @@ describe('the front page', () => {
     expect(root.querySelector('svg [data-line="market"]')).not.toBeNull();
   });
 
+  test('before the reveal the table figures and the "Keep your $N win" line keep their space but are hidden', () => {
+    const m = winningSample();
+    m.actions = { ...m.actions, onDouble: () => {}, onBank: () => {} };
+    mount(m);
+    const money = Array.from(root.querySelectorAll('.es-row span:last-child')) as HTMLElement[];
+    expect(money.length).toBe(3);
+    const stake = root.querySelector('.es-stake') as HTMLElement;
+    for (const e of [...money, stake]) expect(e.style.visibility).toBe('hidden');
+    expect(money[0].textContent).toMatch(/^\$[\d,]+$/); // the text is there, so nothing moves at the reveal
+    revealButton()!.click();
+    for (const e of [...money, stake]) expect(e.style.visibility).toBe('');
+  });
+
+  test('the count-up never shows "$0" for a frame', () => {
+    for (const lead of [3719, 3, -2]) {
+      const m = c2007Sample();
+      m.result = { ...m.result, lead, final: m.result.holderFinal + lead };
+      handle?.destroy();
+      mount(m);
+      const el = root.querySelector('[data-lead]') as HTMLElement;
+      const seen = new Set<string>();
+      const watch = new MutationObserver(() => seen.add(el.textContent ?? ''));
+      watch.observe(el, { childList: true, characterData: true, subtree: true });
+      revealButton()!.click();
+      seen.add(el.textContent ?? '');
+      for (let t = 0; t < 1700; t += 10) {
+        vi.advanceTimersByTime(10);
+        seen.add(el.textContent ?? '');
+      }
+      watch.disconnect();
+      expect([...seen].filter((x) => /^\$0 /.test(x)), `lead ${lead}`).toEqual([]);
+    }
+  });
+
+  test('for 350 ms after the score appears, a tap on a moved button does nothing', () => {
+    const m = losingSample();
+    const onRematch = vi.fn();
+    m.actions = { ...m.actions, onRematch };
+    mount(m);
+    revealButton()!.click();
+    const rematch = Array.from(root.querySelectorAll('button')).find((b) => b.textContent === 'Rematch this crash')!;
+    vi.advanceTimersByTime(340);
+    rematch.click();
+    expect(onRematch).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(20);
+    rematch.click();
+    expect(onRematch).toHaveBeenCalledTimes(1);
+  });
+
   test('trade headlines appear only after the reveal', () => {
     mount(c2007Sample());
     expect(root.textContent).not.toContain('House rejects');

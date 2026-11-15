@@ -234,7 +234,8 @@ function reducedMotion(): boolean {
 /** The lead line: the final one at the end of the count; on the way, the final's words ("ahead"/"behind") at every figure, $0 included. */
 function leadText(value: number, finalLead: number): string {
   if (value === finalLead) return leadLine(finalLead);
-  return aheadBehindLine(value, Math.round(finalLead) < 0);
+  // Never "$0" on the way: the count starts at $1.
+  return aheadBehindLine(Math.max(1, Math.abs(Math.round(value))), Math.round(finalLead) < 0);
 }
 
 /** The folio's reveal text: one-sentence lines lose their full stop ("That was 2008"). */
@@ -328,6 +329,15 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     }
   };
 
+  // Figures that give the score away (the table's money, "Keep your $N win") keep their space but stay
+  // hidden until the reveal, so nothing moves when they show.
+  const secret: HTMLElement[] = [];
+  const hideUntilReveal = (e: HTMLElement) => {
+    if (!model.flags.blind) return e;
+    e.style.visibility = 'hidden';
+    secret.push(e);
+    return e;
+  };
   const table = h('div', 'es-table');
   const row = (label: string, value: number, cls = '', key?: 'solid' | 'dash') => {
     const r = h('div', 'es-row ' + cls);
@@ -339,7 +349,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     }
     l.appendChild(document.createTextNode(label));
     r.appendChild(l);
-    r.appendChild(h('span', '', dollars(value)));
+    r.appendChild(hideUntilReveal(h('span', '', dollars(value))));
     table.appendChild(r);
   };
   row(YOU, result.final, 'es-row-you', model.other ? 'solid' : undefined);
@@ -366,7 +376,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     const d = model.double;
     const block = h('section', 'es-double');
     block.appendChild(h('h2', '', DOUBLE_OR_NOTHING));
-    block.appendChild(h('p', 'es-stake', doubleStakeLine(d.net, d.final)));
+    block.appendChild(hideUntilReveal(h('p', 'es-stake', doubleStakeLine(d.net, d.final))));
     const lad = ladder(d.wins);
     block.appendChild(h('p', 'es-ladder-label', WINS_IN_A_ROW));
     const ul = h('ul', 'es-ladder');
@@ -442,6 +452,16 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   if (foot.childElementCount) page.appendChild(foot);
   page.appendChild(h('p', 'es-footer', FOOTER_RESULT));
 
+  // While the page settles after the reveal, taps on buttons do nothing (they have just moved).
+  page.addEventListener(
+    'click',
+    (e) => {
+      if (!page.hasAttribute('data-settling')) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    },
+    true,
+  );
   root.replaceChildren(page);
 
   // The score counts to the lead over about 1.5 s (spec 6.6), at once with reduced motion.
@@ -521,6 +541,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     revealSlot.replaceChildren(span);
     printNews();
     score.hidden = false;
+    for (const e of secret) e.style.visibility = '';
     // The score pushes the buttons down: for a moment a tap meant for where a button was does nothing.
     if (animate) {
       page.setAttribute('data-settling', '');
