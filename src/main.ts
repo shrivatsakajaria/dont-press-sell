@@ -10,7 +10,7 @@ import type { Headline, RunData, RunResult } from './engine/types';
 import { verdictCopy, verdictFor } from './engine/verdict';
 import { playCues } from './fx/cues';
 import { buzz, setHapticsEnabled } from './fx/haptics';
-import { createSfx } from './fx/sound';
+import { createSfx, startsAudioInTap } from './fx/sound';
 import {
   bankPending, borrowedOn, borrowedUnlocked, currentStreak, doubleUp, firstEverGame, setBorrowed, settle, startScreen, verifiedChallenge,
 } from './game/flow';
@@ -91,6 +91,12 @@ let soundBooked = false;
 function bookSound() {
   if (soundBooked) return;
   soundBooked = true;
+  // iPhone and iPad (every browser there is WebKit) and desktop Safari only let audio start inside the tap
+  // itself, so there it is built at once; elsewhere it waits a frame so Start never stutters.
+  if (startsAudioInTap(typeof navigator === 'object' ? navigator.userAgent : '')) {
+    sfx.unlock();
+    return;
+  }
   const build = () => setTimeout(() => sfx.unlock(), 0);
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(build);
   else build();

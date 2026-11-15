@@ -144,3 +144,8 @@ export function createSfx(): Sfx {
     },
   };
 }
+
+/** WebKit browsers (all of iOS, and desktop Safari): audio must be started inside the user's tap. */
+export function startsAudioInTap(ua: string): boolean {
+  return /AppleWebKit/.test(ua) && (/iPhone|iPad|iPod/.test(ua) || !/Chrome|Chromium|Edg|Android/.test(ua));
+}
