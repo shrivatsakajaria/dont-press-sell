@@ -36,7 +36,9 @@ for (const height of [660, 844]) {
     await play(page, height, null);
     const chartH = () => page.evaluate(() => document.querySelector('main.es svg')!.getBoundingClientRect().height);
     const before = await chartH();
-    expect(before).toBeGreaterThanOrEqual(height <= 700 ? 140 : 160);
+    // 140 (660) / 160 (844) tall; it comes down to 124 / 112 only to keep the foot links on the page.
+    const footShown = await page.locator('.es-foot').isVisible();
+    expect(before).toBeGreaterThanOrEqual(footShown ? (height <= 700 ? 124 : 112) : height <= 700 ? 140 : 160);
     const buttonsBefore = await tops(page);
     expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(height);
     await page.getByRole('button', { name: 'Tap to see what that was' }).click();

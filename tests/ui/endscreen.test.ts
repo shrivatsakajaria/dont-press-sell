@@ -775,7 +775,7 @@ describe('round 2 fixes (R58)', () => {
     }
   });
 
-  test('the foot links can give way on a short screen (the double choice comes first); buttons never do', () => {
+  test('the foot links are the last extra to give way on a short screen; buttons never do', () => {
     mount({ ...c2007Sample(), actions: { onNewMystery: () => {}, onPick: () => {}, onCollection: () => {} } });
     expect(root.querySelector('.es-foot')!.hasAttribute('data-trimmable')).toBe(true);
     expect(root.querySelector('.es-pair[data-trimmable], .es-double[data-trimmable]')).toBeNull();

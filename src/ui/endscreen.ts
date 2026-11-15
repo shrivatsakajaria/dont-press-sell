@@ -167,12 +167,13 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-footer{font-family:${SANS};font-weight:500;font-size:14px;line-height:1.35;color:var(--sec)}
 .es :is(.es-verdict,.es-news,.es-perfect,.es-stake,.es-vs,.es-misses li,.es-pot,.es-name-sub){text-wrap:pretty}
 @media (max-height: 700px){
-  .es-mast{padding:6px 0 3px;font-size:24px}
-  .es-folio{padding:6px 0}
-  .es-h1{margin-top:8px;font-size:26px}
+  .es-mast{padding:4px 0 2px;font-size:22px}
+  .es-folio{padding:4px 0}
+  .es-h1{margin-top:6px;font-size:26px}
   .es-verdict{margin-top:4px;font-size:16px}
-  .es-chart{margin-top:8px;padding:4px 0}
-  .es-moment{margin-top:8px}
+  .es-chart{margin-top:6px;padding:2px 0}
+  .es-moment{margin-top:6px}
+  .es-grow{min-height:0}
   .es-cover{min-height:72px;font-size:24px}
   .es-name{font-size:28px}
   .es-lead{font-size:24px}
@@ -240,13 +241,16 @@ function matches(query: string): boolean {
 /** In-app browsers show about 660px. */
 const shortViewport = () => matches('(max-height: 700px)');
 /**
- * The result chart's least height (R58): 100 px of line at 390 x 660 inside endchart's top and bottom margins,
- * 120 px on taller screens. Room the page does not need goes to the chart too, up to CHART_MAX.
+ * The result chart's least height (R58): 100 px of line at 390 x 660 inside endchart's top and bottom margins
+ * (20 + 20), 120 px on taller screens. Room the page does not need goes to the chart too, up to CHART_MAX.
  */
 const chartMinHeight = () => (shortViewport() ? 140 : 160);
+/**
+ * When the foot links (Pick a crash, Your collection, Sound) do not fit beside that, the chart may come down
+ * to this to keep them: still 100 px tall or more, so tighter chart margins keep about 100 px of line.
+ */
+const chartFloor = () => (shortViewport() ? 124 : 112);
 const CHART_MAX = 260;
-/** .es-grow's own least height. */
-const GROW_MIN = 8;
 const reducedMotion = () => matches('(prefers-reduced-motion: reduce)');
 
 /** The lead line: the final one at the end of the count; on the way, the final's words ("ahead"/"behind") at every figure, $0 included. */
@@ -513,10 +517,21 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     // Laid out at its least height first: the extras are fitted around that, then the chart takes the room left.
     const w = chartEl.getBoundingClientRect().width;
     const scale = w > 0 ? w / CHART_W : 1;
-    chartEl.style.height = `${chartMin * scale}px`;
+    let least = chartMin;
+    chartEl.style.height = `${least * scale}px`;
     trim();
-    const spare = Math.max(0, grow.getBoundingClientRect().height - GROW_MIN);
-    const H = Math.min(CHART_MAX, Math.max(chartMin, Math.floor(chartMin + spare / scale)));
+    if (links.hasAttribute('data-trim') && links.childElementCount) {
+      least = chartFloor();
+      chartEl.style.height = `${least * scale}px`;
+      trim();
+      if (links.hasAttribute('data-trim')) {
+        least = chartMin;
+        chartEl.style.height = `${least * scale}px`;
+        trim();
+      }
+    }
+    const spare = Math.max(0, grow.getBoundingClientRect().height - (parseFloat(getComputedStyle(grow).minHeight) || 0));
+    const H = Math.min(CHART_MAX, Math.max(least, Math.floor(least + spare / scale)));
     chartEl.style.height = '';
     if (H !== chartH) {
       chartH = H;
