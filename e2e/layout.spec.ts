@@ -4,6 +4,8 @@ import { pressStart } from './start';
 // R30: the play screen's layout is stable. Through a whole run (selling on the first red day, then
 // buying back on the next one) the Sell/Buy button never moves (to 1px), stays 40px or more above the
 // bottom, the headline never runs past three lines and the chart keeps at least 120px.
+// R57: the chart and the balance block keep one height through the whole game (no jumps on new headlines,
+// red days or at $10,000).
 for (const height of [660, 844]) {
   for (const run of ['s2011', 'c2007', 's2024']) {
     test(`stable layout through the whole of ${run} at 390 x ${height}`, async ({ page }) => {
@@ -16,6 +18,8 @@ for (const height of [660, 844]) {
       let lastDay = '';
       let red = 0;
       let checked = 0;
+      let firstChart = -1;
+      let firstFigures = -1;
       for (let t = 0; t < 200_000; t += 100) {
         await page.clock.runFor(100);
         const m = await page.evaluate(() => {
@@ -32,6 +36,7 @@ for (const height of [660, 844]) {
             bottom: innerHeight - act.bottom,
             chart: document.querySelector('.chart')!.getBoundingClientRect().height,
             deltaHeight: document.querySelector('.delta')!.getBoundingClientRect().height,
+            figures: document.querySelector('.figures')!.getBoundingClientRect().height,
             scrollHeight: document.documentElement.scrollHeight,
           };
         });
@@ -43,6 +48,9 @@ for (const height of [660, 844]) {
         expect(m.bottom, `${m.day}: from the bottom`).toBeGreaterThanOrEqual(40);
         expect(m.lines, `${m.day}: headline lines`).toBeLessThanOrEqual(3);
         expect(m.chart, `${m.day}: chart height`).toBeGreaterThanOrEqual(120);
+        if (firstChart < 0) [firstChart, firstFigures] = [m.chart, m.figures];
+        expect(Math.abs(m.chart - firstChart), `${m.day}: chart height constant`).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(m.figures - firstFigures), `${m.day}: balance block height constant`).toBeLessThanOrEqual(0.5);
         expect(m.deltaHeight, `${m.day}: "up $N" on one line`).toBeLessThanOrEqual(24);
         expect(m.scrollHeight, `${m.day}: no page scroll`).toBeLessThanOrEqual(height);
         if (m.worst && red < 2) {
