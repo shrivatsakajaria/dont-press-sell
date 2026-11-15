@@ -424,3 +424,22 @@ describe('plain words (R28)', () => {
     }
   });
 });
+
+describe('result page order (R28)', () => {
+  test('score first, then the buttons, then the table, its note and the near misses; the countdown under the score', () => {
+    const m = { ...c2007Sample(), holderNote: true, flags: { showCountdown: true, blind: false } };
+    mount(m);
+    vi.advanceTimersByTime(2000);
+    const order = Array.from(root.querySelector('main.es')!.children).map((e) => e.className.split(' ')[0]);
+    const at = (c: string) => order.indexOf(c);
+    expect(at('es-lead')).toBeGreaterThan(at('es-h1'));
+    expect(at('es-count')).toBe(at('es-perfect') + 1);
+    // The main actions: the double block when offered, else the button pair.
+    const actions = at('es-double') >= 0 ? at('es-double') : at('es-pair');
+    expect(actions).toBeGreaterThan(at('es-count'));
+    expect(at('es-table')).toBeGreaterThan(at('es-link'));
+    expect(at('es-note')).toBe(at('es-table') + 1);
+    expect(at('es-misses')).toBeGreaterThan(at('es-note'));
+    expect(at('es-pot')).toBeGreaterThan(at('es-misses'));
+  });
+});

@@ -36,7 +36,8 @@ export function timeWords(days: number): string {
   let rest = d - Math.round(years * YEAR);
   const months = Math.max(0, Math.floor((rest + 1) / MONTH));
   rest = Math.max(0, rest - Math.round(months * MONTH));
-  const weeks = Math.floor(rest / 7);
+  // At most three weeks after a month ("two months and four weeks" reads wrong); rounding down stays true.
+  const weeks = Math.min(months ? 3 : 4, Math.floor(rest / 7));
   const left = rest % 7;
   const pair = (a: string, b: string | null) => (b ? `${a} and ${b}` : a);
   if (years) return pair(count(years, 'year'), months ? count(months, 'month') : null);

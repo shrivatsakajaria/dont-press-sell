@@ -122,7 +122,7 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-news{margin-top:8px;font-family:${SANS};font-weight:500;font-size:13px;line-height:1.35;color:var(--sec)}
 .es-news b{font-weight:700;color:var(--ink)}
 .es-news+.es-news{margin-top:2px}
-.es-table{margin-top:12px;font-family:${SANS};font-size:16px;line-height:1}
+.es-table{margin-top:16px;font-family:${SANS};font-size:16px;line-height:1}
 .es-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--soft);font-weight:500}
 .es-row:last-child{border-bottom-color:var(--ink)}
 .es-row-you{font-weight:700}
@@ -135,8 +135,8 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-vs{margin-top:8px;font-family:${SANS};font-weight:700;font-size:14px;line-height:1.35}
 .es-misses{list-style:none;padding:0;margin-top:16px;border-top:1px solid var(--soft)}
 .es-misses li{padding:8px 0;border-bottom:1px solid var(--soft);font-family:${SANS};font-weight:500;font-size:14px;line-height:1.3}
-.es-grow{flex-grow:1;min-height:32px}
-.es-double{border-top:4px solid var(--ink);padding-top:12px;margin-bottom:32px}
+.es-grow{flex-grow:1;min-height:16px}
+.es-double{margin-top:16px;border-top:4px solid var(--ink);padding-top:12px;margin-bottom:8px}
 .es-double h2{font-weight:700;font-size:28px;line-height:1.05;letter-spacing:-0.02em}
 .es-stake{margin-top:8px;font-size:16px;line-height:1.35;color:var(--sec)}
 .es-ladder-label{margin-top:16px;font-family:${SANS};font-weight:700;font-size:12px;line-height:1}
@@ -335,8 +335,6 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   if (model.other) row(otherName, model.other.final, '', 'dash');
   row(SOMEONE_WHO_DID_NOTHING, result.holderFinal);
   row(PERFECT_TIMING, result.perfectFinal);
-  page.appendChild(table);
-  if (model.holderNote) page.appendChild(h('p', 'es-note', HOLDER_NOTE));
 
   // Hidden until the reveal; it holds the final text so the layout does not jump.
   const lead = h('p', 'es-lead' + (behind ? ' es-behind' : ''), leadText(result.lead, result.lead));
@@ -354,14 +352,6 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     scoreEnd = h('p', 'es-vs', line);
     page.appendChild(scoreEnd);
   }
-
-  if (model.nearMisses.length) {
-    const ul = h('ul', 'es-misses');
-    for (const m of model.nearMisses) ul.appendChild(h('li', '', m));
-    page.appendChild(ul);
-  }
-
-  page.appendChild(h('div', 'es-grow'));
 
   if (model.double) {
     const d = model.double;
@@ -405,6 +395,17 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   }
   if (pair.childElementCount) page.appendChild(pair);
   page.appendChild(button('es-link', NEW_MYSTERY, actions.onNewMystery));
+
+  // R28: the table and the near misses come after the buttons, so a short screen reaches them first.
+  page.appendChild(table);
+  if (model.holderNote) page.appendChild(h('p', 'es-note', HOLDER_NOTE));
+  if (model.nearMisses.length) {
+    const ul = h('ul', 'es-misses');
+    for (const m of model.nearMisses) ul.appendChild(h('li', '', m));
+    page.appendChild(ul);
+  }
+
+  page.appendChild(h('div', 'es-grow'));
 
   page.appendChild(h('p', 'es-pot', potResultLine(model.pot.pot, model.pot.tonight)));
 

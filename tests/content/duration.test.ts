@@ -16,6 +16,7 @@ it('says a length of time in plain words, small numbers as words', () => {
   expect(timeWords(1257)).toBe('three years and five months');
   expect(timeWords(12 * 365 + 3)).toBe('12 years');
   expect(timeWords(330)).toBe('ten months and three weeks');
+  expect(timeWords(89)).toBe('two months and three weeks');
 });
 
 it('never rounds up: the words are never longer than the time', () => {
