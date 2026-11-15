@@ -257,3 +257,80 @@ it('start screen with borrowed money: the three lines, then the borrowed line in
   play.teardown();
   vi.useRealTimers();
 });
+
+it('start screen on a slow, red day 1: calm paper, "Price: your nerve", no "level" and no chart band before play', () => {
+  vi.useFakeTimers({ toFake: [...FAKE] });
+  document.body.innerHTML = '';
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  const slow0 = steps.map((st, i) => (i === 0 ? { ...st, slow: true } : st));
+  const play = startPlay(root, { ...run, preCloses: [110] }, slow0, { runLabel: 'Mystery crash', onEnd: vi.fn(), gate: { lines: ['a', 'b', 'c'] } });
+  const page = root.querySelector('.play')!;
+  const folio = root.querySelector('.folio')!.textContent!;
+  expect(folio).toContain('Price: your nerve');
+  expect(folio).not.toContain('Time slowed');
+  expect(page.classList.contains('is-worst')).toBe(false);
+  expect(page.classList.contains('is-big')).toBe(false);
+  expect(root.querySelector('.delta')!.textContent).toBe('');
+  expect(page.classList.contains('is-gate')).toBe(true); // CSS hides the chart band while the page waits
+  // Start: day 1 is a red day at once.
+  (root.querySelector('button.act') as HTMLButtonElement).click();
+  expect(page.classList.contains('is-worst')).toBe(true);
+  expect(root.querySelector('.folio')!.textContent).toContain('Time slowed');
+  play.teardown();
+  vi.useRealTimers();
+});
+
+it('a press capture is cleared when the finger is cancelled or leaves the button', () => {
+  vi.useFakeTimers({ toFake: [...FAKE] });
+  document.body.innerHTML = '';
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  const play = startPlay(root, run, steps, { runLabel: 'Mystery crash', onEnd: vi.fn() });
+  const btn = root.querySelector('button.act') as HTMLButtonElement;
+  vi.advanceTimersByTime(16); // day 1 painted
+  btn.dispatchEvent(new Event('pointerdown'));
+  btn.dispatchEvent(new Event('pointercancel'));
+  vi.advanceTimersByTime(100); // day 2, painted
+  vi.advanceTimersByTime(16);
+  btn.click(); // a keyboard or late click: trades on the day on screen, not the cancelled capture's day 1
+  expect(btn.textContent).toMatch(/^Buy back now/);
+  const sold = play.view();
+  expect(sold.dayIndex).toBe(1);
+  expect(sold.invested).toBe(false);
+  // The trade is on day 2's close ($10,100), not day 1's ($10,000).
+  expect(sold.balance).toBeCloseTo(10100);
+  play.teardown();
+  vi.useRealTimers();
+});
+
+it('a finger dragged off the button clears the capture; a touch tap (pointerleave after lifting) keeps it', () => {
+  vi.useFakeTimers({ toFake: [...FAKE] });
+  const mk = () => {
+    document.body.innerHTML = '';
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const play = startPlay(root, run, steps, { runLabel: 'Mystery crash', onEnd: vi.fn() });
+    return { play, btn: root.querySelector('button.act') as HTMLButtonElement };
+  };
+  const leave = (buttons: number) => Object.assign(new Event('pointerleave'), { buttons });
+  // Dragged off while pressed: the click (if any) trades on the day on screen.
+  let { play, btn } = mk();
+  vi.advanceTimersByTime(16);
+  btn.dispatchEvent(new Event('pointerdown'));
+  btn.dispatchEvent(leave(1));
+  vi.advanceTimersByTime(116);
+  btn.click();
+  expect(play.view().balance).toBeCloseTo(10100);
+  play.teardown();
+  // A touch tap: pointerup, then pointerleave with no button down, then the click a step later: still pinned to day 1.
+  ({ play, btn } = mk());
+  vi.advanceTimersByTime(16);
+  btn.dispatchEvent(new Event('pointerdown'));
+  btn.dispatchEvent(leave(0));
+  vi.advanceTimersByTime(100);
+  btn.click();
+  expect(play.view().balance).toBeCloseTo(10000);
+  play.teardown();
+  vi.useRealTimers();
+});
