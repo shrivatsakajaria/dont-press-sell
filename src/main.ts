@@ -29,6 +29,7 @@ import { challengeLink, resultCard } from './share/result';
 import { copyText, shareResult } from './share/share';
 import { cell, save } from './store/store';
 import { holderNoteDue, mountEndScreen, type EndModel } from './ui/endscreen';
+import { mountLoadError } from './ui/loaderror';
 import { mountCollection, mountPickCrash } from './ui/menus';
 import { paperFor } from './ui/paper';
 import { MYSTERY_LABEL, startPlay, type Play } from './ui/screen';
@@ -127,8 +128,18 @@ async function play(game: Game, opts: { double?: boolean; gate?: boolean } = {})
   const mine = ++ticket;
   // Starting anything but the double banks a win that was waiting for a choice (spec 6.8).
   if (!opts.double) bankPending();
-  const { run, headlines } = await load(game.runId);
+  let data: Awaited<ReturnType<typeof load>>;
+  try {
+    data = await load(game.runId);
+  } catch {
+    // I6: no dead page and no unhandled rejection; a tap tries the same game again.
+    if (mine !== ticket) return;
+    clear();
+    mountLoadError(root, () => void play(game, opts));
+    return;
+  }
   if (mine !== ticket) return;
+  const { run, headlines } = data;
   clear();
   lastGame = game;
   const steps = buildSchedule(run, headlines);

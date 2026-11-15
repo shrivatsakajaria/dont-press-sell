@@ -209,3 +209,6 @@ export const COPY_LINK = 'Copy link';
 export const LINK_COPIED = 'Link copied';
 export const COPY_FAILED = 'Copy failed';
 export const CLOSE = 'Close';
+
+// A run whose data did not load (I6).
+export const LOAD_FAILED = 'This run did not load. Tap to try again.';
