@@ -28,7 +28,7 @@ test('with storage blocked a full run completes, the first-sale line shows, and 
   await page.clock.runFor(5000);
   await button.click();
   await expect(page.getByText(FIRST_SALE)).toBeVisible();
-  await page.clock.runFor(46_000);
+  await page.clock.runFor(114_000); // R27: s2018 runs about 118 s
   await expect(page.getByText('Late edition')).toBeVisible();
   await expect(page.locator('.es-pot')).toContainText('Your pot:');
   // Foot links work without storage too.
@@ -70,7 +70,7 @@ test('the daily crash is labelled and has no countdown; a replay is a rematch', 
   await page.clock.runFor(40_000);
   await page.getByRole('button', { name: 'Daily crash' }).click();
   await expect(page.locator('.folio')).toContainText(/Daily crash \d+/);
-  await page.clock.runFor(70_000);
+  await page.clock.runFor(150_000); // R27: any daily run ends within 150 s
   await expect(page.getByText('Late edition')).toBeVisible();
   await page.clock.runFor(15_000);
   await expect(page.getByText(/Next mystery crash/)).toHaveCount(0);

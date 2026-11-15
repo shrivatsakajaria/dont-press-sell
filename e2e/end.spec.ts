@@ -3,12 +3,12 @@ import { expect, test, type Page } from '@playwright/test';
 const COVER = 'Tap to see what that was';
 const NAME = 'That was the autumn 2014 wobble';
 
-/** Plays s2014 (about 18 s) with no taps, a second at a time, until the front page prints. */
+/** Plays s2014 (about 29 s since R27) with no taps, a second at a time, until the front page prints. */
 async function finishWithoutTapping(page: Page) {
   await page.clock.install();
   await page.goto('/?run=s2014');
   await expect(page.locator('button.act')).toHaveText(/^Sell for/);
-  for (let i = 0; i < 40 && (await page.locator('.es-h1').count()) === 0; i++) await page.clock.runFor(1000);
+  for (let i = 0; i < 60 && (await page.locator('.es-h1').count()) === 0; i++) await page.clock.runFor(1000);
 }
 
 test('a run with no taps prints the level front page, with the crash name covered', async ({ page }) => {
