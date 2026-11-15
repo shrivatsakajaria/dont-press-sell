@@ -41,3 +41,4 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - Panel (10 personas) on checkpoint 2: current game too fast to read or decide (2.2/10 and 3.3/10); 3 minutes too long (want-another-go fell 6.9 -> 4.9; 9 of 10 would not finish from a feed); median ideal 75-90 s. Start card: keep to 3 lines, one screen.
 - R27 (SK). A game lasts about 120 seconds: big, red and decoy days hold 3 s so the headline can be read; quiet days stay quicker.
 - R28 (SK). A start screen of 3 short lines in plain human words about the core of the game (hold your nerve, make the most money you can in a fall you cannot see the end of), then Start. Five wordings go to the panel first. Result wording to be plainer ("1241 days in cash", "ahead/behind").
+- R27 applied: most runs ~118 s; 1929 and 2000 ~140 s; the fast real falls stay shorter (Covid 72 s, 2025 91 s, 2014 29 s, 2024 37 s). Accepted: a fast real crash should feel fast.
