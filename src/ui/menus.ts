@@ -15,7 +15,7 @@ export const VERDICT_TITLES: Record<VerdictId, { title: string; line: string }> 
   bigShort: { title: 'Big Short energy', line: 'Out before the fall and back in near the low' },
   nerves: { title: 'Nerves of steel', line: 'Traded, and still came out in front' },
   diamond: { title: 'Diamond hands', line: 'Did nothing at all' },
-  shakenOut: { title: 'Shaken out', line: 'Sold a dip that was back in months' },
+  shakenOut: { title: 'Shaken out', line: 'Sold a dip that bounced straight back' },
   paper: { title: 'Paper hands', line: 'Sold near the low, then bought back higher' },
   cashGang: { title: 'Cash gang', line: 'Sold, and watched the whole recovery from the sidelines' },
   overtrader: { title: 'Overtrader', line: 'In and out, and behind for it' },
