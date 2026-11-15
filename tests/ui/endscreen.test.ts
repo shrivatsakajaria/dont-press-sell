@@ -284,30 +284,41 @@ describe('the front page', () => {
     mount(m);
     const money = Array.from(root.querySelectorAll('.es-row span:last-child')) as HTMLElement[];
     expect(money.length).toBe(3);
-    const stake = root.querySelector('.es-stake')!.closest('.es-double') as HTMLElement; // held with its block
-    for (const e of [...money, stake]) expect(e.style.visibility).toBe('hidden');
+    for (const e of money) expect(e.style.visibility).toBe('hidden');
+    expect(root.querySelector('.es-stake')).toBeNull(); // the double block comes at the reveal
     expect(money[0].textContent).toMatch(/^\$[\d,]+$/); // the text is there, so nothing moves at the reveal
     revealButton()!.click();
-    for (const e of [...money, stake]) expect(e.style.visibility).toBe('');
+    for (const e of money) expect(e.style.visibility).toBe('');
+    expect(root.querySelector('.es-stake')).not.toBeNull();
   });
 
   test('before the reveal the double block (with "Bank $N"), the pot line and money near misses keep their space, hidden', () => {
     const m = winningSample();
     m.nearMisses = [...m.nearMisses, 'One trade from perfect: perfect timing made $15,160'];
-    m.actions = { ...m.actions, onDouble: () => {}, onBank: () => {} };
+    m.actions = { ...m.actions, onDouble: () => {}, onBank: () => {}, onRematch: () => {} };
     mount(m);
-    const block = root.querySelector('.es-double') as HTMLElement;
+    // Rematch looks as it does on a loss until the reveal (R24 outlines it only beside the red double button).
+    const rematch = () => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === 'Rematch this crash')!;
+    expect(rematch().className).toBe('es-main');
+    // No double block, and no space for one, before the reveal: a gap only wins have would be a tell.
+    expect(root.querySelector('.es-double')).toBeNull();
+    expect(root.textContent).not.toMatch(/Bank \$|Keep your/);
     const pot = root.querySelector('.es-pot') as HTMLElement;
     const money = Array.from(root.querySelectorAll('.es-misses li')).filter((li) => li.textContent!.includes('$')) as HTMLElement[];
     expect(money.length).toBeGreaterThan(0);
-    expect(block.querySelector('.es-out')!.textContent).toMatch(/^Bank \$/);
-    const held = [block, pot, ...money];
+    const held = [pot, ...money];
     for (const e of held) expect(e.style.visibility).toBe('hidden');
     // Plain near misses (no figure) show at once.
     const plain = Array.from(root.querySelectorAll('.es-misses li')).filter((li) => !li.textContent!.includes('$')) as HTMLElement[];
     for (const e of plain) expect(e.style.visibility).toBe('');
     revealButton()!.click();
     for (const e of held) expect(e.style.visibility).toBe('');
+    // Inserted at the reveal, in its place: after the score, before the other buttons.
+    const block = root.querySelector('.es-double') as HTMLElement;
+    expect(block.querySelector('.es-out')!.textContent).toMatch(/^Bank \$/);
+    expect(block.nextElementSibling!.className).toMatch(/^es-(pair|link)$/);
+    expect(rematch().className).toBe('es-out');
+    expect(block.previousElementSibling!.className).toBe('es-score');
   });
 
   test('the count-up never shows "$0" for a frame', () => {
@@ -358,6 +369,7 @@ describe('the front page', () => {
     const m = winningSample();
     m.actions = { ...m.actions, onRematch: () => {}, onChallenge: () => {}, onDouble: () => {}, onBank: () => {} };
     mount(m);
+    revealButton()?.click(); // a blind page puts the double block in at the reveal
     const byText = (s: string) => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === s)!;
     expect(byText('Double or nothing').className).toBe('es-dbl');
     expect(byText('Rematch this crash').className).toBe('es-out');
@@ -374,6 +386,7 @@ describe('the front page', () => {
 
   test('the c2007 sample is a winning mystery run with a double block', () => {
     mount(c2007Sample());
+    revealButton()?.click(); // a blind page puts the double block in at the reveal
     expect(root.querySelector('h2')!.textContent).toBe('Double or nothing');
   });
 
@@ -407,6 +420,7 @@ describe('the front page', () => {
     const onBank = vi.fn();
     m.actions = { ...m.actions, onDouble, onBank };
     mount(m);
+    revealButton()?.click(); // a blind page puts the double block in at the reveal
     const t = root.textContent!;
     expect(root.querySelector('h2')!.textContent).toBe('Double or nothing');
     expect(t).toContain(
@@ -436,6 +450,7 @@ describe('the front page', () => {
       'ahead',
     ]);
     const byText = (s: string) => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === s)!;
+    vi.advanceTimersByTime(400); // past the tap guard after the reveal
     byText('Double or nothing').click();
     byText('Bank $5,091').click();
     expect(onDouble).toHaveBeenCalledTimes(1);

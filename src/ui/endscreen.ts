@@ -397,14 +397,20 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     pair.appendChild(button('es-dbl', DOUBLE_OR_NOTHING, actions.onDouble));
     pair.appendChild(button('es-out', bankLabel(d.net), actions.onBank));
     block.appendChild(pair);
-    // The whole block (a win, its size, "Bank $N") waits for the reveal in its own space, then slides in.
-    page.appendChild(hideUntilReveal(block));
-    doubleBlock = block;
+    // Only a win has this block, so on a blind page it is not even there (no space kept: a gap would be
+    // a tell) until the reveal, when it is put in place and slides in; the tap guard covers the move.
+    if (model.flags.blind) doubleBlock = block;
+    else page.appendChild(block);
   }
 
   const pair = h('div', 'es-pair');
   // R24: with the double block, its red button is the only filled one.
-  if (actions.onRematch) pair.appendChild(button(model.double ? 'es-out' : 'es-main', REMATCH, actions.onRematch));
+  // A blind page keeps Rematch filled until the reveal brings the double block (an outline would be a tell).
+  let rematchButton: HTMLButtonElement | null = null;
+  if (actions.onRematch) {
+    rematchButton = button(model.double && !doubleBlock ? 'es-out' : 'es-main', REMATCH, actions.onRematch);
+    pair.appendChild(rematchButton);
+  }
   if (actions.onChallenge) pair.appendChild(button('es-out', CHALLENGE, actions.onChallenge));
   if (actions.onCopyResult) {
     const copyFn = actions.onCopyResult;
@@ -546,7 +552,10 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     printNews();
     score.hidden = false;
     for (const e of secret) e.style.visibility = '';
-    // Visibility keeps the space, so the block slides in over its own place; nothing below it moves.
+    if (doubleBlock) {
+      score.after(doubleBlock);
+      if (rematchButton) rematchButton.className = 'es-out';
+    }
     if (doubleBlock && animate && !reducedMotion() && typeof doubleBlock.animate === 'function') {
       doubleBlock.animate([{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], {
         duration: 320, easing: EASE,
