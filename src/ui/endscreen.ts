@@ -26,7 +26,7 @@ import type { Sfx } from '../fx/sound';
 import { ladder, RUNG_TITLES } from '../game/streak';
 import { load, save } from '../store/store';
 import { announce } from './a11y';
-import { endChart } from './endchart';
+import { endChart, marketInCash } from './endchart';
 import { paperFor } from './paper';
 
 // Strings this screen shows live in src/content/copy.ts; re-exported for existing importers.
@@ -41,6 +41,8 @@ export const REVEAL_AFTER_MS = 4000;
 export const COUNT_MS = 1500;
 const COUNT_STEP_MS = 30;
 export const COUNTDOWN_FROM = 10;
+/** After the score appears, buttons ignore taps this long (they have just moved). */
+const SETTLE_MS = 350;
 
 export interface EndModel {
   run: { pickName: string; revealLine: string; kind: RunKind };
@@ -107,13 +109,13 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-mast{border-top:4px solid var(--ink);border-bottom:1px solid var(--ink);padding:8px 0 4px;text-align:center;font-weight:700;font-size:30px;line-height:1;letter-spacing:-0.02em}
 .es-folio{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;column-gap:12px;row-gap:4px;padding:8px 0;border-bottom:1px solid var(--ink);font-family:${SANS};font-weight:500;font-size:12px;line-height:1;color:var(--sec)}
 .es-folio-long .es-reveal{flex-basis:100%;line-height:1.35}
-.es-cover{display:flex;align-items:center;min-height:44px;margin:-14px 0}
+.es-cover{display:flex;align-items:center;min-height:44px;margin:-12px 0}
 .es-cover span{display:block;padding:4px 8px;background:var(--ink);color:var(--bg);font-weight:700;font-size:12px;line-height:1}
-.es-cover:hover span{background:var(--red)}
 .es-name{display:inline-block;color:var(--ink);font-weight:700}
 .es-name.es-wipe{animation:es-wipe 420ms ${EASE} both}
 @keyframes es-wipe{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
-.es-newsbox{min-height:var(--news-h,0px)}
+.es-score[hidden]{display:none}
+.es[data-settling] button{pointer-events:none}
 .es-h1{margin-top:20px;font-weight:700;font-size:40px;line-height:0.98;letter-spacing:-0.02em;text-wrap:balance}
 .es-verdict{margin-top:8px;font-size:18px;line-height:1.3;color:var(--sec)}
 .es-verdict b{font-weight:700;color:var(--ink)}
@@ -122,7 +124,7 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-chart-word{font-family:${SANS};font-weight:700;font-size:12px;paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
 .es-news{margin-top:8px;font-family:${SANS};font-weight:500;font-size:13px;line-height:1.35;color:var(--sec)}
 .es-news b{font-weight:700;color:var(--ink)}
-.es-news+.es-news{margin-top:2px}
+.es-news+.es-news{margin-top:4px}
 .es-table{margin-top:16px;font-family:${SANS};font-size:16px;line-height:1}
 .es-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--soft);font-weight:500}
 .es-row:last-child{border-bottom-color:var(--ink)}
@@ -141,7 +143,7 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-double h2{font-weight:700;font-size:24px;line-height:1.05;letter-spacing:-0.02em}
 .es-stake{margin-top:4px;font-size:16px;line-height:1.3;color:var(--sec)}
 .es-ladder-label{margin-top:12px;font-family:${SANS};font-weight:700;font-size:12px;line-height:1}
-.es-ladder{list-style:none;padding:0;margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.es-ladder{list-style:none;padding:0;margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
 .es-rung{display:flex;align-items:center;gap:4px;font-family:${SANS};font-weight:500;font-size:12px;line-height:1;color:var(--sec);white-space:nowrap}
 .es-rung b{font-weight:inherit}
 .es-rung i{font-style:normal;display:flex;align-items:center;justify-content:center;width:24px;height:24px;box-sizing:border-box;font-family:'Newsreader',Georgia,serif;font-weight:500;font-size:16px;color:var(--sec)}
@@ -154,22 +156,19 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-count-gap{margin-top:4px}
 .es-pair button{flex:1 1 0;min-height:56px;padding:0 4px;font-family:${SANS};font-weight:700;font-size:16px;line-height:1.1;letter-spacing:-0.01em}
 .es-main{background:var(--ink);color:var(--bg)}
-.es-main:hover{background:#3a362f}
 .es-dbl{background:var(--red);color:#fbeee2}
-.es-dbl:hover{background:#8f0f22}
 .es-out{border:2px solid var(--ink)}
-.es-out:hover{background:rgba(28,26,23,0.06)}
 .es-link{display:flex;align-items:center;justify-content:center;width:100%;min-height:44px;margin-top:4px;font-family:${SANS};font-weight:700;font-size:14px;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
-.es-link:hover{color:var(--red)}
 .es-count{display:flex;align-items:center;width:100%;min-height:44px;margin-top:4px;text-align:left;font-family:${SANS};font-weight:700;font-size:14px;line-height:1.3;color:var(--ink)}
 .es-pot{margin-top:8px;padding-top:8px;border-top:1px solid var(--ink);font-family:${SANS};font-weight:700;font-size:14px;line-height:1.35}
 .es-foot{display:flex;flex-wrap:wrap;column-gap:16px}
 .es-foot button{min-height:44px;font-family:${SANS};font-weight:500;font-size:13px;color:var(--sec);text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
-.es-foot button:hover{color:var(--ink)}
 .es-foot+.es-foot{margin-top:-8px}
 .es-footer{margin-top:4px;font-family:${SANS};font-weight:500;font-size:12px;line-height:1.35;color:var(--sec)}
 .es :is(.es-verdict,.es-news,.es-perfect,.es-stake,.es-vs,.es-misses li,.es-pot){text-wrap:pretty}
-@media (max-height: 700px){.es-h1{margin-top:12px;font-size:34px}.es-chart{margin-top:8px}.es-row{padding:6px 0}.es-lead{margin-top:12px}.es-perfect{font-size:16px}}
+@media (max-height: 700px){.es-h1{margin-top:12px;font-size:34px}.es-chart{margin-top:8px}.es-row{padding:4px 0}.es-lead{margin-top:12px}.es-perfect{font-size:16px}}
+/* Hover colours only where there is a pointer that hovers: on phones :hover sticks after a tap. */
+@media (hover: hover){.es-cover:hover span{background:var(--red)}.es-main:hover{background:#3a362f}.es-dbl:hover{background:#8f0f22}.es-out:hover{background:rgba(28,26,23,0.06)}.es-link:hover{color:var(--red)}.es-foot button:hover{color:var(--ink)}}
 @media (prefers-reduced-motion: reduce){.es-name.es-wipe{animation:none}}
 `;
 }
@@ -292,7 +291,10 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   const otherName = model.other ? (model.other.kind === 'challenger' ? YOUR_CHALLENGER : SCORE_TO_BEAT) : '';
   const chartLabel =
     `Chart of your balance through the whole run, from ${dollars(start)} to ${dollars(result.final)}. ` +
-    (sold === 0 ? 'You never sold.' : `You sold ${sold === 1 ? 'once' : `${sold} times`} and bought back ${bought === 1 ? 'once' : `${bought} times`}.`) +
+    (sold === 0
+      ? 'You never sold.'
+      : `You sold ${sold === 1 ? 'once' : `${sold} times`} and bought back ${bought === 1 ? 'once' : `${bought} times`}. ` +
+        'A dashed line shows the market while you were out.') +
     (model.other ? ` A dashed line shows ${model.other.kind === 'challenger' ? 'your challenger' : 'your last go'}, finishing at ${dollars(model.other.final)}.` : '');
   page.appendChild(
     endChart({
@@ -305,14 +307,18 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       red: paper.accent,
       paper: paper.bg,
       height: shortViewport() ? 68 : undefined,
+      market: marketInCash(result.balances, result.trades, model.closes),
     }),
   );
 
-  // Real headlines name the crash, so they print only after the reveal. The box keeps one line each meanwhile.
+  // The score block (trade headlines, the lead, perfect timing and the lines under it) stays out of the
+  // page until the reveal: real headlines name the crash and the score gives the ending away.
+  const score = h('div', 'es-score');
+  score.hidden = true;
+  page.appendChild(score);
   const news = (model.tradeNews ?? []).filter((n) => n.real);
   const newsBox = h('div', 'es-newsbox');
-  if (news.length) newsBox.style.setProperty('--news-h', `${news.length * 18 + 8}px`);
-  page.appendChild(newsBox);
+  score.appendChild(newsBox);
   const printNews = () => {
     for (const n of news) {
       const p = h('p', 'es-news');
@@ -341,21 +347,19 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   row(SOMEONE_WHO_DID_NOTHING, result.holderFinal);
   row(PERFECT_TIMING, result.perfectFinal);
 
-  // Hidden until the reveal; it holds the final text so the layout does not jump.
   const lead = h('p', 'es-lead' + (behind ? ' es-behind' : ''), leadText(result.lead, result.lead));
   lead.setAttribute('data-lead', '');
-  lead.style.visibility = 'hidden';
-  page.appendChild(lead);
+  score.appendChild(lead);
   let scoreEnd: HTMLElement = h('p', 'es-perfect', perfectLine(result.perfectFinal, result.final));
-  page.appendChild(scoreEnd);
+  score.appendChild(scoreEnd);
   if (model.other?.kind === 'challenger') {
     scoreEnd = h('p', 'es-vs', challengerLine(result.final, model.other.final));
-    page.appendChild(scoreEnd);
+    score.appendChild(scoreEnd);
   }
 
   for (const line of model.extraLines ?? []) {
     scoreEnd = h('p', 'es-vs', line);
-    page.appendChild(scoreEnd);
+    score.appendChild(scoreEnd);
   }
 
   if (model.double) {
@@ -445,7 +449,6 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     const target = result.lead;
     const up = Math.round(target) > 0;
     const down = Math.round(target) < 0;
-    lead.style.visibility = '';
     if (reducedMotion() || Math.round(target) === 0) {
       lead.textContent = leadText(target, target);
       if (up) model.sfx?.payout(true);
@@ -517,6 +520,12 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     const span = h('span', 'es-name' + (animate && !reducedMotion() ? ' es-wipe' : ''), name);
     revealSlot.replaceChildren(span);
     printNews();
+    score.hidden = false;
+    // The score pushes the buttons down: for a moment a tap meant for where a button was does nothing.
+    if (animate) {
+      page.setAttribute('data-settling', '');
+      later(() => page.removeAttribute('data-settling'), SETTLE_MS);
+    }
     // One announcement for the reveal; a countdown that starts at once joins it.
     revealNote = `${model.run.revealLine} ${leadText(result.lead, result.lead)}.`;
     count(startCountdown);

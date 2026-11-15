@@ -82,10 +82,11 @@ describe('the reveal', () => {
     mount(m);
     const el = root.querySelector('[data-lead]') as HTMLElement;
     const lead = () => el.textContent;
-    expect(el.style.visibility).toBe('hidden');
+    const score = el.closest('.es-score') as HTMLElement;
+    expect(score.hidden).toBe(true);
     expect(lead()).not.toContain('$0');
     revealButton()!.click();
-    expect(el.style.visibility).toBe('');
+    expect(score.hidden).toBe(false);
     vi.advanceTimersByTime(700);
     const mid = lead();
     expect(mid).not.toBe('$0 ahead of someone who did nothing');
@@ -255,6 +256,26 @@ describe('the front page', () => {
     expect(t).toContain('US stock market · A Still Signal build');
     expect(t).toContain('Late edition');
     expect(t).toContain('Mystery crash');
+  });
+
+  test('before the reveal the score block is out of the page: no "Perfect timing made" line and no blank gap', () => {
+    mount(c2007Sample());
+    const score = root.querySelector('.es-score') as HTMLElement;
+    expect(score.hidden).toBe(true);
+    expect(score.querySelector('.es-perfect')!.textContent).toBe('Perfect timing made $24,188. You made $14,513.');
+    expect(root.querySelector('.es-newsbox')!.getAttribute('style') ?? '').not.toContain('--news-h');
+    vi.advanceTimersByTime(4000);
+    expect(score.hidden).toBe(false);
+  });
+
+  test('the result chart draws the market as a dashed line while the player was out', () => {
+    mount(c2007Sample());
+    const svg = root.querySelector('svg[role="img"]')!;
+    expect(svg.querySelector('[data-line="market"]')).not.toBeNull();
+    expect(svg.getAttribute('aria-label')).toContain('the market while you were out');
+    mount(losingSample());
+    // losingSample sold near the low and bought back higher: the dashed line shows the bounce it missed.
+    expect(root.querySelector('svg [data-line="market"]')).not.toBeNull();
   });
 
   test('trade headlines appear only after the reveal', () => {
@@ -467,7 +488,10 @@ describe('result page order (R28)', () => {
     const m = { ...c2007Sample(), holderNote: true, flags: { showCountdown: true, blind: false } };
     mount(m);
     vi.advanceTimersByTime(2000);
-    const order = Array.from(root.querySelector('main.es')!.children).map((e) => e.className.split(' ')[0]);
+    // The score block's own lines count in place (it is one box so it can wait for the reveal).
+    const order = Array.from(root.querySelector('main.es')!.children)
+      .flatMap((e) => (e.classList.contains('es-score') ? Array.from(e.children) : [e]))
+      .map((e) => e.className.split(' ')[0]);
     const at = (c: string) => order.indexOf(c);
     expect(at('es-lead')).toBeGreaterThan(at('es-h1'));
     expect(at('es-count')).toBe(at('es-perfect') + 1);
