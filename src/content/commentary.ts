@@ -1,10 +1,468 @@
-// The line under each day's headline, worked out from the prices (spec 8.5).
-// Every template is guarded by a condition computed from the pre-run closes
-// and closes[0..dayIndex], so no line can state something the data does not
-// support. Future days are never read. House rules: no digit-years, no emoji,
-// no exclamation marks, British spelling, no advice.
+// The line under each day's headline, worked out from the prices (spec 8.5, ruling R37).
+// A line stays up for several steps, so each one is chosen for a window of days: a "state" line
+// must be true on every day of the window, an "event" line is about the day it goes up and is
+// worded so it stays true for a few days after. Every template is guarded by a condition computed
+// from the pre-run closes and closes up to the day in question. House rules: no digit-years, no
+// emoji, no exclamation marks, British spelling, no advice, no filler.
 
 import { dollars } from './copy';
+
+export type Dir = 'up' | 'down' | null;
+
+/** Facts about the market up to and including one day (no player facts). */
+export interface MarketState {
+  day: number;
+  /** Today's move in percent; null when there is no earlier close at all. */
+  chg: number | null;
+  /** Yesterday's move in percent, or null. */
+  prevChg: number | null;
+  /** Consecutive falling / rising closes ending today, and ending yesterday. */
+  dn: number;
+  up: number;
+  prevDn: number;
+  prevUp: number;
+  /** A falling streak that reaches the start of the data may be longer than counted. */
+  dnCut: boolean;
+  prevDnCut: boolean;
+  /** Percent below max(high, highest close so far). */
+  dd: number;
+  /** Percent above the lowest close so far in the run. */
+  fromLow: number;
+  /** Percent below the first close of the run (0 when at or above it). */
+  belowFirst: number;
+  aboveHigh: boolean;
+  /** Yesterday's close was below the highest level seen up to then. */
+  yesterdayBelowPeak: boolean;
+  newLow: boolean;
+  /** Today is the best (worst) day in the whole window: this many weeks at least. */
+  bestWeeks: number;
+  worstWeeks: number;
+  /** Rose a percent or more yesterday, then fell today to a close below every earlier close in the run. */
+  dippedAgain: boolean;
+  /** The last five changes were each smaller than half a percent. */
+  quiet: boolean;
+  /** Change over the last five trading days in percent, or null. */
+  week: number | null;
+  /** Deepest fall from the peak seen so far, in percent. */
+  maxDd: number;
+  /** The fall from the run's highest close so far (an investor from day one). */
+  runFall: number;
+  /** Today's close is above the run's first close. */
+  aboveFirst: boolean;
+  /** Falling and rising days among the last ten (counting through the pre-run closes). */
+  downOfTen: number;
+  upOfTen: number;
+  /** The last five days include a rise and a fall of a percent or more. */
+  swings: boolean;
+  /** Every close of the run so far is below the reference high. */
+  allBelowHigh: boolean;
+  /** Trading days since the run's lowest close so far (0 when today is it). */
+  lowAge: number;
+}
+
+/** A day's market facts plus the player's position on it. */
+export interface State extends MarketState {
+  /** Held shares through today's move (not on day one). */
+  invested: boolean;
+  /** Not in the market through today's move (not on day one). */
+  out: boolean;
+  neverSold: boolean;
+  loss: number;
+  gain: number;
+  balance: number;
+  start: number;
+  moneyDiffers: boolean;
+}
+
+const pct = (x: number) => Math.round(x);
+const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+const word = (n: number) => (n < WORDS.length ? WORDS[n] : String(n));
+
+/** The market facts for day i. */
+export function marketState(closes: number[], preCloses: number[], high: number, i: number): MarketState {
+  if (!Number.isInteger(i) || i < 0 || i >= closes.length) {
+    throw new RangeError(`commentary: dayIndex ${i} is outside closes (length ${closes.length})`);
+  }
+  const series = [...preCloses, ...closes.slice(0, i + 1)];
+  const idx = series.length - 1;
+  const c = series[idx];
+  const ch: number[] = [];
+  for (let k = 1; k <= idx; k++) ch.push((series[k] / series[k - 1] - 1) * 100);
+  const chg = idx >= 1 ? ch[idx - 1] : null;
+  const streak = (end: number, dir: 1 | -1): number => {
+    let n = 0;
+    for (let k = end; k >= 1; k--) {
+      if ((series[k] - series[k - 1]) * dir > 0) n++;
+      else break;
+    }
+    return n;
+  };
+  const runCloses = closes.slice(0, i + 1);
+  let peak = high;
+  for (const x of series) peak = Math.max(peak, x);
+  let peakBefore = high;
+  for (let k = 0; k < idx; k++) peakBefore = Math.max(peakBefore, series[k]);
+  const low = Math.min(...runCloses);
+  const priorRunLow = i >= 1 ? Math.min(...closes.slice(0, i)) : Infinity;
+  const earlier = ch.slice(0, -1);
+  const maxEarlier = earlier.length ? Math.max(...earlier) : -Infinity;
+  const minEarlier = earlier.length ? Math.min(...earlier) : Infinity;
+  const weeks = Math.floor(idx / 5);
+  let maxDd = 0;
+  let runPeak = high;
+  for (const x of series) {
+    runPeak = Math.max(runPeak, x);
+    maxDd = Math.max(maxDd, ((runPeak - x) / runPeak) * 100);
+  }
+  const first = closes[0];
+  const prevDn = idx >= 1 ? streak(idx - 1, -1) : 0;
+  const dn = streak(idx, -1);
+  const runHigh = Math.max(...runCloses);
+  return {
+    day: i,
+    chg,
+    prevChg: idx >= 2 ? ch[idx - 2] : null,
+    dn,
+    up: streak(idx, 1),
+    prevDn,
+    prevUp: idx >= 1 ? streak(idx - 1, 1) : 0,
+    dnCut: dn === idx,
+    prevDnCut: prevDn === idx - 1,
+    dd: ((peak - c) / peak) * 100,
+    fromLow: ((c - low) / low) * 100,
+    belowFirst: c < first ? ((first - c) / first) * 100 : 0,
+    aboveHigh: c > high,
+    yesterdayBelowPeak: idx >= 1 && series[idx - 1] < peakBefore,
+    newLow: i >= 1 && c < priorRunLow,
+    bestWeeks: chg !== null && weeks >= 2 && chg >= 1 && chg > maxEarlier ? weeks : 0,
+    worstWeeks: chg !== null && weeks >= 2 && chg <= -1 && chg < minEarlier ? weeks : 0,
+    dippedAgain: i >= 1 && chg !== null && chg < 0 && idx >= 2 && ch[idx - 2] >= 1 && c < priorRunLow,
+    quiet: idx >= 5 && ch.slice(-5).every((x) => Math.abs(x) < 0.5),
+    week: idx >= 5 ? (c / series[idx - 5] - 1) * 100 : null,
+    maxDd,
+    runFall: ((runHigh - c) / runHigh) * 100,
+    aboveFirst: c > first,
+    downOfTen: idx >= 10 ? ch.slice(-10).filter((x) => x < 0).length : 0,
+    upOfTen: idx >= 10 ? ch.slice(-10).filter((x) => x > 0).length : 0,
+    swings: idx >= 5 && ch.slice(-5).some((x) => x >= 1) && ch.slice(-5).some((x) => x <= -1),
+    allBelowHigh: runHigh < high,
+    lowAge: i - runCloses.lastIndexOf(low),
+  };
+}
+
+/** Adds the player's position to a day's market facts. `held`: in the market at yesterday's close. */
+export function withPlayer(m: MarketState, p: { held: boolean; neverSold: boolean; balance: number; start: number }): State {
+  const ratio = p.start > 0 ? p.balance / p.start : 1;
+  return {
+    ...m,
+    invested: p.held && m.day > 0,
+    out: !p.held && m.day > 0,
+    neverSold: p.neverSold,
+    loss: ratio < 1 ? (1 - ratio) * 100 : 0,
+    gain: ratio > 1 ? (ratio - 1) * 100 : 0,
+    balance: p.balance,
+    start: p.start,
+    moneyDiffers: Math.round(p.balance) !== Math.round(p.start),
+  };
+}
+
+interface Template {
+  key: string;
+  /** event: about the first day of the window; state: true on every day of it. */
+  kind: 'event' | 'state';
+  dir: Dir;
+  /** No jokes and no slang: may stand on a sombre day. */
+  plain?: boolean;
+  /** Reads the player's balance, so it is only checked where the balance is known (see lineCandidates). */
+  money?: boolean;
+  /** If any eligible, pick only among these. */
+  must?: boolean;
+  /** Most uses in one game (default 2). */
+  max?: number;
+  w?: number;
+  when: (s: State) => boolean;
+  /** The words, true for every state given (event: just the first); null when no true wording exists. */
+  text: (ss: State[]) => string | null;
+}
+
+/** An event line stays up at most this many trading days after its day. */
+export const EVENT_DAYS = 4;
+
+const up = (s: State) => s.chg !== null && s.chg > 0;
+const down = (s: State) => s.chg !== null && s.chg < 0;
+const chgAbs = (s: State) => Math.abs(s.chg ?? 0);
+const minOf = (ss: State[], f: (s: State) => number) => Math.min(...ss.map(f));
+/** The largest multiple of `step` strictly below x (so "more than N%" is true). */
+const under = (x: number, step: number) => Math.ceil(x / step - 1) * step;
+/** The same words on every day, or null. */
+function same(ss: State[], f: (s: State) => string): string | null {
+  const t = f(ss[0]);
+  return ss.every((s) => f(s) === t) ? t : null;
+}
+const fixed = (t: string) => () => t;
+/** Money lines about gains and losses: only in the market (in cash they read as the cash still moving). */
+const money = (s: State) => s.balance >= 0 && s.start > 0 && !s.out;
+const cashMoney = (s: State) => s.balance >= 0 && s.start > 0 && s.out;
+/** "more than N%" below the peak, N a multiple of five and at least `least`. */
+const peakFloor = (ss: State[], least: number) => {
+  const n = under(minOf(ss, (s) => s.dd), 5);
+  return n >= least ? n : null;
+};
+
+const TEMPLATES: Template[] = [
+  // ---- Events: the day the line goes up.
+  { key: 'fell', kind: 'event', dir: 'down', w: 4, when: (s) => s.chg !== null && s.chg <= -3, text: (ss) => `The market fell ${pct(chgAbs(ss[0]))}% in a single day. Not a quiet one.` },
+  { key: 'fell-plain', kind: 'event', dir: 'down', plain: true, w: 3, when: (s) => s.chg !== null && s.chg <= -3, text: (ss) => `The market fell ${pct(chgAbs(ss[0]))}% in a single day.` },
+  { key: 'lost', kind: 'event', dir: 'down', w: 4, when: (s) => s.chg !== null && s.chg <= -5, text: (ss) => `The market lost ${pct(chgAbs(ss[0]))}% in one day. That is not a rounding error.` },
+  { key: 'rose', kind: 'event', dir: 'up', w: 4, when: (s) => s.chg !== null && s.chg >= 3, text: (ss) => `The market rose ${pct(chgAbs(ss[0]))}% in a single day. It has not made up its mind.` },
+  { key: 'rose-plain', kind: 'event', dir: 'up', plain: true, w: 3, when: (s) => s.chg !== null && s.chg >= 3, text: (ss) => `The market rose ${pct(chgAbs(ss[0]))}% in a single day.` },
+  { key: 'whiplash', kind: 'event', dir: 'up', w: 4, when: (s) => s.chg !== null && s.chg >= 5 && s.prevDn >= 1, text: (ss) => `The market rose ${pct(chgAbs(ss[0]))}% in a day, straight after a fall. Whiplash.` },
+  { key: 'worst', kind: 'event', dir: 'down', w: 5, when: (s) => s.worstWeeks > 0, text: (ss) => `The worst day in at least ${word(ss[0].worstWeeks)} weeks. Earlier days now look polite.` },
+  { key: 'best-out', kind: 'event', dir: 'up', must: true, when: (s) => s.bestWeeks > 0 && s.out, text: (ss) => `The best day in at least ${word(ss[0].bestWeeks)} weeks, and you watched it from the sidelines.` },
+  { key: 'best-in', kind: 'event', dir: 'up', w: 5, when: (s) => s.bestWeeks > 0 && s.invested, text: (ss) => `The best day in at least ${word(ss[0].bestWeeks)} weeks, and you were there for it.` },
+  { key: 'dip', kind: 'event', dir: 'down', w: 3, max: 1, when: (s) => s.dippedAgain, text: fixed('A rise of a percent or more, then a fall to a new low. The dip kept dipping.') },
+  { key: 'low', kind: 'event', dir: 'down', w: 2, max: 1, when: (s) => s.newLow, text: fixed('A fresh low. Nobody is cheering.') },
+  { key: 'low-plain', kind: 'event', dir: 'down', plain: true, w: 1, max: 1, when: (s) => s.newLow, text: fixed('Prices hit a new low.') },
+  { key: 'bounce', kind: 'event', dir: 'up', w: 3, when: (s) => up(s) && s.prevDn >= 3 && !s.prevDnCut, text: (ss) => `A bounce after ${word(ss[0].prevDn)} falling days. It may not mean anything.` },
+  { key: 'at-last', kind: 'event', dir: 'up', w: 2, max: 1, when: (s) => up(s) && s.prevDn >= 2, text: fixed('A rise at last. Nobody trusts it yet.') },
+
+  // ---- Distance from the peak (the higher of the reference high and the run's highest close).
+  {
+    key: 'peak', kind: 'state', dir: null, plain: true, max: 4, when: (s) => s.dd >= 5,
+    text: (ss) => { const n = peakFloor(ss, 5); return n === null ? null : `The market is more than ${n}% below the peak.`; },
+  },
+  {
+    key: 'peak-hold', kind: 'state', dir: null, max: 4, w: 2, when: (s) => s.dd >= 10 && s.invested && s.neverSold,
+    text: (ss) => { const n = peakFloor(ss, 10); return n === null ? null : `The market is more than ${n}% below the peak. Still holding?`; },
+  },
+  {
+    key: 'peak-out', kind: 'state', dir: null, max: 4, w: 2, when: (s) => s.dd >= 10 && s.out,
+    text: (ss) => { const n = peakFloor(ss, 10); return n === null ? null : `The market is more than ${n}% below the peak. You are out of it, for now.`; },
+  },
+  {
+    key: 'correction', kind: 'state', dir: null, max: 1, when: (s) => s.dd >= 10 && s.dd < 20 && s.maxDd < 20,
+    text: (ss) => { const n = peakFloor(ss, 5); return n === null ? null : `More than ${n}% off the peak. The polite word for this is a correction.`; },
+  },
+  {
+    key: 'bear', kind: 'state', dir: null, max: 1, w: 3, when: (s) => s.dd >= 20,
+    text: (ss) => { const n = peakFloor(ss, 15); return n === null ? null : `More than ${n}% below the peak. Officially a bear market.`; },
+  },
+  { key: 'tenth', kind: 'state', dir: null, plain: true, max: 1, when: (s) => s.dd >= 8 && s.dd <= 12, text: fixed('About a tenth below the peak.') },
+  { key: 'fifth', kind: 'state', dir: null, max: 1, when: (s) => s.dd >= 18 && s.dd <= 22, text: fixed('About a fifth gone from the peak. Hard to call that a blip.') },
+  { key: 'quarter', kind: 'state', dir: null, max: 1, when: (s) => s.dd >= 23 && s.dd <= 27, text: fixed('About a quarter gone from the peak. It has stopped looking temporary.') },
+  { key: 'third', kind: 'state', dir: null, max: 1, w: 2, when: (s) => s.dd >= 30 && s.dd <= 40, text: fixed('About a third gone from the peak. Nobody is calling this a wobble.') },
+  { key: 'half', kind: 'state', dir: null, max: 1, w: 2, when: (s) => s.dd >= 45 && s.dd <= 55, text: fixed('About half gone from the peak. About half of it is still there.') },
+  { key: 'over-half', kind: 'state', dir: null, max: 1, w: 2, when: (s) => s.dd > 55, text: fixed('More than half gone from the peak. Less than half is still there.') },
+  {
+    key: 'day-one', kind: 'state', dir: null, max: 2, when: (s) => s.belowFirst >= 5,
+    text: (ss) => { const n = under(minOf(ss, (s) => s.belowFirst), 1); return n >= 5 ? `The market is more than ${n}% down since day one. The paper is keeping count.` : null; },
+  },
+  {
+    key: 'day-one-plain', kind: 'state', dir: null, plain: true, max: 2, when: (s) => s.belowFirst >= 5,
+    text: (ss) => { const n = under(minOf(ss, (s) => s.belowFirst), 1); return n >= 5 ? `The market is more than ${n}% below where it began.` : null; },
+  },
+  { key: 'near-peak', kind: 'state', dir: 'up', max: 1, when: (s) => s.dd > 0 && s.dd <= 3 && s.fromLow >= 5, text: fixed('Back within three percent of the peak.') },
+  { key: 'above-peak', kind: 'state', dir: 'up', max: 1, when: (s) => s.aboveHigh && s.fromLow >= 5, text: fixed('Above the old peak again. Memories are short.') },
+
+  // ---- Recovery from the low so far.
+  {
+    key: 'from-low', kind: 'state', dir: 'up', plain: true, max: 4, when: (s) => s.fromLow >= 10 && s.dd > 0,
+    text: (ss) => { const n = under(minOf(ss, (s) => s.fromLow), 5); return n >= 10 ? `The market is more than ${n}% up from its lowest close so far.` : null; },
+  },
+  {
+    key: 'from-low-peak', kind: 'state', dir: 'up', max: 4, when: (s) => s.fromLow >= 10 && s.dd >= 10,
+    text: (ss) => {
+      const a = under(minOf(ss, (s) => s.fromLow), 5);
+      const b = peakFloor(ss, 10);
+      return a >= 10 && b !== null ? `More than ${a}% up from the lowest close, and still more than ${b}% below the peak.` : null;
+    },
+  },
+
+  // ---- Streaks (counted back through the pre-run closes; never cut off by the data start).
+  { key: 'down-fine', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices down ${word(ss[0].dn)} days in a row, and counting. This is fine.` },
+  { key: 'down-habit', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices down ${word(ss[0].dn)} days in a row, and counting. A habit is forming.` },
+  { key: 'down-gravity', kind: 'state', dir: 'down', w: 3, when: (s) => s.dn >= 5 && !s.dnCut, text: (ss) => `Prices down ${word(ss[0].dn)} days in a row, and counting. Gravity is working as intended.` },
+  { key: 'down-plain', kind: 'state', dir: 'down', plain: true, w: 2, when: (s) => s.dn >= 3 && !s.dnCut, text: (ss) => `Prices have fallen at least ${word(Math.min(...ss.map((s) => s.dn)))} days in a row.` },
+  { key: 'up-mood', kind: 'state', dir: 'up', w: 3, when: (s) => s.up >= 3, text: (ss) => `Prices up ${word(ss[0].up)} days in a row, and counting. The mood is improving.` },
+  { key: 'up-catch', kind: 'state', dir: 'up', w: 3, when: (s) => s.up >= 3, text: (ss) => `Prices up ${word(ss[0].up)} days in a row, and counting. Everyone is waiting for the catch.` },
+  { key: 'down-again', kind: 'state', dir: 'down', max: 1, when: (s) => down(s) && s.prevDn >= 1, text: fixed('Another down day. The ledger records it without comment.') },
+  { key: 'up-again', kind: 'state', dir: 'up', max: 1, when: (s) => up(s) && s.prevUp >= 1, text: fixed('Up again. Noted, cautiously.') },
+  { key: 'barely', kind: 'state', dir: null, max: 1, when: (s) => s.chg !== null && Math.abs(s.chg) < 0.25 && s.dd >= 3, text: fixed('Barely moved. A pause, after all that.') },
+  { key: 'quiet', kind: 'state', dir: null, max: 1, when: (s) => s.quiet && s.dd >= 3, text: fixed('At least five quiet days in a row. Suspicious.') },
+  {
+    key: 'week-down', kind: 'state', dir: 'down', max: 4, plain: true, when: (s) => s.week !== null && s.week <= -5,
+    text: (ss) => `Prices are down at least ${Math.floor(minOf(ss, (s) => -(s.week as number)))}% on the week.`,
+  },
+  {
+    key: 'week-up', kind: 'state', dir: 'up', max: 4, plain: true, when: (s) => s.week !== null && s.week >= 5,
+    text: (ss) => `Prices are up at least ${Math.floor(minOf(ss, (s) => s.week as number))}% on the week.`,
+  },
+
+  // ---- Your money (against where you started; no claims about the holder).
+  { key: 'money-down', kind: 'state', dir: null, money: true, when: (s) => money(s) && s.loss >= 10, text: (ss) => same(ss, (s) => `Down ${pct(s.loss)}% on your money.`) },
+  { key: 'money-up', kind: 'state', dir: null, money: true, when: (s) => money(s) && s.gain >= 10, text: (ss) => same(ss, (s) => `Up ${pct(s.gain)}% on your money. For now.`) },
+  {
+    key: 'sums', kind: 'state', dir: null, money: true, max: 1, when: (s) => money(s) && s.moneyDiffers && s.balance < s.start,
+    text: (ss) => same(ss, (s) => `Your ${dollars(s.start)} is now ${dollars(s.balance)}. Check the sums if you like.`),
+  },
+  {
+    key: 'no-fuss', kind: 'state', dir: null, money: true, max: 1, when: (s) => money(s) && s.moneyDiffers && s.balance > s.start,
+    text: (ss) => same(ss, (s) => `Your ${dollars(s.start)} is now ${dollars(s.balance)}. No fuss.`),
+  },
+  // Never sold: the balance follows the price (borrowed money too, until a wipe-out), so these read the price.
+  { key: 'hold-below', kind: 'state', dir: null, max: 1, when: (s) => s.invested && s.neverSold && s.belowFirst > 0, text: fixed('Holding, and below where you started.') },
+  { key: 'hold-above', kind: 'state', dir: null, max: 1, when: (s) => s.invested && s.neverSold && s.aboveFirst, text: fixed('Holding, and above where you started.') },
+  {
+    key: 'held-fall', kind: 'state', dir: null, w: 2, max: 4, when: (s) => s.invested && s.neverSold && s.runFall >= 20,
+    text: (ss) => { const n = under(minOf(ss, (s) => s.runFall), 5); return n >= 15 ? `You have held through a fall of more than ${n}% so far.` : null; },
+  },
+
+  // ---- In the market, or not, for the day's move.
+  { key: 'in-up', kind: 'state', dir: 'up', max: 1, when: (s) => s.invested && up(s), text: fixed('An up day, and you were in the market for it.') },
+  { key: 'in-down', kind: 'state', dir: 'down', max: 1, when: (s) => s.invested && down(s), text: fixed('A down day, and you were in the market for it.') },
+  { key: 'sat-out', kind: 'state', dir: null, max: 1, when: (s) => s.out, text: fixed("You sat out today's move.") },
+  { key: 'without-you', kind: 'state', dir: null, max: 1, when: (s) => s.out, text: fixed("Today's move happened without you.") },
+  { key: 'out-below', kind: 'state', dir: null, max: 1, when: (s) => s.out && s.belowFirst > 0, text: fixed('Out for today, with prices below where this all began.') },
+  { key: 'out-fell', kind: 'state', dir: 'down', max: 1, when: (s) => s.out && down(s), text: fixed('Prices fell and you were out of it. A calm day, for cash.') },
+  { key: 'out-rose', kind: 'state', dir: 'up', max: 1, when: (s) => s.out && up(s), text: fixed('Prices rose and you missed it. Cash did not rise.') },
+
+  // ---- Over the last days (true on every day of the window).
+  { key: 'week-lower', kind: 'state', dir: 'down', plain: true, max: 1, when: (s) => s.week !== null && s.week < 0, text: fixed('Prices are lower than a week ago.') },
+  { key: 'week-higher', kind: 'state', dir: 'up', plain: true, max: 1, when: (s) => s.week !== null && s.week > 0, text: fixed('Prices are higher than a week ago.') },
+  {
+    key: 'ten-down', kind: 'state', dir: 'down', max: 4, plain: true, when: (s) => s.downOfTen >= 6,
+    text: (ss) => `The market has fallen on at least ${word(minOf(ss, (s) => s.downOfTen))} of the last ten days.`,
+  },
+  {
+    key: 'ten-up', kind: 'state', dir: 'up', max: 4, plain: true, when: (s) => s.upOfTen >= 6,
+    text: (ss) => `The market has risen on at least ${word(minOf(ss, (s) => s.upOfTen))} of the last ten days.`,
+  },
+  { key: 'swings', kind: 'state', dir: null, max: 1, when: (s) => s.swings, text: fixed('Moves of a percent or more both ways this week. Nobody is bored.') },
+  { key: 'never-above', kind: 'state', dir: null, plain: true, max: 1, when: (s) => s.day >= 5 && s.allBelowHigh, text: fixed('Not one close so far has made it back to the old peak.') },
+  {
+    key: 'near-low', kind: 'state', dir: null, plain: true, max: 2, when: (s) => s.day >= 5 && s.dd >= 5 && s.fromLow < 3,
+    text: (ss) => { const n = Math.ceil(Math.max(...ss.map((s) => s.fromLow)) + 1e-9); return `The market is within ${word(Math.max(1, n))} percent of its lowest close so far.`; },
+  },
+  { key: 'below-start', kind: 'state', dir: null, plain: true, max: 1, when: (s) => s.day >= 1 && s.belowFirst > 0, text: fixed('Prices are below where this all began.') },
+
+  {
+    key: 'no-low', kind: 'state', dir: null, plain: true, max: 2, when: (s) => s.lowAge >= 3,
+    text: (ss) => {
+      // Trading days: five make at least a calendar week, sixty-five at least three months.
+      const n = minOf(ss, (s) => s.lowAge);
+      if (n <= 12) return `No new low for at least ${word(n)} days.`;
+      if (n < 65) return `No new low for at least ${word(Math.floor(n / 5))} weeks.`;
+      return 'No new low for months.';
+    },
+  },
+  // ---- The player's position (constant inside a window: a trade brings a new line).
+  { key: 'all-shares', kind: 'state', dir: null, max: 1, when: (s) => s.invested && s.neverSold && s.day >= 3, text: fixed('You still hold every share you started with.') },
+  { key: 'back-in', kind: 'state', dir: null, max: 1, when: (s) => s.invested && !s.neverSold, text: fixed('You are back in the market, for better or worse.') },
+  {
+    key: 'cash', kind: 'state', dir: null, money: true, max: 1, when: cashMoney,
+    text: (ss) => same(ss, (s) => `Your ${dollars(s.balance)} is sitting in cash. Whatever the market does, it stays put.`),
+  },
+  {
+    key: 'cash-peak', kind: 'state', dir: null, money: true, max: 2, when: (s) => cashMoney(s) && s.dd >= 5,
+    text: (ss) => {
+      const n = peakFloor(ss, 5);
+      const t = same(ss, (s) => `Your ${dollars(s.balance)} is sitting in cash.`);
+      return n === null || t === null ? null : `${t} The market is more than ${n}% below the peak.`;
+    },
+  },
+  {
+    key: 'cash-start', kind: 'state', dir: null, money: true, max: 1, when: (s) => cashMoney(s) && s.belowFirst >= 5,
+    text: (ss) => {
+      const n = under(minOf(ss, (s) => s.belowFirst), 1);
+      const t = same(ss, (s) => `Your ${dollars(s.balance)} is sitting in cash.`);
+      return n < 5 || t === null ? null : `${t} The market is more than ${n}% below where it began.`;
+    },
+  },
+
+  // ---- Plain daily lines (also for sombre days).
+  { key: 'n-again', kind: 'state', dir: 'down', plain: true, max: 1, when: (s) => down(s) && s.prevDn >= 1, text: fixed('Markets fall again.') },
+  { key: 'n-fall', kind: 'state', dir: 'down', plain: true, max: 1, when: down, text: fixed('Prices fall.') },
+  { key: 'n-lower', kind: 'state', dir: 'down', plain: true, max: 1, when: down, text: fixed('The market closes lower.') },
+  { key: 'n-higher', kind: 'state', dir: 'up', plain: true, max: 1, when: up, text: fixed('Markets close higher.') },
+  { key: 'n-rise', kind: 'state', dir: 'up', plain: true, max: 1, when: up, text: fixed('Prices rise.') },
+  { key: 'n-recover', kind: 'state', dir: 'up', plain: true, max: 1, when: (s) => up(s) && s.yesterdayBelowPeak, text: fixed('Markets recover some ground.') },
+  { key: 'n-below', kind: 'state', dir: null, plain: true, max: 1, when: (s) => s.dd >= 5, text: fixed('Prices are below where they were.') },
+];
+
+export interface LineCandidate {
+  text: string;
+  key: string;
+  dir: Dir;
+  plain: boolean;
+  must: boolean;
+  /** About the day the line goes up (a big day's own news). */
+  event: boolean;
+  w: number;
+  max: number;
+}
+
+/**
+ * Every line that is true for a window of days (one State per visible day, in order, no trade in
+ * between). `exactMoney`: the balances in the states are exact (otherwise money lines are left out).
+ */
+export function lineCandidates(states: State[], opts: { exactMoney?: boolean } = {}): LineCandidate[] {
+  if (!states.length) return [];
+  const s0 = states[0];
+  const span = states[states.length - 1].day - s0.day;
+  const exactMoney = opts.exactMoney ?? states.length === 1;
+  const out: LineCandidate[] = [];
+  for (const t of TEMPLATES) {
+    if (t.money && !exactMoney) continue;
+    if (t.kind === 'event') {
+      if (span > EVENT_DAYS || !t.when(s0)) continue;
+    } else if (!states.every(t.when)) continue;
+    const text = t.text(t.kind === 'event' ? [s0] : states);
+    if (text === null) continue;
+    out.push({ text, key: t.key, dir: t.dir, plain: !!t.plain, must: !!t.must, event: t.kind === 'event', w: t.w ?? 1, max: t.max ?? 2 });
+  }
+  return out;
+}
+
+/** Weighted pick (the rng gives [0, 1)). */
+export function pickLine(candidates: LineCandidate[], rng: () => number): LineCandidate {
+  const musts = candidates.filter((c) => c.must);
+  const from = musts.length ? musts : candidates;
+  const total = from.reduce((a, c) => a + c.w, 0);
+  let r = rng() * total;
+  for (const c of from) {
+    r -= c.w;
+    if (r < 0) return c;
+  }
+  return from[from.length - 1];
+}
+
+const PLAIN = new Set<string>();
+/** Whether a line is from the plain set (no jokes, no slang): the only lines for sombre days. */
+export function isPlainLine(text: string): boolean {
+  if (PLAIN.has(text)) return true;
+  return (
+    /^The market (fell|rose) \d+% in a single day\.$/.test(text) ||
+    /^The market is more than \d+% (below the peak|below where it began|up from its lowest close so far)\.$/.test(text) ||
+    /^Prices have fallen at least \w+ days in a row\.$/.test(text) ||
+    /^Prices are (down|up) at least \d+% on the week\.$/.test(text) ||
+    /^The market has (fallen|risen) on at least \w+ of the last ten days\.$/.test(text) ||
+    /^The market is within \w+ percent of its lowest close so far\.$/.test(text) ||
+    /^No new low for (at least \w+ (days|weeks)|months)\.$/.test(text) ||
+    NEUTRAL_LINES.includes(text)
+  );
+}
+
+/** The fixed plain lines, exported for tests. */
+export const NEUTRAL_LINES: string[] = [
+  'Prices hit a new low.', 'Markets fall again.', 'Prices fall.', 'The market closes lower.', 'Markets close higher.',
+  'Prices rise.', 'Markets recover some ground.', 'Prices are below where they were.',
+  'Prices are lower than a week ago.', 'Prices are higher than a week ago.',
+  'Not one close so far has made it back to the old peak.', 'Prices are below where this all began.',
+  'About a tenth below the peak.',
+];
+for (const t of NEUTRAL_LINES) PLAIN.add(t);
+
+// ---- Single-day use (one step, nothing remembered): kept for callers and tests.
 
 export interface CommentaryCtx {
   /** Every trading day of the run, day 1 first. Never one close per screen step. */
@@ -22,335 +480,16 @@ export interface CommentaryCtx {
   high: number;
   /** Closes of the 30 trading days before day 1, oldest first, ending the day before closes[0]. */
   preCloses: number[];
-  /** The line shown the day before. The function is pure, so the caller passes it to avoid a repeat. */
+  /** The line shown the step before; never repeated. */
   previous?: string;
 }
 
-/** Facts about the run so far, from preCloses and closes up to and including dayIndex. */
-interface State {
-  /** Today's move in percent; null when there is no earlier close at all. */
-  chg: number | null;
-  /** Consecutive falling / rising closes ending today, and ending yesterday. */
-  dn: number;
-  up: number;
-  prevDn: number;
-  prevUp: number;
-  /** A falling streak that reaches the start of the data may be longer than counted. */
-  dnCut: boolean;
-  prevDnCut: boolean;
-  /** Percent below max(high, highest close so far). */
-  dd: number;
-  /** Percent above the lowest close so far in the run. */
-  fromLow: number;
-  /** Percent below the first close of the run (0 when at or above it). */
-  belowFirst: number;
-  /** Today's close is above the reference high. */
-  aboveHigh: boolean;
-  /** Yesterday's close was below the highest level seen up to then. */
-  yesterdayBelowPeak: boolean;
-  newLow: boolean;
-  /** Today is the best (worst) day in the whole window: this many weeks at least. */
-  bestWeeks: number;
-  worstWeeks: number;
-  /** Rose yesterday, then fell today to a close below every earlier close in the run. */
-  dippedAgain: boolean;
-  /** The last five changes were each smaller than half a percent. */
-  quiet: boolean;
-  /** Change over the last five trading days in percent, or null. */
-  week: number | null;
-  invested: boolean;
-  neverSold: boolean;
-  /** Not in the market through today's move, and not day one. */
-  out: boolean;
-  /** Deepest fall from the peak seen so far, in percent. */
-  maxDd: number;
-  /** The player's own fall from the run's highest close so far (an investor from day one). */
-  runFall: number;
-  /** Percent of the starting amount lost, or gained; 0 when the other way. */
-  loss: number;
-  gain: number;
-  balance: number;
-  start: number;
-  /** True when the balance and start differ as whole dollars. */
-  moneyDiffers: boolean;
-}
-
-const pct = (x: number) => Math.round(x);
-
-const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
-const word = (n: number) => (n < WORDS.length ? WORDS[n] : String(n));
-
-function compute(ctx: CommentaryCtx): State {
-  const i = ctx.dayIndex;
-  if (!Number.isInteger(i) || i < 0 || i >= ctx.closes.length) {
-    throw new RangeError(`commentaryFor: dayIndex ${i} is outside closes (length ${ctx.closes.length})`);
-  }
-  const series = [...ctx.preCloses, ...ctx.closes.slice(0, i + 1)];
-  const idx = series.length - 1;
-  const c = series[idx];
-
-  // ch[k - 1] is the move into series[k], in percent.
-  const ch: number[] = [];
-  for (let k = 1; k <= idx; k++) ch.push((series[k] / series[k - 1] - 1) * 100);
-  const chg = idx >= 1 ? ch[idx - 1] : null;
-
-  const streak = (end: number, dir: 1 | -1): number => {
-    let n = 0;
-    for (let k = end; k >= 1; k--) {
-      if ((series[k] - series[k - 1]) * dir > 0) n++;
-      else break;
-    }
-    return n;
-  };
-
-  const runCloses = ctx.closes.slice(0, i + 1);
-  let peak = ctx.high;
-  for (const x of series) peak = Math.max(peak, x);
-  let peakBefore = ctx.high;
-  for (let k = 0; k < idx; k++) peakBefore = Math.max(peakBefore, series[k]);
-  const low = Math.min(...runCloses);
-  const priorRunLow = i >= 1 ? Math.min(...ctx.closes.slice(0, i)) : Infinity;
-
-  const earlier = ch.slice(0, -1);
-  const maxEarlier = earlier.length ? Math.max(...earlier) : -Infinity;
-  const minEarlier = earlier.length ? Math.min(...earlier) : Infinity;
-  const weeks = Math.floor(idx / 5);
-
-  let maxDd = 0;
-  let runPeak = ctx.high;
-  for (const x of series) {
-    runPeak = Math.max(runPeak, x);
-    maxDd = Math.max(maxDd, ((runPeak - x) / runPeak) * 100);
-  }
-
-  const first = ctx.closes[0];
-  const ratio = ctx.start > 0 ? ctx.balance / ctx.start : 1;
-  const prevDn = idx >= 1 ? streak(idx - 1, -1) : 0;
-  const dn = streak(idx, -1);
-
-  return {
-    chg,
-    dn,
-    up: streak(idx, 1),
-    prevDn,
-    prevUp: idx >= 1 ? streak(idx - 1, 1) : 0,
-    dnCut: dn === idx,
-    prevDnCut: prevDn === idx - 1,
-    dd: ((peak - c) / peak) * 100,
-    fromLow: ((c - low) / low) * 100,
-    belowFirst: c < first ? ((first - c) / first) * 100 : 0,
-    aboveHigh: c > ctx.high,
-    yesterdayBelowPeak: idx >= 1 && series[idx - 1] < peakBefore,
-    newLow: i >= 1 && c < priorRunLow,
-    bestWeeks: chg !== null && weeks >= 2 && chg >= 1 && chg > maxEarlier ? weeks : 0,
-    worstWeeks: chg !== null && weeks >= 2 && chg <= -1 && chg < minEarlier ? weeks : 0,
-    dippedAgain:
-      i >= 1 && chg !== null && chg < 0 && idx >= 2 && ch[idx - 2] >= 1 && c < priorRunLow,
-    quiet: idx >= 5 && ch.slice(-5).every((x) => Math.abs(x) < 0.5),
-    week: idx >= 5 ? (c / series[idx - 5] - 1) * 100 : null,
-    invested: ctx.invested && i > 0,
-    out: !ctx.invested && i > 0,
-    maxDd,
-    runFall: ((Math.max(...runCloses) - c) / Math.max(...runCloses)) * 100,
-    neverSold: ctx.neverSold,
-    loss: ratio < 1 ? (1 - ratio) * 100 : 0,
-    gain: ratio > 1 ? (ratio - 1) * 100 : 0,
-    balance: ctx.balance,
-    start: ctx.start,
-    moneyDiffers: Math.round(ctx.balance) !== Math.round(ctx.start),
-  };
-}
-
-interface Template {
-  when: (s: State) => boolean;
-  text: (s: State) => string;
-  /** Pick weight among eligible lines (default 1). */
-  w?: number | ((s: State) => number);
-  /** If any eligible, pick only among these. Used where the line must be said. */
-  must?: boolean;
-}
-
-const up = (s: State) => s.chg !== null && s.chg > 0;
-const down = (s: State) => s.chg !== null && s.chg < 0;
-const chgAbs = (s: State) => Math.abs(s.chg ?? 0);
-/** A percentage for the peak lines: whole numbers, but never "20%" for a fall still short of 20. */
-function ddText(dd: number): string {
-  return dd < 20 && pct(dd) === 20 ? 'almost 20%' : `${pct(dd)}%`;
-}
-const money = (s: State) => s.balance >= 0 && s.start > 0;
-
-const TEMPLATES: Template[] = [
-  // Falling streaks (counted back through the pre-run closes; never cut off by the data start)
-  { w: 4, when: (s) => s.dn >= 3 && !s.dnCut, text: (s) => `Prices down ${word(s.dn)} days in a row. This is fine.` },
-  { w: 4, when: (s) => s.dn >= 3 && !s.dnCut, text: (s) => `Prices down ${word(s.dn)} days in a row. The chart has made its point.` },
-  { w: 3, when: (s) => s.dn >= 5 && !s.dnCut, text: (s) => `Prices down ${word(s.dn)} days in a row. Gravity is working as intended.` },
-  { w: 3, when: (s) => s.dn >= 2 && !s.dnCut, text: (s) => `Prices down ${word(s.dn)} days in a row. A habit is forming.` },
-
-  // Rising streaks and bounces
-  { w: 3, when: (s) => s.up >= 3, text: (s) => `Prices up ${word(s.up)} days in a row. The mood is improving.` },
-  { w: 3, when: (s) => s.up >= 3, text: (s) => `Prices up ${word(s.up)} days in a row. Everyone is waiting for the catch.` },
-  {
-    w: 2,
-    when: (s) => up(s) && s.prevDn >= 3 && !s.prevDnCut,
-    text: (s) => `A bounce after ${word(s.prevDn)} falling days. It may not mean anything.`,
-  },
-  { when: (s) => up(s) && s.prevDn >= 1, text: () => 'An up day, after a down one. Nobody is celebrating yet.' },
-  { when: (s) => up(s) && s.prevDn >= 2, text: () => 'A rise at last. Nobody trusts it yet.' },
-  { when: (s) => up(s) && s.prevUp >= 1, text: () => 'Up again. Noted, cautiously.' },
-  { when: (s) => down(s) && s.prevUp >= 1, text: () => 'Down today. Yesterday was kinder.' },
-  { when: (s) => down(s) && s.prevDn >= 1, text: () => 'Another down day. The ledger records it without comment.' },
-  { w: 2, when: (s) => s.dippedAgain, text: () => 'A rise of a percent or more, then a fall to a new low. The dip kept dipping.' },
-
-  // Big single days (whole-number percentages are rounded, as people read them)
-  { when: (s) => s.chg !== null && s.chg <= -3, text: (s) => `The market fell ${pct(chgAbs(s))}% in one day. Not a quiet one.` },
-  { when: (s) => s.chg !== null && s.chg <= -5, text: (s) => `The market lost ${pct(chgAbs(s))}% in one day. That is not a rounding error.` },
-  { when: (s) => s.chg !== null && s.chg >= 3, text: (s) => `The market rose ${pct(chgAbs(s))}% in a day. It has not made up its mind.` },
-  { when: (s) => s.chg !== null && s.chg >= 5 && s.prevDn >= 1, text: (s) => `The market rose ${pct(chgAbs(s))}% in a day. Whiplash.` },
-  { when: (s) => s.chg !== null && Math.abs(s.chg) < 0.25 && s.dd >= 3, text: () => 'Barely moved. A pause, after all that.' },
-  { when: (s) => s.quiet && s.dd >= 3, text: () => 'Five quiet days in a row. Suspicious.' },
-  { when: (s) => s.week !== null && s.week <= -5, text: (s) => `Prices are down ${pct(-(s.week as number))}% in a week.` },
-  { when: (s) => s.week !== null && s.week >= 5, text: (s) => `Prices are up ${pct(s.week as number)}% in a week.` },
-
-  // Distance from the peak (the higher of the reference high and the run's highest close)
-  {
-    w: (s) => (s.dd >= 40 ? 3 : 1),
-    when: (s) => pct(s.dd) >= 10,
-    text: (s) =>
-      `The market is down ${ddText(s.dd)} from the peak.` +
-      (s.invested && s.neverSold ? ' Still holding?' : s.out ? " You sat out today's move." : ''),
-  },
-  {
-    when: (s) => s.dd >= 10 && s.dd < 20 && s.maxDd < 20,
-    text: (s) => `The market is down ${ddText(s.dd)} from the peak. The polite word for this is a correction.`,
-  },
-  { when: (s) => s.dd >= 20, text: (s) => `The market is down ${ddText(s.dd)} from the peak. Officially a bear market.` },
-  { w: 2, when: (s) => s.dd >= 30 && s.dd <= 40, text: () => 'About a third gone from the peak. Nobody is calling this a wobble.' },
-  { w: 2, when: (s) => s.dd >= 45 && s.dd <= 55, text: () => 'About half gone from the peak. About half of it is still there.' },
-  { w: 2, when: (s) => s.dd > 55, text: () => 'More than half gone from the peak. Less than half is still there.' },
-  { when: (s) => s.belowFirst >= 5, text: (s) => `The market is down ${pct(s.belowFirst)}% since day one. The paper is keeping count.` },
-  { when: (s) => s.dd > 0 && s.dd <= 3 && s.fromLow >= 5, text: () => 'Back within three percent of the peak.' },
-  { when: (s) => s.aboveHigh && s.fromLow >= 5, text: () => 'Above the old peak again. Memories are short.' },
-
-  // Lows, worst and best days
-  { w: 2, when: (s) => s.newLow, text: () => 'A fresh low. Nobody is cheering.' },
-  { w: 2, when: (s) => s.newLow, text: () => 'Lower than anything so far.' },
-  {
-    w: 3,
-    when: (s) => s.worstWeeks > 0,
-    text: (s) => `The worst day in at least ${word(s.worstWeeks)} weeks. Earlier days now look polite.`,
-  },
-  {
-    must: true,
-    when: (s) => s.bestWeeks > 0 && s.out,
-    text: (s) => `The best day in at least ${word(s.bestWeeks)} weeks, and you watched it from the sidelines.`,
-  },
-  {
-    w: 3,
-    when: (s) => s.bestWeeks > 0 && s.invested,
-    text: (s) => `The best day in at least ${word(s.bestWeeks)} weeks, and you were there for it.`,
-  },
-
-  // Recovery from the low so far
-  { when: (s) => s.fromLow >= 10 && s.dd > 0, text: (s) => `The market is up ${pct(s.fromLow)}% from its lowest close so far.` },
-  {
-    when: (s) => s.fromLow >= 10 && s.dd >= 10,
-    text: (s) => `The market is up ${pct(s.fromLow)}% off its lowest close, and still ${ddText(s.dd)} below the peak.`,
-  },
-
-  // Your money (against where you started; no claims about the holder)
-  { when: (s) => money(s) && s.loss >= 10, text: (s) => `Down ${pct(s.loss)}% on your money.` },
-  { when: (s) => money(s) && s.gain >= 10, text: (s) => `Up ${pct(s.gain)}% on your money. For now.` },
-  {
-    when: (s) => money(s) && s.moneyDiffers && s.balance < s.start,
-    text: (s) => `Your ${dollars(s.start)} is now ${dollars(s.balance)}. Check the sums if you like.`,
-  },
-  {
-    when: (s) => money(s) && s.moneyDiffers && s.balance > s.start,
-    text: (s) => `Your ${dollars(s.start)} is now ${dollars(s.balance)}. No fuss.`,
-  },
-  {
-    when: (s) => money(s) && s.invested && s.neverSold && s.moneyDiffers && s.balance < s.start,
-    text: () => 'Holding, and below where you started.',
-  },
-  {
-    when: (s) => money(s) && s.invested && s.neverSold && s.moneyDiffers && s.balance > s.start,
-    text: () => 'Holding, and above where you started.',
-  },
-  {
-    when: (s) => s.invested && s.neverSold && s.runFall >= 20,
-    text: (s) => `You have held through a fall of ${pct(s.runFall)}% so far.`,
-  },
-
-  // In the market, or not, for today's move
-  { when: (s) => s.invested && up(s), text: () => 'An up day, and you were in the market for it.' },
-  { when: (s) => s.invested && down(s), text: () => 'A down day, and you were in the market for it.' },
-  { when: (s) => s.out, text: () => "You sat out today's move." },
-  { when: (s) => s.out, text: () => "Today's move happened without you." },
-  { when: (s) => s.out && s.belowFirst > 0, text: () => 'Out for today, with prices below where this all began.' },
-  { when: (s) => s.out && down(s), text: () => 'Prices fell and you were out of it. A calm day, for cash.' },
-  { when: (s) => s.out && up(s), text: () => 'Prices rose and you missed it. Cash did not rise.' },
-
-  // Always true
-  { when: () => true, text: () => 'Another day on the markets.' },
-  { when: () => true, text: () => 'Prices move. Opinions move faster.' },
-  { when: () => true, text: () => 'The market has made no promises.' },
-  { when: () => true, text: () => 'Somewhere, a chart is being refreshed.' },
-  { when: () => true, text: () => 'Everyone has a view. Prices have the final say.' },
-  { when: () => true, text: () => 'The chart does not care how you feel.' },
-];
-
-/**
- * Plain lines for sombre days and the day after (headlines about deaths,
- * attacks or disasters). No jokes, no slang. Each is guarded so it is true.
- */
-interface NeutralLine {
-  text: string;
-  when: (s: State) => boolean;
-}
-
-const NEUTRAL: NeutralLine[] = [
-  { text: 'Markets fall again.', when: (s) => down(s) && s.prevDn >= 1 },
-  { text: 'Another day of losses.', when: (s) => down(s) && s.prevDn >= 1 },
-  { text: 'Prices fall.', when: (s) => down(s) },
-  { text: 'The market closes lower.', when: (s) => down(s) },
-  { text: 'Markets close higher.', when: (s) => up(s) },
-  { text: 'Prices rise.', when: (s) => up(s) },
-  { text: 'Markets recover some ground.', when: (s) => up(s) && s.yesterdayBelowPeak },
-  { text: 'Prices are below where they were.', when: (s) => s.dd >= 5 },
-  { text: 'Trading continues.', when: () => true },
-  { text: 'Markets remain open.', when: () => true },
-];
-
-/** The fixed neutral set, exported for tests. */
-export const NEUTRAL_LINES: string[] = NEUTRAL.map((n) => n.text);
-
-function pick(candidates: { text: string; w: number }[], rng: () => number): string {
-  const total = candidates.reduce((a, c) => a + c.w, 0);
-  let r = rng() * total;
-  for (const c of candidates) {
-    r -= c.w;
-    if (r < 0) return c.text;
-  }
-  return candidates[candidates.length - 1].text;
-}
-
+/** One day's line on its own (empty when nothing true fits). */
 export function commentaryFor(ctx: CommentaryCtx): string {
-  const s = compute(ctx);
-
-  if (ctx.sombre) {
-    const all = NEUTRAL.filter((n) => n.when(s)).map((n) => ({ text: n.text, w: 1 }));
-    const fresh = all.filter((c) => c.text !== ctx.previous);
-    return pick(fresh.length ? fresh : all, ctx.rng);
-  }
-
-  const eligible = TEMPLATES.filter((t) => t.when(s));
-  const musts = eligible.filter((t) => t.must).map((t) => ({ text: t.text(s), w: 1 }));
-  const mustFresh = musts.filter((c) => c.text !== ctx.previous);
-  if (mustFresh.length) return pick(mustFresh, ctx.rng);
-
-  const weight = (t: Template) => (typeof t.w === 'function' ? t.w(s) : t.w ?? 1);
-  const all = eligible.map((t) => ({ text: t.text(s), w: weight(t) }));
+  const m = marketState(ctx.closes, ctx.preCloses, ctx.high, ctx.dayIndex);
+  const s = withPlayer(m, { held: ctx.invested, neverSold: ctx.neverSold, balance: ctx.balance, start: ctx.start });
+  const all = lineCandidates([s], { exactMoney: true }).filter((c) => !ctx.sombre || c.plain);
   const fresh = all.filter((c) => c.text !== ctx.previous);
-  return pick(fresh.length ? fresh : all, ctx.rng);
+  const from = fresh.length ? fresh : all;
+  return from.length ? pickLine(from, ctx.rng).text : '';
 }
-

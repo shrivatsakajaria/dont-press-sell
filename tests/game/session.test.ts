@@ -446,6 +446,29 @@ describe('C1: holdFor, stepMs and quicker quiet days in cash (R35, R41)', () => 
     s.destroy();
   });
 
+  it('holdFor works when called from inside press() (from the onStep a press sends) and right after it', () => {
+    let s: ReturnType<typeof createSession> | null = null;
+    let calls = 0;
+    s = createSession(tiny, tinySteps, {
+      start: 10000,
+      onStep: (v) => {
+        // The play screen holds the day on the sale, from inside the press.
+        if (!v.invested && calls++ === 0) s!.holdFor(500);
+      },
+      onEnd: () => {},
+    });
+    s.start();
+    vi.advanceTimersByTime(100);
+    s.press(); // onStep runs inside press() and calls holdFor(500)
+    expect(s.view().stepMs).toBe(700);
+    s.holdFor(0); // ignored
+    vi.advanceTimersByTime(599);
+    expect(s.view().stepIndex).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(s.view().stepIndex).toBe(1);
+    s.destroy();
+  });
+
   it('in cash, quiet fall steps use cashMs; in the market, holdMs', () => {
     const { s, views } = make(tiny, cashSteps);
     s.start();
