@@ -2,8 +2,8 @@
 // screenModel() turns the session's view into what the page shows (pure, tested);
 // mountScreen() draws it; startPlay() runs one session on it.
 import {
-  FIRST_SALE_LINE, FOOTER_PLAY, MASTHEAD, OPENING_LINE, SOLD_LAST_TIME, buyBackLabel, dollars, potLine, scoreToBeatLine,
-  sellLabel, sellingAtTopLine,
+  FIRST_SALE_LINE, FOOTER_PLAY, MASTHEAD, OPENING_LINE, SOLD_LAST_TIME, START_LABEL, buyBackLabel, dollars, potLine,
+  scoreToBeatLine, sellLabel, sellingAtTopLine,
 } from '../content/copy';
 import type { RunData, RunResult, Trade } from '../engine/types';
 import type { Step } from '../game/schedule';
@@ -235,6 +235,8 @@ export interface ScreenHandlers {
 
 export interface Screen {
   render(v: ScreenModel): void;
+  /** The start screen (R28): lines in place of the headline and standfirst; null takes them away. */
+  setGate(lines: string[] | null): void;
   setSound(on: boolean): void;
   /** Disconnects the resize watcher and clears the page colours on <html>. */
   destroy(): void;
@@ -278,6 +280,7 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   folio.append(fRun, fDay, fStatus);
   const headline = h('h1', 'headline');
   const standfirst = h('p', 'standfirst');
+  const intro = h('div', 'intro');
   const chartWrap = h('div', 'chart');
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   chartWrap.append(svg);
@@ -302,7 +305,7 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   const pause = h('button', 'quiet pause', PAUSE);
   pause.type = 'button';
   foot.append(pot, sound, pause);
-  page.append(masthead, folio, headline, standfirst, chartWrap, figures, regret, spacer, act, under, foot);
+  page.append(masthead, folio, intro, headline, standfirst, chartWrap, figures, regret, spacer, act, under, foot);
   root.replaceChildren(page);
 
   const balanceRoll = createRoll(balance);
@@ -428,6 +431,10 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
         );
       }
     },
+    setGate(lines) {
+      page.classList.toggle('is-gate', !!lines);
+      intro.replaceChildren(...(lines ?? []).map((t, i) => h('p', i === 0 ? 'lead' : i < 3 ? '' : 'note', t)));
+    },
     setSound(on) {
       sound.textContent = on ? SOUND_ON : SOUND_OFF;
       sound.setAttribute('aria-pressed', String(on));
@@ -458,6 +465,11 @@ export interface PlayOpts {
   scoreToBeat?: number | null;
   other?: number[] | null;
   opening?: string;
+  /**
+   * The start screen (R28): the front page stands still on day 1 with these lines in place of the
+   * headline and standfirst, and a Start button. The clock starts only when Start is pressed.
+   */
+  gate?: { lines: string[]; note?: string | null };
   /** Rule book for balances (borrowed money plugs in simulateBorrowed). */
   simulateFn?: SimulateFn;
   /**
@@ -498,6 +510,7 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
   let lastAnnouncedStep = -1;
   let words: { headline: string; commentary: string } | undefined;
   let wordsStep = -1;
+  let gated = !!opts.gate;
 
   const screen = mountScreen(root, {
     onPressStart() {
@@ -507,6 +520,12 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       if (rendered) paintedStep = rendered.stepIndex;
     },
     onPress() {
+      if (gated) {
+        gated = false;
+        screen.setGate(null);
+        session.start();
+        return;
+      }
       if (!rendered || paused) {
         capturedStep = null;
         return;
@@ -520,6 +539,7 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       session.press(target);
     },
     onPauseToggle() {
+      if (gated) return;
       if (paused) session.resume();
       else session.pause();
     },
@@ -603,7 +623,21 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       if (rendered) draw(session.view());
     },
   });
-  session.start();
+  if (opts.gate) showGate(opts.gate);
+  else session.start();
+
+  /** The still front page: day 1, the starting balance, the Start button. */
+  function showGate(g: NonNullable<PlayOpts['gate']>) {
+    const v = session.view();
+    const still = new Map<number, DayPoint>([[v.dayIndex, { balance: v.balance, invested: true }]]);
+    const m = screenModel({
+      run, steps, start, view: v, runLabel: opts.runLabel, history: still, trades: [], firstSaleStep: null, paused: false,
+      pot: opts.pot ?? start, headline: '', commentary: '', other: opts.other,
+    });
+    screen.setGate(g.note ? [...g.lines, g.note] : g.lines);
+    screen.render({ ...m, buttonLabel: START_LABEL, longLabel: false, regret: null, underButton: FOOTER_PLAY });
+  }
+
   return {
     ...session,
     teardown() {

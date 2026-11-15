@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pressStart } from './start';
 
 const COVER = 'Tap to see what that was';
 const NAME = 'That was the autumn 2014 wobble';
@@ -7,6 +8,7 @@ const NAME = 'That was the autumn 2014 wobble';
 async function finishWithoutTapping(page: Page) {
   await page.clock.install();
   await page.goto('/?run=s2014');
+  await pressStart(page);
   await expect(page.locator('button.act')).toHaveText(/^Sell for/);
   for (let i = 0; i < 40 && (await page.locator('.es-h1').count()) === 0; i++) await page.clock.runFor(1000);
 }

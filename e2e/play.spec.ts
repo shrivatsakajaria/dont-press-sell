@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { pressStart } from './start';
 
 const FIRST_SALE = 'You are out. To win, buy back in for less than you sold.';
 
@@ -7,6 +8,7 @@ for (const height of [844, 660]) {
     test(`play screen at 390 x ${height}, ${run}`, async ({ page }) => {
       await page.setViewportSize({ width: 390, height });
       await page.goto(`/?run=${run}`);
+      await pressStart(page);
       const button = page.locator('button.act');
       await expect(button).toHaveText(/^Sell for \$[\d,]+$/);
 
@@ -47,6 +49,7 @@ for (const height of [844, 660]) {
 
 test('pause stops the clock and resume starts it again', async ({ page }) => {
   await page.goto('/?run=s2018');
+  await pressStart(page);
   await page.waitForTimeout(800);
   await page.locator('button.pause').click();
   await expect(page.locator('button.pause')).toHaveText('Resume');
@@ -61,6 +64,7 @@ test('pause stops the clock and resume starts it again', async ({ page }) => {
 
 test('the fast-forward shows a year counter and the run ends on the result page', async ({ page }) => {
   await page.goto('/?run=s2018');
+  await pressStart(page);
   await expect(page.locator('.folio')).toContainText('Fast forward', { timeout: 60_000 });
   await expect(page.locator('.folio span').nth(1)).toHaveText(/^Year \d+$/);
   await expect(page.getByText('Late edition')).toBeVisible({ timeout: 20_000 });

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pressStart } from './start';
 
 const FIRST_SALE = 'You are out. To win, buy back in for less than you sold.';
 
@@ -23,6 +24,7 @@ test('with storage blocked a full run completes, the first-sale line shows, and 
   });
   await page.clock.install();
   await page.goto('/?run=s2018');
+  await pressStart(page);
   const button = page.locator('button.act');
   await expect(button).toHaveText(/^Sell for \$[\d,]+$/);
   await page.clock.runFor(5000);
@@ -52,6 +54,7 @@ test('a second first sale shows the line again when storage is blocked', async (
   });
   await page.clock.install();
   await page.goto('/?run=s2014');
+  await pressStart(page);
   await expect(page.locator('button.act')).toHaveText(/^Sell for/);
   await page.clock.runFor(2000);
   await page.locator('button.act').click();
@@ -67,6 +70,7 @@ test('a second first sale shows the line again when storage is blocked', async (
 test('the daily crash is labelled and has no countdown; a replay is a rematch', async ({ page }) => {
   await page.clock.install();
   await page.goto('/?run=s2014');
+  await pressStart(page);
   await page.clock.runFor(40_000);
   await page.getByRole('button', { name: 'Daily crash' }).click();
   await expect(page.locator('.folio')).toContainText(/Daily crash \d+/);

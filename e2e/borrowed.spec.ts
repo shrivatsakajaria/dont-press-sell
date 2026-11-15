@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pressStart } from './start';
 
 async function unlockBorrowed(page: Page) {
   await page.addInitScript(() => {
@@ -13,6 +14,7 @@ test('borrowed money on a known crash with no taps is wiped out on the margin-ca
   await unlockBorrowed(page);
   await page.clock.install();
   await page.goto('/?run=c2007');
+  await pressStart(page);
   await expect(page.locator('.folio')).toContainText('Borrowed money');
   await expect(page.locator('.standfirst')).toHaveText(
     'You have borrowed $20,000. Every move is three times bigger. Fall a third and you are wiped out.',
@@ -29,6 +31,7 @@ test('borrowed money on a known scare with no taps finishes ahead', async ({ pag
   await unlockBorrowed(page);
   await page.clock.install();
   await page.goto('/?run=s2018');
+  await pressStart(page);
   await expect(page.locator('.folio')).toContainText('Borrowed money');
   await page.clock.runFor(47_000);
   await expect(page.getByText('Late edition')).toBeVisible();

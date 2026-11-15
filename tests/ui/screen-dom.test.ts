@@ -188,3 +188,57 @@ it('tells the caller about each new step and each trade (for sound and vibration
   expect(frames[frames.length - 1]).toEqual({ step: 1, newStep: false, trade: 'sell', holdMs: 100 });
   play.teardown();
 });
+
+it('start screen: the front page stands still with the start lines until Start is pressed', () => {
+  vi.useFakeTimers({ toFake: [...FAKE] });
+  document.body.innerHTML = '';
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  const onEnd = vi.fn();
+  const onFrame = vi.fn();
+  const lines = ['Line one here.', 'Line two here.', 'Line three here.'];
+  const play = startPlay(root, run, steps, {
+    runLabel: 'Daily crash 3', onEnd, onFrame, gate: { lines, note: 'Score to beat: $11,341' },
+  });
+  const page = root.querySelector('.play')!;
+  const btn = root.querySelector('button.act') as HTMLButtonElement;
+  expect(page.classList.contains('is-gate')).toBe(true);
+  expect(btn.textContent).toBe('Start');
+  const intro = [...root.querySelectorAll('.intro p')].map((p) => p.textContent);
+  expect(intro).toEqual([...lines, 'Score to beat: $11,341']);
+  expect(root.querySelector('.folio')?.textContent).toContain('Daily crash 3');
+  expect(root.querySelector('.folio')?.textContent).toContain('Day 1');
+  expect(root.querySelector('.balance')?.textContent).toBe('$10,000');
+  // The clock does not move.
+  vi.advanceTimersByTime(60_000);
+  expect(onEnd).not.toHaveBeenCalled();
+  expect(root.querySelector('.folio')?.textContent).toContain('Day 1');
+  expect(onFrame).not.toHaveBeenCalled();
+  // Pause does nothing while the page waits.
+  (root.querySelector('button.pause') as HTMLButtonElement).click();
+  expect(root.querySelector('.folio')?.textContent).not.toContain('Paused');
+
+  btn.click();
+  expect(page.classList.contains('is-gate')).toBe(false);
+  expect(btn.textContent).toBe('Sell for $10,000');
+  expect(root.querySelector('.standfirst')?.textContent).toBe(
+    'You have $10,000 of play money in the stock market. Hold your nerve or bail.',
+  );
+  vi.advanceTimersByTime(100);
+  expect(root.querySelector('.folio')?.textContent).toContain('Day 2');
+  vi.advanceTimersByTime(5000);
+  expect(onEnd).toHaveBeenCalledTimes(1);
+  play.teardown();
+  vi.useRealTimers();
+});
+
+it('start screen without a note shows exactly the three lines', () => {
+  vi.useFakeTimers({ toFake: [...FAKE] });
+  document.body.innerHTML = '';
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  const play = startPlay(root, run, steps, { runLabel: 'Mystery crash', onEnd: vi.fn(), gate: { lines: ['a', 'b', 'c'] } });
+  expect(root.querySelectorAll('.intro p').length).toBe(3);
+  play.teardown();
+  vi.useRealTimers();
+});

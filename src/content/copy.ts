@@ -24,6 +24,19 @@ export const leadLine = (lead: number) =>
 export const potLine = (n: number) => `Your pot: ${dollars(n)}`;
 export const PLAY_BORROWED = 'Play with borrowed money';
 export const BORROWED_OPENING = 'You have borrowed $20,000. Every move is three times bigger. Fall a third and you are wiped out.';
+
+// Start screen (ruling R28): three plain lines on the still front page, then Start.
+// The owner may change the words; the layout holds lines of 8 to 16 words.
+export const START_LINES: [string, string, string] = [
+  "You have $10,000 of play money in a stock market that's started to fall.",
+  'It might be a real crash, or a scare that blows over. Every instinct will say sell.',
+  "Hold your nerve, or don't. Most money at the end wins.",
+];
+export const START_LABEL = 'Start';
+/** Borrowed money swaps its own opening in as the second line. */
+export const startLines = (borrowed: boolean): [string, string, string] =>
+  borrowed ? [START_LINES[0], BORROWED_OPENING, START_LINES[2]] : [...START_LINES];
+
 export const DOUBLE_OR_NOTHING = 'Double or nothing';
 export const bankLabel = (n: number) => `Bank ${dollars(n)}`;
 export const REMATCH = 'Rematch this crash';
