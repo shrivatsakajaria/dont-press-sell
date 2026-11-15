@@ -119,7 +119,7 @@ describe('result chart labels and range', () => {
     }
   }
   for (const [name, closes, trades] of cases) {
-    for (const height of [104, 68]) {
+    for (const height of [104, 76, 68, 52]) {
       it(`${name} (${height}px): "Sold" and "Bought" cross no line and stay inside`, () => {
         const other = closes.map((c) => (10000 * c) / closes[0] * 0.97);
         const { svg } = draw(closes, trades, other, height);
