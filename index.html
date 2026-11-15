@@ -34,7 +34,7 @@ body{font-family:'Newsreader',Georgia,serif;min-height:100vh;min-height:100dvh;-
   padding:max(24px,env(safe-area-inset-top)) max(24px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(24px,env(safe-area-inset-left))}
 .masthead{border-top:4px solid currentColor;border-bottom:1px solid currentColor;padding:8px 0 4px;text-align:center;font-weight:700;font-size:30px;line-height:1;letter-spacing:-0.02em}
 /* The menus bring their own column; inside #app they take its margins instead. */
-#app>.dps-menu{padding:0;min-height:0;flex:1 0 auto}
+#app>.dps-menu{padding:0;min-height:0;flex:1 0 auto;width:100%;margin:0}
 
 .play{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;background:var(--bg);color:var(--ink);
   transition:background-color var(--fade) var(--ease),color var(--fade) var(--ease)}
@@ -50,6 +50,9 @@ body{font-family:'Newsreader',Georgia,serif;min-height:100vh;min-height:100dvh;-
 .is-gate .headline,.is-gate .standfirst{display:none}
 .is-gate .pause{visibility:hidden}
 .is-gate .chart,.is-gate .delta{display:none}
+/* With no chart yet, the balance sits over the button and the space stays above it. */
+.is-gate .spacer{flex-grow:0}
+.is-gate .figures{margin-top:auto}
 .intro p{margin:12px 0 0;font-size:20px;line-height:1.3;text-wrap:pretty}
 .intro .lead{margin:0;font-weight:700;font-size:28px;line-height:1.08;letter-spacing:-0.02em;text-wrap:balance}
 .intro .extra{font-size:18px;color:var(--sec)}

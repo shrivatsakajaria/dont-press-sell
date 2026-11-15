@@ -37,7 +37,9 @@ export interface ChartGeometry {
 const MIN_SPAN_DAYS = 40;
 /** Today's dot sits at most this far across, leaving the right edge as "the future". */
 const TODAY_AT = 0.9;
-const PAD_Y = 12;
+/** Room above the highest point, and below the lowest for a label under it ("Sold" at the low). */
+const PAD_TOP = 12;
+const PAD_BOTTOM = 24;
 const PAD_RIGHT = 8;
 /** Least vertical range, as a share of the start, either side of the start line. */
 export const MIN_RANGE = 0.02;
@@ -78,7 +80,7 @@ export function chartGeometry(m: ChartModel, w: number, h: number): ChartGeometr
   // The range always spans 2% of the start either side of it, so small wobbles never look like cliffs.
   lo = Math.min(lo, m.start * (1 - MIN_RANGE));
   hi = Math.max(hi, m.start * (1 + MIN_RANGE));
-  const yOf = (v: number) => PAD_Y + ((hi - v) / (hi - lo)) * (h - 2 * PAD_Y);
+  const yOf = (v: number) => PAD_TOP + ((hi - v) / (hi - lo)) * (h - PAD_TOP - PAD_BOTTOM);
 
   const line = pts.map((p) => [xOf(p.dayIndex), yOf(p.balance)] as [number, number]);
   const ghosts: [number, number][][] = [];

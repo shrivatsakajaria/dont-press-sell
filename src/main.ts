@@ -124,7 +124,7 @@ const potNow = () => getPot().pot + currentStreak().net;
  * opts.gate: the start screen (R28). Only the first game of a fresh page load gets it; rematch, double
  * or nothing, the countdown's next game and a challenge link opened again in the visit start at once.
  */
-async function play(game: Game, opts: { double?: boolean; gate?: boolean } = {}) {
+async function play(game: Game, opts: { double?: boolean; gate?: boolean; retry?: boolean } = {}) {
   const mine = ++ticket;
   // Starting anything but the double banks a win that was waiting for a choice (spec 6.8).
   if (!opts.double) bankPending();
@@ -132,10 +132,12 @@ async function play(game: Game, opts: { double?: boolean; gate?: boolean } = {})
   try {
     data = await load(game.runId);
   } catch {
-    // I6: no dead page and no unhandled rejection; a tap tries the same game again.
+    // I6: no dead page and no unhandled rejection; a tap tries the same game again. Some browsers keep a
+    // failed module load for the page's life, so when the retry fails too the page reloads instead.
     if (mine !== ticket) return;
+    if (opts.retry) return location.reload();
     clear();
-    mountLoadError(root, () => void play(game, opts));
+    mountLoadError(root, () => void play(game, { ...opts, retry: true }));
     return;
   }
   if (mine !== ticket) return;
