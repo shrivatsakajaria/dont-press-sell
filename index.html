@@ -49,36 +49,37 @@ body{font-family:'Newsreader',Georgia,serif;min-height:100vh;min-height:100dvh;-
 .is-gate .intro{display:block;margin-top:20px}
 .is-gate .headline,.is-gate .standfirst{display:none}
 .is-gate .pause{visibility:hidden}
-.is-gate .chart{min-height:48px}
+.is-gate .chart,.is-gate .delta{display:none}
 .intro p{margin:12px 0 0;font-size:20px;line-height:1.3;text-wrap:pretty}
 .intro .lead{margin:0;font-weight:700;font-size:28px;line-height:1.08;letter-spacing:-0.02em;text-wrap:balance}
 .intro .extra{font-size:18px;color:var(--sec)}
 .intro .note{font-family:var(--sans);font-weight:700;font-size:16px;line-height:1.3;font-variant-numeric:tabular-nums}
-.chart{flex:3 1 0;min-height:72px;max-height:288px;margin-top:16px;padding:8px 0;border-top:1px solid currentColor;border-bottom:1px solid currentColor;overflow:hidden}
+/* R30: the chart takes (and gives back) every change of height above the button, so the button never moves. */
+.chart{flex:100 1 0;min-height:0;max-height:288px;margin-top:16px;padding:8px 0;border-top:1px solid currentColor;border-bottom:1px solid currentColor;overflow:hidden}
 .chart svg{display:block;width:100%;overflow:visible}
 .is-worst .chart{margin-left:-24px;margin-right:-24px;padding:0;border-color:transparent}
 .figures{margin-top:16px;display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .balance{font-weight:700;font-size:72px;line-height:1;letter-spacing:-0.03em;font-variant-numeric:lining-nums tabular-nums;white-space:nowrap}
 .slot{display:inline-block;vertical-align:bottom;line-height:inherit}
 .slot>span{display:inline-block}
-.delta{font-family:var(--sans);font-weight:700;font-size:16px;line-height:1.25;text-align:right;font-variant-numeric:tabular-nums;max-width:5.5em}
+.delta{font-family:var(--sans);font-weight:700;font-size:16px;line-height:1.25;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .delta.loss{color:var(--accent)}
 .regret{margin:8px 0 0;font-family:var(--sans);font-weight:700;font-size:16px;line-height:1.3;font-variant-numeric:tabular-nums}
 .regret.rose{color:var(--accent)}
 .regret[hidden]{display:none}
 .spacer{flex:1 0 16px}
-.act{display:block;width:100%;min-height:72px;margin:0;padding:8px 12px;border:0;border-radius:0;background:var(--btn-bg);color:var(--btn-ink);
+.act{display:block;flex:none;width:100%;height:72px;margin:0;padding:8px 12px;border:0;border-radius:0;background:var(--btn-bg);color:var(--btn-ink);
   font-family:var(--sans);font-weight:700;font-size:24px;line-height:1.15;font-variant-numeric:tabular-nums;cursor:pointer;touch-action:manipulation;
   transition:background-color var(--fade) var(--ease),color var(--fade) var(--ease)}
 .act.long{font-size:20px;padding:8px}
 .act:active{transform:translateY(1px)}
 .act[aria-disabled="true"]{cursor:default}
 .act:focus-visible,.quiet:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
-.under{margin:12px 0 0;min-height:16px;font-family:var(--sans);font-weight:500;font-size:12px;line-height:1.35;color:var(--sec);font-variant-numeric:tabular-nums}
-.foot{display:flex;align-items:center;gap:16px;margin-top:4px;border-top:1px solid currentColor;font-family:var(--sans);font-weight:500;font-size:12px;line-height:1;color:var(--sec);font-variant-numeric:tabular-nums}
+.under{flex:none;height:32px;overflow:hidden;margin:12px 0 0;font-family:var(--sans);font-weight:500;font-size:12px;line-height:16px;color:var(--sec);font-variant-numeric:tabular-nums}
+.foot{flex:none;display:flex;align-items:center;gap:16px;margin-top:4px;border-top:1px solid currentColor;font-family:var(--sans);font-weight:500;font-size:12px;line-height:1;color:var(--sec);font-variant-numeric:tabular-nums}
 .pot{margin-right:auto}
 .quiet{min-height:44px;min-width:44px;margin:0;padding:0;border:0;background:none;color:inherit;font:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer;touch-action:manipulation}
-.quiet:hover{color:var(--ink)}
+@media (hover:hover){.quiet:hover{color:var(--ink)}}
 @media (max-height:760px){
   .headline{margin-top:16px;font-size:34px}
   .is-big .headline{font-size:38px}
@@ -92,7 +93,7 @@ body{font-family:'Newsreader',Georgia,serif;min-height:100vh;min-height:100dvh;-
   .chart{margin-top:12px}
   .figures{margin-top:12px}
   .balance{font-size:56px}
-  .act{min-height:64px}
+  .act{height:64px}
   .under{margin-top:8px}
 }
 /* A run that did not load (I6): one line on the paper; the whole column is the retry button. */

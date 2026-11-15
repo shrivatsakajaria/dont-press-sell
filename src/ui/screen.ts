@@ -32,6 +32,10 @@ const TOP_GAP = 500;
 const YEAR_MS = 365.25 * 24 * 3600 * 1000;
 const EASE = 'cubic-bezier(0.22,1,0.36,1)';
 const SEEN_FIRST_SALE = 'seenFirstSale';
+/** R30: the headline's size steps (of its CSS size), its line limit, and the chart's least height. */
+const HEADLINE_STEPS = [1, 0.82, 0.68, 0.6, 0.52];
+const MAX_HEADLINE_LINES = 3;
+const MIN_CHART = 120;
 
 export interface ScreenModel {
   runLabel: string;
@@ -355,6 +359,29 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
     if (meta) meta.setAttribute('content', p.bg);
   }
 
+  /**
+   * R30: the headline never runs past three lines and the chart keeps at least MIN_CHART px. The headline
+   * steps down from its CSS size (82%, 68%, then 60% and 52% for the longest lines) until both hold; the smallest step is the floor.
+   */
+  function fitHeadline() {
+    headline.style.fontSize = '';
+    if (page.classList.contains('is-gate') || chartWrap.getBoundingClientRect().height === 0) return;
+    let base = 0;
+    try {
+      base = parseFloat(getComputedStyle(headline).fontSize);
+    } catch {
+      return;
+    }
+    if (!(base > 0)) return;
+    for (const k of HEADLINE_STEPS) {
+      const px = Math.round(base * k);
+      headline.style.fontSize = k === 1 ? '' : `${px}px`;
+      const lh = parseFloat(getComputedStyle(headline).lineHeight) || px;
+      const lines = Math.round(headline.getBoundingClientRect().height / lh);
+      if (lines <= MAX_HEADLINE_LINES && chartWrap.getBoundingClientRect().height >= MIN_CHART) return;
+    }
+  }
+
   function drawChartNow(m: ScreenModel) {
     const r = chartWrap.getBoundingClientRect();
     const w = Math.round(r.width) || 342;
@@ -378,6 +405,7 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       const key = `${Math.round(r.width)}x${Math.round(r.height)}`;
       if (key !== lastSize && last) {
         lastSize = key;
+        fitHeadline();
         drawChartNow(last);
       }
     });
@@ -434,6 +462,7 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       pot.textContent = m.pot;
       pause.textContent = m.paused ? RESUME : PAUSE;
       pause.setAttribute('aria-pressed', String(m.paused));
+      fitHeadline();
       drawChartNow(m);
       cancelRaf(paintFrame);
       paintFrame = raf(() => handlers.onPainted?.());
