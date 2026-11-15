@@ -1,6 +1,6 @@
 import { leadAt, simulate } from '../engine/simulate';
 import type { RunData, RunResult, Trade } from '../engine/types';
-import type { Step } from './schedule';
+import { stepHold, type Step } from './schedule';
 
 /** What the play screen needs to draw the current step. */
 export interface SessionView {
@@ -17,6 +17,11 @@ export interface SessionView {
   leadNow: number;
   phase: 'fall' | 'forward';
   slow: boolean;
+  /**
+   * C1: how long the current step is shown, in ms: its hold for the player's position when it began
+   * (quiet fall days run quicker in cash, R35), plus any holdFor added since.
+   */
+  stepMs: number;
 }
 
 export type SimulateFn = (closes: number[], trades: Trade[], start?: number) => RunResult;
@@ -59,6 +64,12 @@ export interface Session {
   press(expectedStepIndex?: number): void;
   pause(): void;
   resume(): void;
+  /**
+   * C1: keeps the current day on screen `ms` longer (R41: the sold and bought moments). The step's
+   * deadline, and so every later one, moves by `ms`; while paused it adds to the time left.
+   * Does nothing before start(), after the end, or for a value that is not a positive number.
+   */
+  holdFor(ms: number): void;
   view(): SessionView;
   /** Clears the timer and the visibility listener. The session is dead afterwards. */
   destroy(): void;
@@ -98,6 +109,8 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
     opts.now ??
     (() => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()));
   let remaining = 0;
+  /** How long the current step is shown: its hold when it began, plus holdFor. */
+  let stepMs = steps.length ? stepHold(steps[0], true) : 0;
   let current: SessionView = compute();
 
   function compute(): SessionView {
@@ -116,6 +129,7 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
       leadNow: closes.length ? leadAt(closes, trades, d, start) : 0,
       phase: step ? step.phase : 'fall',
       slow: step ? step.slow : false,
+      stepMs,
     };
   }
 
@@ -128,9 +142,10 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
 
   /** `from`: the previous step's deadline when the clock ran straight on; null to start from now. */
   function enterStep(from: number | null) {
+    const hold = stepHold(steps[stepIndex], invested);
+    stepMs = hold;
     current = compute();
     peak = current.peakBalance;
-    const hold = steps[stepIndex].holdMs;
     // Arm the clock before calling the UI, so a throwing onStep cannot freeze the run.
     if (!paused) {
       const t = now();
@@ -173,7 +188,7 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
     if (started && timer !== undefined) {
       clearTimeout(timer);
       timer = undefined;
-      remaining = Math.min(steps[stepIndex].holdMs, Math.max(0, deadline - now()));
+      remaining = Math.min(stepMs, Math.max(0, deadline - now()));
     }
     opts.onPause?.();
   }
@@ -218,6 +233,13 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
       invested = !invested;
       current = compute();
       opts.onStep({ ...current });
+    },
+    holdFor(ms: number) {
+      if (!started || ended || destroyed || !(ms > 0) || !Number.isFinite(ms)) return;
+      stepMs += ms;
+      current = { ...current, stepMs };
+      if (paused) remaining += ms;
+      else if (timer !== undefined) armUntil(deadline + ms);
     },
     pause() {
       userPaused = true;

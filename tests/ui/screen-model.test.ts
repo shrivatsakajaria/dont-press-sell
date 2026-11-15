@@ -29,7 +29,7 @@ function view(stepIndex: number, over: Partial<SessionView> = {}): SessionView {
   const bal = (10000 / closes[0]) * closes[d];
   return {
     stepIndex, dayIndex: d, balance: bal, invested: true, marketBalance: bal,
-    peakBalance: bal, leadNow: 0, phase: steps[stepIndex].phase, slow: steps[stepIndex].slow, ...over,
+    peakBalance: bal, leadNow: 0, phase: steps[stepIndex].phase, slow: steps[stepIndex].slow, stepMs: steps[stepIndex].holdMs, ...over,
   };
 }
 
@@ -169,7 +169,7 @@ describe('screenModel', () => {
     ];
     const v: SessionView = {
       stepIndex: 2, dayIndex: 3, balance: 10100, invested: false, marketBalance: 10000,
-      peakBalance: 10100, leadNow: 100, phase: 'fall', slow: false,
+      peakBalance: 10100, leadNow: 100, phase: 'fall', slow: false, stepMs: 300,
     };
     const s = state(v, { steps: grouped, trades: [{ dayIndex: 1, side: 'sell' }] });
     // closes[3] / closes[2] = 100 / 99: today's move is up about 1%, so $102 (not the $100 cost since day 1).

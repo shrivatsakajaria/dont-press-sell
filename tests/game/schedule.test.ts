@@ -423,7 +423,7 @@ describe('smooth pacing (R35): one step a day, gradual changes, quicker quiet da
       });
       // In all, about 20% off the quiet days, less what the 125 ms floor and the gentle slow-down after
       // slow days hold up. Falls pinned near the floor (quiet steps averaging 250 ms or less) are exempt.
-      const quiet = steps.map((s, i) => i).filter((i) => i > 0 && !steps[i].slow && steps[i].phase === 'fall');
+      const quiet = steps.map((_, i) => i).filter((i) => i > 0 && !steps[i].slow && steps[i].phase === 'fall');
       const usual = quiet.reduce((a, i) => a + steps[i].holdMs, 0);
       const cash = quiet.reduce((a, i) => a + stepHold(steps[i], false), 0);
       if (quiet.length && usual / quiet.length > 250) {

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunData, RunResult, Trade } from '../../src/engine/types';
 import { leadAt, simulate } from '../../src/engine/simulate';
-import { buildSchedule, type Step } from '../../src/game/schedule';
+import { buildSchedule, stepHold, type Step } from '../../src/game/schedule';
 import { createSession, type SessionView } from '../../src/game/session';
 
 const run = JSON.parse(
@@ -237,12 +237,15 @@ describe('createSession', () => {
     let step = 0;
     let t = 0;
     while (ends.length === 0) {
+      // R35: quiet fall steps entered in cash hold cashMs, so the clock runs by the view's stepMs.
+      const hold = s.view().stepMs;
+      expect(hold).toBe(stepHold(steps[step], s.view().invested));
       if (pressAt.has(step)) {
         s.press();
         s.press(); // a double tap
       }
-      t += steps[step].holdMs;
-      vi.advanceTimersByTime(steps[step].holdMs);
+      t += hold;
+      vi.advanceTimersByTime(hold);
       step++;
     }
     expect(step).toBe(steps.length);
@@ -253,7 +256,10 @@ describe('createSession', () => {
     // Every step was shown in order.
     const shown = views.map((v) => v.stepIndex).filter((x, i, a) => a.indexOf(x) === i);
     expect(shown).toEqual(steps.map((_, i) => i));
-    expect(t).toBe(steps.reduce((a, x) => a + x.holdMs, 0));
+    // Sold on steps 3, 20 and 22, bought on 4, 21 and 50: steps 4, 21 and 23..50 begin in cash and run quicker.
+    const inCash = (i: number) => i === 4 || i === 21 || (i >= 23 && i <= 50);
+    expect(t).toBe(steps.reduce((a, x, i) => a + stepHold(x, !inCash(i)), 0));
+    expect(t).toBeLessThan(steps.reduce((a, x) => a + x.holdMs, 0));
   });
 
   it('uses opts.simulateFn for the result when given', () => {
@@ -371,5 +377,89 @@ describe('createSession', () => {
     vi.advanceTimersByTime(60_000);
     expect(views.length).toBe(1);
     expect(ends.length).toBe(0);
+  });
+});
+
+describe('C1: holdFor, stepMs and quicker quiet days in cash (R35, R41)', () => {
+  const cashSteps: Step[] = [
+    { dayIndex: 0, holdMs: 200, phase: 'fall', slow: false },
+    { dayIndex: 1, holdMs: 1000, phase: 'fall', slow: false, cashMs: 800 },
+    { dayIndex: 2, holdMs: 1000, phase: 'fall', slow: false, cashMs: 800 },
+    { dayIndex: 3, holdMs: 3000, phase: 'fall', slow: true },
+    { dayIndex: 4, holdMs: 300, phase: 'forward', slow: false },
+    { dayIndex: 5, holdMs: 300, phase: 'forward', slow: false },
+  ];
+
+  it('stepMs is the current step hold', () => {
+    const { s, views } = make(tiny, tinySteps);
+    s.start();
+    expect(views[0].stepMs).toBe(200);
+    vi.advanceTimersByTime(200);
+    expect(s.view().stepMs).toBe(800);
+    s.destroy();
+  });
+
+  it('holdFor(ms) keeps the current day on screen ms longer and moves every later deadline', () => {
+    const { s } = make(tiny, tinySteps);
+    s.start();
+    vi.advanceTimersByTime(100);
+    s.holdFor(500);
+    expect(s.view().stepMs).toBe(700);
+    vi.advanceTimersByTime(599);
+    expect(s.view().stepIndex).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(s.view().stepIndex).toBe(1);
+    // The next step keeps its full hold from the moved deadline.
+    vi.advanceTimersByTime(799);
+    expect(s.view().stepIndex).toBe(1);
+    vi.advanceTimersByTime(1);
+    expect(s.view().stepIndex).toBe(2);
+    s.destroy();
+  });
+
+  it('holdFor while paused adds to the time left; resume keeps it', () => {
+    const { s } = make(tiny, tinySteps);
+    s.start();
+    vi.advanceTimersByTime(200 + 300); // 300 ms into the 800 ms slow step: 500 left
+    s.pause();
+    s.holdFor(500);
+    vi.advanceTimersByTime(30_000);
+    s.resume();
+    vi.advanceTimersByTime(999);
+    expect(s.view().stepIndex).toBe(1);
+    vi.advanceTimersByTime(1);
+    expect(s.view().stepIndex).toBe(2);
+    s.destroy();
+  });
+
+  it('holdFor does nothing before start or after the end, and ignores bad values', () => {
+    const { s, ends } = make(tiny, tinySteps);
+    s.holdFor(500);
+    s.start();
+    s.holdFor(-100);
+    s.holdFor(Number.NaN);
+    vi.advanceTimersByTime(200);
+    expect(s.view().stepIndex).toBe(1);
+    vi.advanceTimersByTime(10_000);
+    expect(ends.length).toBe(1);
+    s.holdFor(500);
+    s.destroy();
+  });
+
+  it('in cash, quiet fall steps use cashMs; in the market, holdMs', () => {
+    const { s, views } = make(tiny, cashSteps);
+    s.start();
+    vi.advanceTimersByTime(200);
+    expect(s.view()).toMatchObject({ stepIndex: 1, stepMs: 1000 });
+    s.press(); // sell on day 1
+    vi.advanceTimersByTime(1000);
+    // Step 2 is entered in cash: 800 ms.
+    expect(s.view()).toMatchObject({ stepIndex: 2, stepMs: 800, invested: false });
+    vi.advanceTimersByTime(799);
+    expect(s.view().stepIndex).toBe(2);
+    vi.advanceTimersByTime(1);
+    expect(s.view()).toMatchObject({ stepIndex: 3, stepMs: 3000 });
+    expect(views.some((v) => v.stepMs === undefined)).toBe(false);
+    s.destroy();
   });
 });
