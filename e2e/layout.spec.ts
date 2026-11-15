@@ -61,7 +61,8 @@ for (const [w, h] of [[360, 780], [375, 812], [390, 660], [390, 844]]) {
   const edges = (page: import('@playwright/test').Page) =>
     page.evaluate(() => {
       // Measure the settled layout: the red-day jolt shakes the page by a few px for 240 ms.
-      for (const a of document.getAnimations()) a.finish();
+      // (The green buy-back pulse, R38, runs forever and cannot be finished; it moves nothing.)
+      for (const a of document.getAnimations()) if (a.effect?.getComputedTiming().endTime !== Infinity) a.finish();
       const r = (q: string) => document.querySelector(q)!.getBoundingClientRect();
       return { day: document.querySelector('.folio')!.textContent!, balance: r('.balance').right, delta: r('.delta').right,
         deltaLeft: r('.delta').left, act: r('button.act').top, worst: !!document.querySelector('.play.is-worst'), text: document.querySelector('.delta')!.textContent };
@@ -112,7 +113,8 @@ for (const [w, h] of [[360, 780], [375, 812], [390, 660], [390, 844]]) {
       last = m.day;
       expect(m.balance, `${m.day} balance`).toBeLessThanOrEqual(w - 24);
       expect(m.delta, `${m.day} ${m.text}`).toBeLessThanOrEqual(w - 24);
-      if (/ahead$/.test((await page.locator('button.act').textContent()) ?? '')) ahead = true;
+      // R38: winning in cash reads "Buy back $N cheaper".
+      if (/cheaper$/.test((await page.locator('button.act').textContent()) ?? '')) ahead = true;
     }
     expect(ahead).toBe(true);
     await page.screenshot({ path: `e2e/shots/S/edges-cash-${w}x${h}.png` });

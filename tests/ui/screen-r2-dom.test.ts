@@ -96,6 +96,20 @@ it('the last day stays on screen with the final balance before the result (R49)'
   expect(Math.round(onEnd.mock.calls[0][0].final)).toBe(10800);
 });
 
+it('a buy-back pinned to the step painted at the finger-down stamps the saving the player saw', () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+  const { btn, q } = mount();
+  vi.advanceTimersByTime(316); // day 4 (100) painted
+  btn.click(); // sold 10,000 at 100
+  vi.advanceTimersByTime(100); // day 5 (90) painted
+  expect(btn.textContent).toBe('Buy back $1,000 cheaper');
+  btn.dispatchEvent(new Event('pointerdown'));
+  vi.advanceTimersByTime(100); // the clock moves to day 6 (92) before the finger lifts
+  btn.click();
+  // Bought at day 5's close: the stamp names the $1,000 on the button, not a figure from day 6's balance.
+  expect(q<HTMLElement>('.stamp').textContent).toBe('Bought back $1,000 cheaper');
+});
+
 it('teardown during the final hold never calls onEnd', () => {
   const { play, onEnd } = mount();
   vi.advanceTimersByTime(1000);

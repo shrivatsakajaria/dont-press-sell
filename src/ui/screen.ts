@@ -288,7 +288,8 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: st
 /**
  * Round 2 play-screen styles (lane C). index.html is lead-only, so the screen brings these itself,
  * once, after the page's own sheet so they win on equal specificity.
- * - .act.cheaper: R38's green buy-back (white on #1d6b3a is 6.5:1; a slow, gentle pulse, none with reduced motion).
+ * - .act.cheaper: R38's green buy-back, pulsing in colour only so the button never moves under a finger
+ *   (white on #1d6b3a is 6.5:1, on #23804a 4.9:1; no pulse with reduced motion).
  * - .stamp: R41's press stamp over the chart, out of the flow (no layout jump).
  * - .pot: R40 hides the pot.
  * - R48: the folio, the line under the button and the footer at 14px.
@@ -296,18 +297,21 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: st
 const STYLE_ID = 'play-r2-c';
 const STYLE = `
 .chart{position:relative}
-.stamp{position:absolute;left:0;right:0;top:50%;margin:-24px 0 0;padding:0 24px;text-align:center;pointer-events:none;
-  font-family:var(--sans);font-weight:700;font-size:28px;line-height:48px;letter-spacing:-0.01em;font-variant-numeric:tabular-nums;color:var(--ink)}
+.stamp{position:absolute;left:0;right:0;top:50%;margin:-22px 0 0;padding:0;text-align:center;pointer-events:none;
+  font-family:var(--sans);font-weight:700;font-size:min(24px,6.2vw);line-height:44px;letter-spacing:-0.01em;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--ink)}
 .stamp>span{display:inline-block;padding:0 12px;background:var(--bg);border-top:2px solid currentColor;border-bottom:2px solid currentColor}
 .stamp.win{color:#1d6b3a}
 .is-worst .stamp.win{color:var(--ink)}
 .stamp[hidden]{display:none}
-.act.cheaper{background:#1d6b3a;color:#ffffff;animation:dps-pulse 1600ms var(--ease) infinite}
-@keyframes dps-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.025)}}
+.act.cheaper{background:#1d6b3a;color:#ffffff;animation:dps-pulse 1600ms ease-in-out infinite}
+@keyframes dps-pulse{0%,100%{background-color:#1d6b3a}50%{background-color:#23804a}}
 @media (prefers-reduced-motion:reduce){.act.cheaper{animation:none}}
 .pot:empty{display:none}
+.is-over .act{opacity:0.45;animation:none}
+.foot .quiet{flex:none}
+.foot .sound{margin-left:auto}
 .folio,.foot{font-size:14px}
-.under{font-size:14px;line-height:18px;height:36px}
+.under{font-size:14px;line-height:20px;height:40px}
 `;
 function ensureStyle(): void {
   if (typeof document === 'undefined' || document.getElementById(STYLE_ID)) return;
@@ -512,7 +516,15 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       actRoll.set(fig);
       actPost.textContent = post;
       act.classList.toggle('long', m.longLabel);
-      act.classList.toggle('cheaper', m.cheaper);
+      if (act.classList.contains('cheaper') !== m.cheaper) {
+        // In and out of green at once: a fading green would sit behind "Sell for" (slowest with reduced motion).
+        act.style.transition = 'none';
+        act.classList.toggle('cheaper', m.cheaper);
+        void act.offsetWidth;
+        raf(() => {
+          act.style.transition = '';
+        });
+      }
       act.setAttribute('aria-disabled', String(m.paused || frozen));
       under.textContent = m.underButton;
       pot.textContent = m.pot;
@@ -566,6 +578,7 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
     },
     freeze() {
       frozen = true;
+      page.classList.add('is-over');
       act.setAttribute('aria-disabled', 'true');
     },
     destroy() {
@@ -711,8 +724,9 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       if (side === 'sell') stamp = { text: soldStamp(v.balance), win: false };
       else {
         const sale = [...trades].reverse().find((t) => t.side === 'sell');
-        // The cash bought the shares at this close: the balance now is that cash.
-        const saving = sale ? buyBackSaving(v.balance, run.closes[at], run.closes[sale.dayIndex]) : 0;
+        // The cash is the balance at the sale's close (a buy pinned to the step before shows today's balance).
+        const cash = sale ? history.get(sale.dayIndex)?.balance ?? v.balance : v.balance;
+        const saving = sale ? buyBackSaving(cash, run.closes[at], run.closes[sale.dayIndex]) : 0;
         stamp = { text: boughtStamp(saving), win: saving > 0 };
       }
       trades.push({ dayIndex: at, side });
