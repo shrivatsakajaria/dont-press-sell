@@ -93,6 +93,15 @@ describe('the reveal', () => {
     expect(lead()).toBe('$3,719 ahead of someone who did nothing');
   });
 
+  test('a level finish reads "Level with someone who did nothing" (R32)', () => {
+    const m = c2007Sample();
+    m.result = { ...m.result, trades: [], lead: 0, final: m.result.holderFinal };
+    mount(m);
+    vi.advanceTimersByTime(4000 + 1600);
+    expect(root.querySelector('[data-lead]')!.textContent).toBe('Level with someone who did nothing');
+    expect(root.textContent).not.toContain('$0 ahead');
+  });
+
   test('a loss counts down and reads "behind"', () => {
     mount(losingSample());
     vi.advanceTimersByTime(4000 + 1600);

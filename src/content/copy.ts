@@ -19,8 +19,12 @@ export const nextMysteryLine = (n: number) => `Next mystery crash in ${n}. Tap t
 export const WINS_IN_A_ROW = 'Wins in a row';
 export const sellingAtTopLine = (n: number) => `Selling at the top would have saved you ${dollars(n)}`;
 export const daysInRowLine = (n: number) => `${n} days in a row`;
-export const leadLine = (lead: number) =>
-  lead < 0 ? `${dollars(lead)} behind someone who did nothing` : `${dollars(lead)} ahead of someone who did nothing`;
+/** A finish that rounds to $0 (R32): never "$0 ahead" or "beat the market by $0". */
+export const LEVEL_LINE = 'Level with someone who did nothing';
+/** The ahead/behind words for any amount, $0 included (the count-up passes through it). */
+export const aheadBehindLine = (lead: number, behind: boolean) =>
+  behind ? `${dollars(lead)} behind someone who did nothing` : `${dollars(lead)} ahead of someone who did nothing`;
+export const leadLine = (lead: number) => (Math.round(lead) === 0 ? LEVEL_LINE : aheadBehindLine(lead, lead < 0));
 // Time out of the market (result page, near-miss list), in plain words (R28).
 const SMALL = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 const count = (n: number, unit: string) => `${n <= 10 ? SMALL[n] : n} ${unit}${n === 1 ? '' : 's'}`;
@@ -194,6 +198,8 @@ export const shareAhead = (lead: number) => `I beat the market by ${dollars(lead
 export const shareBehind = (lead: number) => `I finished ${dollars(lead)} behind someone who did nothing. Beat me.`;
 export const shareAheadPractice = (lead: number, go: string) => `I beat the market by ${dollars(lead)} ${go}. Beat me.`;
 export const shareBehindPractice = (lead: number, go: string) => `I finished ${dollars(lead)} behind someone who did nothing ${go}. Beat me.`;
+export const SHARE_LEVEL = `${LEVEL_LINE} in a crash I could not see coming. Beat me.`;
+export const shareLevelPractice = (go: string) => `${LEVEL_LINE} ${go}. Beat me.`;
 
 // Share fallback (spec 10).
 export const SHARE_DIALOG = 'Save or copy your result';

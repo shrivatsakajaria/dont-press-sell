@@ -19,6 +19,7 @@ import {
   REMATCH,
   TAP_TO_REVEAL,
   WINS_IN_A_ROW,
+  aheadBehindLine,
 } from '../content/copy';
 import type { RunKind, RunResult, VerdictId } from '../engine/types';
 import type { Sfx } from '../fx/sound';
@@ -231,9 +232,10 @@ function reducedMotion(): boolean {
   }
 }
 
-/** The lead line with the final sign kept while the count passes through zero. */
+/** The lead line: the final one at the end of the count; on the way, the final's words ("ahead"/"behind") at every figure, $0 included. */
 function leadText(value: number, finalLead: number): string {
-  return leadLine(finalLead < 0 ? Math.min(value, -1e-9) : Math.max(value, 0));
+  if (value === finalLead) return leadLine(finalLead);
+  return aheadBehindLine(value, Math.round(finalLead) < 0);
 }
 
 /** The folio's reveal text: one-sentence lines lose their full stop ("That was 2008"). */
