@@ -82,7 +82,10 @@ test('the layout holds two 16-word lines, a 22-word line and a score to beat at 
   const m = await layout(page);
   expect(m.scrollHeight).toBeLessThanOrEqual(m.clientHeight);
   expect(660 - m.bottom).toBeGreaterThanOrEqual(40);
-  expect(m.chartHeight).toBeGreaterThanOrEqual(40);
+  // No empty chart band and no "level" on the start screen (audit 5): the chart waits for play.
+  expect(m.chartHeight).toBe(0);
+  await expect(page.locator('.delta')).toBeHidden();
+  await expect(page.locator('.folio')).toContainText('Price: your nerve');
   await page.screenshot({ path: 'e2e/shots/S/start-660-long-lines.png' });
 });
 
@@ -91,7 +94,8 @@ test('a challenge link shows the score to beat on the start screen, and not the 
   const link = `/#c=${code(S2018, 11341, [10, 30])}`;
   await page.goto(link);
   await expect(page.locator('button.act')).toHaveText('Start');
-  await expect(page.locator('.intro .note')).toHaveText('Score to beat: $11,341');
+  // The score to beat is recomputed from the trades (I5): selling on day 11 and buying on day 31 of s2018 makes $11,804.
+  await expect(page.locator('.intro .note')).toHaveText('Score to beat: $11,804');
   await page.screenshot({ path: 'e2e/shots/S/start-challenge-660.png' });
   await page.goto('about:blank');
   await page.goto(link);

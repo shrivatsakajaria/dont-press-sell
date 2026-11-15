@@ -30,7 +30,7 @@
 html,body{margin:0;background:var(--bg);color:var(--ink);transition:background-color var(--fade) var(--ease)}
 body{font-family:'Newsreader',Georgia,serif;min-height:100vh;min-height:100dvh;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
 ::selection{background:var(--ink);color:var(--bg)}
-#app{box-sizing:border-box;max-width:440px;margin:0 auto;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;
+#app{box-sizing:border-box;max-width:440px;margin:0 auto;overflow:clip;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;
   padding:max(24px,env(safe-area-inset-top)) max(24px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(24px,env(safe-area-inset-left))}
 .masthead{border-top:4px solid currentColor;border-bottom:1px solid currentColor;padding:8px 0 4px;text-align:center;font-weight:700;font-size:30px;line-height:1;letter-spacing:-0.02em}
 /* The menus bring their own column; inside #app they take its margins instead. */

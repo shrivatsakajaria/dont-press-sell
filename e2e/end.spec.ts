@@ -36,3 +36,25 @@ test('the crash name shows by itself after 4 seconds without a tap', async ({ pa
   await page.clock.runFor(1600);
   await expect(page.locator('.es-folio')).toContainText(NAME);
 });
+
+test('a tap on Rematch starts the next game at once: s2014 opens on its red day 1', async ({ page }) => {
+  await finishWithoutTapping(page);
+  await expect(page.locator('.es-h1')).toBeVisible();
+  await page.clock.runFor(6000); // reveal and count
+  await page.getByRole('button', { name: 'Rematch this crash' }).click();
+  // s2014's day 1 is a slow, falling day: the page turns red at once.
+  await expect(page.locator('.play.is-worst')).toHaveCount(1);
+  await expect(page.locator('.folio')).toContainText('Day 1');
+});
+
+test('a new game on a quiet day 1 moves on within half a second', async ({ page }) => {
+  await page.clock.install();
+  await page.goto('/?run=c2020');
+  await pressStart(page);
+  for (let i = 0; i < 100 && (await page.locator('.es-h1').count()) === 0; i++) await page.clock.runFor(1000);
+  await page.clock.runFor(6000);
+  await page.getByRole('button', { name: 'Rematch this crash' }).click();
+  await expect(page.locator('.folio')).toContainText('Day 1');
+  await page.clock.runFor(500);
+  await expect(page.locator('.folio')).not.toContainText('Day 1');
+});
