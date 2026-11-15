@@ -56,14 +56,12 @@ export function nearMisses(result: RunResult, run: RunData): string[] {
   }
   if (boughtAfter > 0) out.push(`Bought back ${days(boughtAfter)} after the bottom`);
 
-  // Largest daily rise and fall, over the fall only: the play screen numbers those days ("Day N"), while the
-  // fast-forward after it samples days and shows years, so a day there could not be checked against anything seen.
+  // Largest daily rise and fall of the run.
   let bestDay = -1;
   let worstDay = -1;
   let bestRatio = 1;
   let worstRatio = 1;
-  const fallEnd = Math.min(Math.max(run.fallEndIndex, 1), run.closes.length);
-  for (let i = 1; i < fallEnd; i++) {
+  for (let i = 1; i < run.closes.length; i++) {
     const ratio = run.closes[i] / run.closes[i - 1];
     if (ratio > bestRatio) {
       bestRatio = ratio;
@@ -74,6 +72,11 @@ export function nearMisses(result: RunResult, run: RunData): string[] {
       worstDay = i;
     }
   }
+  // Named only when the day is in the fall: the play screen numbers those days ("Day N"), while the
+  // fast-forward after it samples days and shows years, so a day there could not be checked against anything seen.
+  const fallEnd = Math.min(Math.max(run.fallEndIndex, 1), run.closes.length);
+  if (bestDay >= fallEnd) bestDay = -1;
+  if (worstDay >= fallEnd) worstDay = -1;
   if (bestDay > 0 && !investedAt(result, bestDay - 1) && !investedAt(result, bestDay)) {
     out.push(`In cash on day ${bestDay + 1}, the best day of the run`);
   }

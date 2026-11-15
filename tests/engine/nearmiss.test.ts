@@ -97,9 +97,8 @@ describe('nearMisses', () => {
     // fallEndIndex 4: days 0..3 are the fall. The best day (index 5) is in the fast-forward.
     expect(joined(res([sell(2)]), runData(3, 4))).not.toContain('best day');
     expect(nearMisses(res([]), runData(3, 4))).toContain('Held through day 4, the worst day of the run');
-    // fallEndIndex 3: the worst day (index 3) is the first forward day; a fall-day worst is named instead.
-    expect(joined(res([]), runData(3, 3))).not.toContain('day 4');
-    expect(nearMisses(res([]), runData(3, 3))).toContain('Held through day 2, the worst day of the run');
+    // fallEndIndex 3: the worst day (index 3) is the first forward day. No line: a lesser fall day is not "the worst".
+    expect(joined(res([]), runData(3, 3))).not.toContain('worst day');
   });
 
   it('R49: buying back at the close of the worst day is not holding through it (panel, 2020)', () => {

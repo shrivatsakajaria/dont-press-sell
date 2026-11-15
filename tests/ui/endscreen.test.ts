@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { announce } from '../../src/ui/a11y';
 import { keep } from '../../src/ui/endchart';
-import { REVEAL_BEAT_MS, holderNoteDue, mountEndScreen, type EndModel } from '../../src/ui/endscreen';
+import { COUNT_MS, REVEAL_BEAT_MS, holderNoteDue, mountEndScreen, type EndModel } from '../../src/ui/endscreen';
 import { c2007Sample, losingSample, winningSample } from '../fixtures/sample-result';
 
 vi.mock('../../src/ui/a11y', () => ({ announce: vi.fn(), initAnnouncer: vi.fn() }));
@@ -235,7 +235,7 @@ describe('the front page', () => {
     expect(root.querySelector('.es-stake')).not.toBeNull();
   });
 
-  test('before the reveal the double block (with "Bank $N") is out and money near misses keep their space, hidden', () => {
+  test('before the reveal the double block (with "Keep my win") is out and money near misses keep their space, hidden', () => {
     const m = winningSample();
     m.nearMisses = [...m.nearMisses, 'One trade from perfect: perfect timing made $15,160'];
     m.actions = { ...m.actions, onDouble: () => {}, onBank: () => {}, onRematch: () => {} };
@@ -245,7 +245,7 @@ describe('the front page', () => {
     expect(rematch().className).toBe('es-main');
     // No double block, and no space for one, before the reveal: a gap only wins have would be a tell.
     expect(root.querySelector('.es-double')).toBeNull();
-    expect(root.textContent).not.toMatch(/Bank \$|Keep your/);
+    expect(root.textContent).not.toMatch(/Keep my win|Keep your/);
     expect(root.querySelector('.es-pot')).toBeNull();
     const money = Array.from(root.querySelectorAll('.es-misses li')).filter((li) => li.textContent!.includes('$')) as HTMLElement[];
     expect(money.length).toBeGreaterThan(0);
@@ -259,8 +259,8 @@ describe('the front page', () => {
     for (const e of held) expect(e.style.visibility).toBe('');
     // Inserted at the reveal, in its place: after the score, before the other buttons.
     const block = root.querySelector('.es-double') as HTMLElement;
-    expect(block.querySelector('.es-out')!.textContent).toMatch(/^Bank \$/);
-    expect(block.nextElementSibling!.className).toMatch(/^es-(pair|link)$/);
+    expect(block.querySelector('.es-out')!.textContent).toBe('Keep my win');
+    expect(block.nextElementSibling!.className).toMatch(/^es-(grow|pair|link)$/);
     expect(rematch().className).toBe('es-out');
     expect(block.previousElementSibling!.className).toBe('es-score');
   });
@@ -385,7 +385,7 @@ describe('the front page', () => {
     const byText = (s: string) => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === s)!;
     vi.advanceTimersByTime(400); // past the tap guard after the reveal
     byText('Double or nothing').click();
-    byText('Bank $5,091').click();
+    byText('Keep my win').click();
     expect(onDouble).toHaveBeenCalledTimes(1);
     expect(onBank).toHaveBeenCalledTimes(1);
   });
@@ -595,7 +595,8 @@ describe('the big reveal (R44)', () => {
     mount(c2007Sample());
     revealButton()!.click();
     vi.advanceTimersByTime(REVEAL_BEAT_MS + 2000);
-    expect(announced()).toEqual(['That was 2008. $3,719 ahead of someone who did nothing.']);
+    // '' is the result page emptying the live region as it mounts.
+    expect(announced().filter((a) => a !== '')).toEqual(['That was 2008. $3,719 ahead of someone who did nothing.']);
   });
 
   test('a false alarm prints its name large and how long it took to come back under it', () => {
@@ -670,3 +671,114 @@ describe('one screen (R44)', () => {
     expect(root.querySelectorAll('[data-trim]')).toHaveLength(0);
   });
 });
+
+describe('round 2 fixes (R58)', () => {
+  const short = (h: number) =>
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (q: string) => ({ matches: q.includes('max-height') && h <= 700, media: q }) as unknown as MediaQueryList,
+    );
+  const reveal = () => {
+    revealButton()!.click();
+    vi.advanceTimersByTime(REVEAL_BEAT_MS + COUNT_MS + 500);
+  };
+
+  test('the keep button says "Keep my win": no figure, the pot is hidden (design #6)', () => {
+    const m = winningSample();
+    m.actions = { ...m.actions, onDouble: () => {}, onBank: () => {} };
+    mount(m);
+    reveal();
+    const buttons = Array.from(root.querySelectorAll('.es-double button')).map((b) => b.textContent);
+    expect(buttons).toEqual(['Double or nothing', 'Keep my win']);
+    expect(root.textContent).not.toMatch(/Bank/);
+  });
+
+  test('"You finished with $N." is never left out; only the perfect-timing half can go (truth #5)', () => {
+    mount(c2007Sample());
+    reveal();
+    const p = root.querySelector('.es-perfect') as HTMLElement;
+    expect(p.textContent).toBe('Perfect timing made $24,188. You finished with $14,513.');
+    expect(p.closest('[data-trimmable]')).toBeNull();
+    const part = p.querySelector('[data-trimmable]')!;
+    expect(part.textContent).toBe('Perfect timing made $24,188. ');
+  });
+
+  test('"Best winning streak: N" is never left out (review minor)', () => {
+    mount({ ...losingSample(), bestStreak: 3 });
+    reveal();
+    const best = root.querySelector('.es-best') as HTMLElement;
+    expect(best.textContent).toBe('Best winning streak: 3');
+    expect(best.closest('[data-trimmable]')).toBeNull();
+  });
+
+  test('a page shown again (Back, Keep my win) prints the final lead at once, with no count and no sound (review minor)', () => {
+    const sfx = { rise: vi.fn(), thud: vi.fn(), payout: vi.fn() };
+    mount({ ...c2007Sample(), sfx, flags: { blind: false, again: true } });
+    expect(root.querySelector('[data-lead]')!.textContent).toBe('$3,719 ahead of someone who did nothing');
+    vi.advanceTimersByTime(3000);
+    expect(sfx.rise).not.toHaveBeenCalled();
+    expect(sfx.payout).not.toHaveBeenCalled();
+    expect(sfx.thud).not.toHaveBeenCalled();
+    handle!.destroy();
+    // The first showing still counts and plays.
+    mount({ ...c2007Sample(), sfx, flags: { blind: false } });
+    vi.advanceTimersByTime(3000);
+    expect(sfx.payout).toHaveBeenCalled();
+  });
+
+  test('focus on "Tap to see what that was" moves to the crash name at the reveal (review minor)', () => {
+    mount(c2007Sample());
+    revealButton()!.focus();
+    revealButton()!.click();
+    const name = root.querySelector('.es-name') as HTMLElement;
+    expect(document.activeElement).toBe(name);
+    expect(name.getAttribute('tabindex')).toBe('-1');
+    handle!.destroy();
+    // By itself after 4 s, too.
+    mount(c2007Sample());
+    revealButton()!.focus();
+    vi.advanceTimersByTime(4000);
+    expect(document.activeElement).toBe(root.querySelector('.es-name'));
+    handle!.destroy();
+    // Focus elsewhere is left alone.
+    mount(c2007Sample());
+    vi.advanceTimersByTime(4000);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  test('the live region drops the play screen\'s last words when the result mounts (design minor)', () => {
+    mount({ ...c2007Sample(), flags: { blind: false } });
+    expect(announced()[0]).toBe('');
+  });
+
+  test('the spare room sits above the buttons, so the reveal fills it and nothing below moves (design minor)', () => {
+    const m = winningSample();
+    m.actions = { ...m.actions, onDouble: () => {}, onBank: () => {}, onRematch: () => {} };
+    mount(m);
+    const grow = root.querySelector('.es-grow')!;
+    expect(grow.nextElementSibling!.className).toBe('es-pair');
+    reveal();
+    expect(grow.previousElementSibling!.className).toBe('es-double');
+    expect(grow.nextElementSibling!.className).toBe('es-pair');
+  });
+
+  test.each([
+    [660, 140],
+    [844, 160],
+  ])('at %i px the result chart is at least %i tall: 100 px of line or more (review #4, design #1)', (h, min) => {
+    const mm = short(h);
+    try {
+      mount(c2007Sample());
+      const vb = root.querySelector('main.es svg')!.getAttribute('viewBox')!.split(' ').map(Number);
+      expect(vb[3]).toBeGreaterThanOrEqual(min);
+    } finally {
+      mm.mockRestore();
+    }
+  });
+
+  test('the foot links can give way on a short screen (the double choice comes first); buttons never do', () => {
+    mount({ ...c2007Sample(), actions: { onNewMystery: () => {}, onPick: () => {}, onCollection: () => {} } });
+    expect(root.querySelector('.es-foot')!.hasAttribute('data-trimmable')).toBe(true);
+    expect(root.querySelector('.es-pair[data-trimmable], .es-double[data-trimmable]')).toBeNull();
+  });
+});
+

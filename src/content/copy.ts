@@ -77,13 +77,16 @@ export const START_LINES: [string, string, string] = [
 export const START_LABEL = 'Start';
 
 export const DOUBLE_OR_NOTHING = 'Double or nothing';
-export const bankLabel = (n: number) => `Bank ${dollars(n)}`;
+// Round 2 fix, lane FD (R58): the button that banks a win names what it does, with no figure (the pot is hidden).
+export const KEEP_MY_WIN = 'Keep my win';
 export const REMATCH = 'Rematch this crash';
 export const CHALLENGE = 'Challenge a friend';
 export const NEW_MYSTERY = 'Play a new mystery crash';
 export const CARD_GUESS = 'Can you guess which crash this was?';
-export const perfectLine = (perfect: number, you: number) =>
-  `Perfect timing made ${dollars(perfect)}. You finished with ${dollars(you)}.`;
+// Round 2 fix, lane FD (R58): the result prints the two halves apart, so "You finished with $N." is never trimmed.
+export const perfectTimingPart = (perfect: number) => `Perfect timing made ${dollars(perfect)}.`;
+export const finishedLine = (you: number) => `You finished with ${dollars(you)}.`;
+export const perfectLine = (perfect: number, you: number) => `${perfectTimingPart(perfect)} ${finishedLine(you)}`;
 
 // Round 2, lane D (R44, R45, R49): the result screen's streak lines and the short start screen.
 /** After a win, large: "Wins in a row: 2". */

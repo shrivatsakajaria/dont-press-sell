@@ -2,7 +2,6 @@
 // Plain DOM. The lead wires the callbacks; this module only draws and times.
 // R44: the whole page, buttons included, fits one screen. What does not fit is left out, extras first.
 import {
-  bankLabel,
   bestWinningStreakLine,
   CHALLENGE,
   COPIED,
@@ -10,11 +9,13 @@ import {
   dollars,
   DOUBLE_OR_NOTHING,
   FOOTER_RESULT,
+  finishedLine,
   HOLDER_NOTE,
+  KEEP_MY_WIN,
   leadLine,
   MASTHEAD,
   NEW_MYSTERY,
-  perfectLine,
+  perfectTimingPart,
   REMATCH,
   TAP_TO_REVEAL,
   aheadBehindLine,
@@ -25,7 +26,7 @@ import type { Sfx } from '../fx/sound';
 import { ladder } from '../game/streak';
 import { load, save } from '../store/store';
 import { announce } from './a11y';
-import { endChart, marketInCash } from './endchart';
+import { CHART_W, endChart, marketInCash } from './endchart';
 import { paperFor } from './paper';
 
 // Strings this screen shows live in src/content/copy.ts; re-exported for existing importers.
@@ -68,7 +69,8 @@ export interface EndModel {
   /** The pot is hidden this round (R40); the line is still here for when it comes back. */
   pot: { pot: number; tonight: number };
   showPot?: boolean;
-  flags: { blind: boolean };
+  /** blind: the crash name waits behind the cover. again: the page is shown a second time (Back, Keep my win): no count, no sound. */
+  flags: { blind: boolean; again?: boolean };
   /** Print the plain line about someone who did nothing under the table (R28: first result only). */
   holderNote?: boolean;
   /** Plain lines printed under the score, such as "4 days in a row" on a daily result. */
@@ -118,6 +120,7 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-chart{display:block;width:100%;height:auto;margin-top:12px;padding:8px 0;border-top:1px solid var(--ink);border-bottom:1px solid var(--ink);box-sizing:content-box;overflow:visible}
 .es-chart-word{font-family:${SANS};font-weight:700;font-size:14px;paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
 .es-moment{margin-top:12px}
+.es-name:focus{outline:none}
 .es-cover{position:relative;display:flex;align-items:center;justify-content:center;width:100%;min-height:88px;padding:12px 16px;overflow:hidden;background:var(--ink);color:var(--bg);font-weight:700;font-size:26px;line-height:1.1;letter-spacing:-0.02em;text-align:center}
 .es-cover i{position:absolute;left:0;right:0;bottom:0;height:4px;background:var(--red);transform-origin:left;transform:scaleX(0);animation:es-fill ${REVEAL_AFTER_MS}ms linear both}
 @keyframes es-fill{to{transform:scaleX(1)}}
@@ -164,9 +167,9 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-footer{font-family:${SANS};font-weight:500;font-size:14px;line-height:1.35;color:var(--sec)}
 .es :is(.es-verdict,.es-news,.es-perfect,.es-stake,.es-vs,.es-misses li,.es-pot,.es-name-sub){text-wrap:pretty}
 @media (max-height: 700px){
-  .es-mast{font-size:26px}
+  .es-mast{padding:6px 0 3px;font-size:24px}
   .es-folio{padding:6px 0}
-  .es-h1{margin-top:8px;font-size:28px}
+  .es-h1{margin-top:8px;font-size:26px}
   .es-verdict{margin-top:4px;font-size:16px}
   .es-chart{margin-top:8px;padding:4px 0}
   .es-moment{margin-top:8px}
@@ -234,8 +237,16 @@ function matches(query: string): boolean {
   }
 }
 
-/** In-app browsers show about 660px: draw a shorter chart there. */
+/** In-app browsers show about 660px. */
 const shortViewport = () => matches('(max-height: 700px)');
+/**
+ * The result chart's least height (R58): 100 px of line at 390 x 660 inside endchart's top and bottom margins,
+ * 120 px on taller screens. Room the page does not need goes to the chart too, up to CHART_MAX.
+ */
+const chartMinHeight = () => (shortViewport() ? 140 : 160);
+const CHART_MAX = 260;
+/** .es-grow's own least height. */
+const GROW_MIN = 8;
 const reducedMotion = () => matches('(prefers-reduced-motion: reduce)');
 
 /** The lead line: the final one at the end of the count; on the way, the final's words ("ahead"/"behind") at every figure, $0 included. */
@@ -285,6 +296,8 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   };
 
   const page = h('main', 'es' + (model.blackBorder ? ' es-black' : ''));
+  // The live region still holds the play screen's last words: a result page starts it empty.
+  announce('');
 
   page.appendChild(h('div', 'es-mast', MASTHEAD));
 
@@ -308,21 +321,22 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     (sold === 0
       ? 'You never sold.'
       : `You sold ${sold === 1 ? 'once' : `${sold} times`} and bought back ${bought === 1 ? 'once' : `${bought} times`}; dots on the price line mark each sale and buy.`);
-  page.appendChild(
-    endChart({
-      balances: result.balances,
-      trades: result.trades,
-      start,
-      other: model.other?.balances,
-      label: chartLabel,
-      ink: paper.ink,
-      red: paper.accent,
-      paper: paper.bg,
-      height: shortViewport() ? 52 : 76,
-      market: marketInCash(result.balances, result.trades, model.closes),
-      closes: model.closes,
-    }),
-  );
+  const chartInput = {
+    balances: result.balances,
+    trades: result.trades,
+    start,
+    other: model.other?.balances,
+    label: chartLabel,
+    ink: paper.ink,
+    red: paper.accent,
+    paper: paper.bg,
+    market: marketInCash(result.balances, result.trades, model.closes),
+    closes: model.closes,
+  };
+  const chartMin = chartMinHeight();
+  let chartH = chartMin;
+  let chartEl: SVGSVGElement | HTMLElement = endChart({ ...chartInput, height: chartH });
+  page.appendChild(chartEl);
 
   // The moment (R44): on a blind page a large "Tap to see what that was" stands where the name and the
   // score will print. The name comes first, in big type; the score a beat later.
@@ -379,7 +393,11 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   lead.setAttribute('data-lead', '');
   score.appendChild(lead);
   // The last to go, and only on a very short screen: the lead above says the score.
-  score.appendChild(optional(h('p', 'es-perfect', perfectLine(result.perfectFinal, result.final)), 9));
+  // "You finished with $N" (R49) always stays: it ties the result to the last balance of the play screen.
+  const perfect = h('p', 'es-perfect');
+  perfect.appendChild(optional(h('span', '', `${perfectTimingPart(result.perfectFinal)} `), 9));
+  perfect.appendChild(document.createTextNode(finishedLine(result.final)));
+  score.appendChild(perfect);
   if (model.other?.kind === 'challenger') {
     score.appendChild(optional(h('p', 'es-vs', challengerLine(result.final, model.other.final)), 8));
   }
@@ -401,16 +419,20 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       block.appendChild(optional(h('p', 'es-stake', doubleStakeLine(d.net, d.final)), 4));
       const pair = h('div', 'es-pair');
       pair.appendChild(button('es-dbl', DOUBLE_OR_NOTHING, actions.onDouble));
-      pair.appendChild(button('es-out', bankLabel(d.net), actions.onBank));
+      pair.appendChild(button('es-out', KEEP_MY_WIN, actions.onBank));
       block.appendChild(pair);
     }
     winBlock = block;
   } else if (!won && (model.bestStreak ?? 0) > 0) {
-    score.appendChild(optional(h('p', 'es-best', bestWinningStreakLine(model.bestStreak!)), 7));
+    score.appendChild(h('p', 'es-best', bestWinningStreakLine(model.bestStreak!)));
   }
   // Only a win has this block, so on a blind page it is not even there (no space kept: a gap would be
   // a tell) until the reveal, when it is put in place and slides in; the tap guard covers the move.
   if (winBlock && !model.flags.blind) page.appendChild(winBlock);
+  // The spare room sits above the buttons: the score (and a win's block) fill it at the reveal, so the
+  // buttons and everything under them stay where they are.
+  const grow = h('div', 'es-grow');
+  page.appendChild(grow);
 
   const pair = h('div', 'es-pair');
   // R24: with the double block, its red button is the only filled one.
@@ -448,11 +470,10 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     page.appendChild(ul);
   }
 
-  page.appendChild(h('div', 'es-grow'));
-
   if (model.showPot) page.appendChild(hideUntilReveal(h('p', 'es-pot', potResultLine(model.pot.pot, model.pot.tonight))));
 
-  const links = h('div', 'es-foot');
+  // The foot links are the last extra to go: only when the buttons (a win's double-or-keep choice) need the room.
+  const links = optional(h('div', 'es-foot'), 10);
   if (actions.onDaily) links.appendChild(button('', DAILY_CRASH, actions.onDaily));
   if (actions.onPick) links.appendChild(button('', PICK_A_CRASH, actions.onPick));
   if (actions.onCollection) links.appendChild(button('', YOUR_COLLECTION, actions.onCollection));
@@ -489,7 +510,28 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
    */
   const fit = () => {
     if (destroyed) return;
-    const over = () => document.documentElement.scrollHeight > window.innerHeight + 0.5;
+    // Laid out at its least height first: the extras are fitted around that, then the chart takes the room left.
+    const w = chartEl.getBoundingClientRect().width;
+    const scale = w > 0 ? w / CHART_W : 1;
+    chartEl.style.height = `${chartMin * scale}px`;
+    trim();
+    const spare = Math.max(0, grow.getBoundingClientRect().height - GROW_MIN);
+    const H = Math.min(CHART_MAX, Math.max(chartMin, Math.floor(chartMin + spare / scale)));
+    chartEl.style.height = '';
+    if (H !== chartH) {
+      chartH = H;
+      const next = endChart({ ...chartInput, height: H });
+      chartEl.replaceWith(next);
+      chartEl = next;
+    }
+  };
+  const trim = () => {
+    // Over when the window scrolls, or when the page outgrows its own least height (the column's bottom
+    // padding would hide that from the scroll height, but the spare room above the buttons is gone then).
+    const least = parseFloat(getComputedStyle(page).minHeight);
+    const over = () =>
+      document.documentElement.scrollHeight > window.innerHeight + 0.5 ||
+      (least > 0 && page.getBoundingClientRect().height > least + 0.5);
     for (const e of trimmable) e.removeAttribute('data-trim');
     if (!over()) return;
     const ranked = trimmable
@@ -502,12 +544,32 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     }
   };
   /**
+   * The name's height in the moment, measured off to the side (a focused cover keeps its focus). Before
+   * the reveal the page is fitted with the name in place of the taller cover: the cover's extra height
+   * comes out of the room the score fills, and the buttons under it stay put.
+   */
+  const nameHeight = (): number => {
+    const probe = h('div', 'es-moment');
+    probe.style.cssText = `position:absolute;visibility:hidden;margin:0;width:${moment.getBoundingClientRect().width}px`;
+    probe.append(...nameNodes(false));
+    page.appendChild(probe);
+    const height = probe.getBoundingClientRect().height;
+    probe.remove();
+    return height;
+  };
+  let revealed = false;
+  /**
    * Before the reveal: fit as the page will be once revealed (the score and any win block laid out,
    * unseen), so nothing that shows now has to vanish when the score arrives.
    */
   let scoreShown = false;
   const refit = () => {
     if (scoreShown || destroyed) return fit();
+    const nameH = revealed ? 0 : nameHeight();
+    if (nameH > 0) {
+      moment.style.height = `${nameH}px`;
+      moment.style.overflow = 'hidden';
+    }
     const insertWin = !!winBlock && !winBlock.isConnected;
     score.hidden = false;
     score.style.visibility = 'hidden';
@@ -518,6 +580,8 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     if (model.double) newLink.hidden = true;
     printNews();
     fit();
+    moment.style.height = '';
+    moment.style.overflow = '';
     newsBox.replaceChildren();
     score.hidden = true;
     score.style.visibility = '';
@@ -535,6 +599,11 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     const target = result.lead;
     const up = Math.round(target) > 0;
     const down = Math.round(target) < 0;
+    // Shown again (Back from a menu, Keep my win): the figure is known, so no count and no sound.
+    if (model.flags.again) {
+      lead.textContent = leadText(target, target);
+      return;
+    }
     if (reducedMotion() || Math.round(target) === 0) {
       lead.textContent = leadText(target, target);
       if (up) model.sfx?.payout(true);
@@ -559,11 +628,21 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     later(step, COUNT_STEP_MS);
   };
 
-  const printName = (animate: boolean) => {
+  const nameNodes = (animate: boolean): HTMLElement[] => {
     const name = h('p', 'es-name' + (animate ? ' es-wipe' : ''), parts.name);
     const nodes: HTMLElement[] = [name];
     if (parts.rest) nodes.push(h('p', 'es-name-sub', parts.rest));
+    return nodes;
+  };
+  const printName = (animate: boolean) => {
+    // A keyboard or screen reader user on the cover lands on the name, not on <body>, when the cover goes.
+    const hadFocus = !!document.activeElement && moment.contains(document.activeElement);
+    const nodes = nameNodes(animate);
     moment.replaceChildren(...nodes);
+    if (hadFocus) {
+      nodes[0].setAttribute('tabindex', '-1');
+      nodes[0].focus({ preventScroll: true });
+    }
   };
 
   const showScore = (animate: boolean) => {
@@ -591,7 +670,6 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     count();
   };
 
-  let revealed = false;
   const reveal = (tapped: boolean) => {
     if (revealed || destroyed) return;
     revealed = true;

@@ -63,7 +63,7 @@ for (const height of [660, 844]) {
     await expect(page.locator('.es-double h2')).toHaveText('Wins in a row: 1');
     await expect(page.locator('.es-double h2')).toBeInViewport({ ratio: 1 });
     await expect(page.getByRole('button', { name: 'Double or nothing' })).toBeInViewport({ ratio: 1 });
-    await expect(page.getByRole('button', { name: /^Bank \$/ })).toBeInViewport({ ratio: 1 });
+    await expect(page.getByRole('button', { name: 'Keep my win' })).toBeInViewport({ ratio: 1 });
     await expect(page.locator('.es-lead')).toHaveText(/ahead of someone who did nothing/);
     await expect(page.locator('.es-perfect')).toContainText('You finished with $');
     await expect(page.getByText(/Your pot/)).toHaveCount(0);
