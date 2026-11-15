@@ -24,6 +24,10 @@ import {
   slowCountsFor,
   pickSlowDays,
   buildSchedule,
+  stepHold,
+  CASH_FACTOR,
+  RAMP_UP,
+  RAMP_DOWN,
   type Step,
 } from '../../src/game/schedule';
 import { parseHeadlineRows, toHeadlines } from '../../scripts/lib/headlines';
@@ -138,12 +142,14 @@ describe('buildSchedule on every real run (no headlines)', () => {
         expect(fallBudgetFor(run)).toBe(isLong(run) ? LONG_FALL_BUDGET_MS : FALL_BUDGET_MS);
       });
 
-      it('ordinary fall steps: at most 1,500 ms, or exactly 3,000 ms in a short fall (R27); a quiet day 1 is short', () => {
+      it('ordinary fall steps: at most 1,500 ms (3,000 ms in a short fall), or a ramp down from a slow day (R27, R35); a quiet day 1 is short', () => {
         steps.forEach((s, i) => {
           if (s.phase !== 'fall' || s.slow) return;
           if (i === 0) expect(s.holdMs).toBeLessThanOrEqual(FIRST_STEP_MAX_MS);
-          else if (isShortFall(run)) expect(s.holdMs).toBe(SHORT_QUIET_MS);
-          else expect(s.holdMs).toBeLessThanOrEqual(MAX_QUIET_MS);
+          else {
+            const cap = isShortFall(run) ? SHORT_QUIET_MS : MAX_QUIET_MS;
+            expect(s.holdMs).toBeLessThanOrEqual(Math.max(cap, Math.ceil(RAMP_DOWN * steps[i - 1].holdMs) + 1));
+          }
         });
       });
 
@@ -213,9 +219,10 @@ describe('buildSchedule on every real run (no headlines)', () => {
         const total = sum(steps);
         // R27: ceiling 150 s (long falls run about 140 s).
         expect(total).toBeLessThanOrEqual(150_000);
-        // A very short run simply finishes sooner (R22, R27): at least 25 s, less a short quiet day 1.
+        // A very short run simply finishes sooner (R22, R27): at least 25 s, less a short quiet day 1 and
+        // the gentle ramp from it up to the 3 s days (R35: 800, 1,280, 2,048 ms in place of 3,000 each).
         if (isShortFall(run)) {
-          expect(total).toBeGreaterThanOrEqual(25_000 - (SHORT_QUIET_MS - FIRST_STEP_MAX_MS));
+          expect(total).toBeGreaterThanOrEqual(25_000 - (SHORT_QUIET_MS - FIRST_STEP_MAX_MS) - (3 * SHORT_QUIET_MS - 800 - 1280 - 2048));
           return;
         }
         // A fall the 1,500 ms cap cannot fill finishes sooner too: at least 60 s.
@@ -330,7 +337,11 @@ describe('buildSchedule with the real headline files (R22)', () => {
       const first = steps.findIndex((s) => s.slow);
       expect(sum(steps.slice(0, first))).toBeLessThanOrEqual(FIRST_SLOW_BY_MS);
       const quietCap = run.fallEndIndex < SHORT_FALL_DAYS ? SHORT_QUIET_MS : MAX_QUIET_MS;
-      for (const s of steps) if (s.phase === 'fall' && !s.slow) expect(s.holdMs).toBeLessThanOrEqual(quietCap);
+      steps.forEach((s, i) => {
+        if (s.phase === 'fall' && !s.slow && i > 0) {
+          expect(s.holdMs).toBeLessThanOrEqual(Math.max(quietCap, Math.ceil(RAMP_DOWN * steps[i - 1].holdMs) + 1));
+        }
+      });
       expect(sum(steps)).toBeLessThanOrEqual(150_000);
     });
   }
@@ -370,6 +381,68 @@ describe('first red day and a prompt start, on every run with its real headlines
       expect(slow.length).toBeLessThanOrEqual(MAX_SLOW);
       const { decoys } = pickSlowDays(run, headlines);
       checkDecoys(run, slow, decoys);
+    });
+  }
+});
+
+describe('smooth pacing (R35): one step a day, gradual changes, quicker quiet days in cash', () => {
+  for (const run of runs) {
+    const file = join(DIR, `${run.id}.headlines.csv`);
+    const headlines = existsSync(file) ? toHeadlines(parseHeadlineRows(readFileSync(file, 'utf8')).rows, run) : [];
+    const steps = buildSchedule(run, headlines);
+    /** The holds a player sees who stays in the market, or who is in cash from step 1 on. */
+    const inMarket = steps.map((s) => stepHold(s, true));
+    const inCash = steps.map((s, i) => stepHold(s, i === 0));
+
+    for (const [name, holds] of [['in the market', inMarket], ['in cash', inCash]] as const) {
+      it(`${run.id} ${name}: no step under 0.6x or over 1.6x the step before, except the jump into a slow day`, () => {
+        for (let i = 1; i < steps.length; i++) {
+          const r = `step ${i} (day ${steps[i].dayIndex}): ${holds[i - 1]} -> ${holds[i]}`;
+          expect(holds[i], r).toBeGreaterThanOrEqual(RAMP_DOWN * holds[i - 1] - 1);
+          if (!steps[i].slow) expect(holds[i], r).toBeLessThanOrEqual(RAMP_UP * holds[i - 1] + 1);
+        }
+      });
+    }
+
+    it(`${run.id}: the one or two quiet steps before a slow day ramp up (as far as the quiet cap allows)`, () => {
+      const cap = run.fallEndIndex < SHORT_FALL_DAYS ? SHORT_QUIET_MS : MAX_QUIET_MS;
+      for (let i = 2; i < steps.length; i++) {
+        if (!steps[i].slow || steps[i - 1].slow || steps[i - 2].slow) continue;
+        const want = Math.min(cap, RAMP_UP * inMarket[i - 2]);
+        expect(inMarket[i - 1], `before slow step ${i}`).toBeGreaterThanOrEqual(want - 1);
+      }
+    });
+
+    it(`${run.id}: quiet fall days in cash run about 20% quicker; slow days and the fast-forward do not change`, () => {
+      expect(CASH_FACTOR).toBe(0.8);
+      steps.forEach((s, i) => {
+        const c = stepHold(s, false);
+        expect(c).toBeLessThanOrEqual(s.holdMs);
+        expect(c).toBeGreaterThanOrEqual(125);
+        if (s.slow || s.phase === 'forward' || i === 0) expect(c).toBe(s.holdMs);
+      });
+      // In all, about 20% off the quiet days, less what the 125 ms floor and the gentle slow-down after
+      // slow days hold up. Falls pinned near the floor (quiet steps averaging 250 ms or less) are exempt.
+      const quiet = steps.map((_, i) => i).filter((i) => i > 0 && !steps[i].slow && steps[i].phase === 'fall');
+      const usual = quiet.reduce((a, i) => a + steps[i].holdMs, 0);
+      const cash = quiet.reduce((a, i) => a + stepHold(steps[i], false), 0);
+      if (quiet.length && usual / quiet.length > 250) {
+        expect(cash / usual).toBeLessThan(0.91);
+        expect(cash / usual).toBeGreaterThanOrEqual(CASH_FACTOR - 0.01);
+      }
+      // Never quicker than 80% of the usual hold, except where the gentle ramp (R35) carries it.
+      quiet.forEach((i) => {
+        const c = stepHold(steps[i], false);
+        expect(c, `step ${i}`).toBeGreaterThanOrEqual(Math.min(CASH_FACTOR * steps[i].holdMs, RAMP_DOWN * inCash[i - 1]) - 1);
+      });
+    });
+
+    it(`${run.id}: every fall day is its own step except where the long fall cannot fit (one step = one trading day)`, () => {
+      const fall = steps.filter((s) => s.phase === 'fall');
+      if (run.fallEndIndex <= LONG_FALL_DAYS) {
+        // Falls up to 500 days: one step a day, every day.
+        expect(fall.length).toBe(run.fallEndIndex);
+      }
     });
   }
 });

@@ -14,6 +14,20 @@ export interface Step {
   holdMs: number;
   phase: 'fall' | 'forward';
   slow: boolean;
+  /** The hold while the player is in cash (quiet fall days run quicker, R35); holdMs when absent. */
+  cashMs?: number;
+}
+
+/** R35: a step holds at most RAMP_UP times the step before (except the jump into a slow day)... */
+export const RAMP_UP = 1.6;
+/** ...and at least RAMP_DOWN times it. */
+export const RAMP_DOWN = 0.6;
+/** R35: quiet fall days while the player is in cash hold this fraction of their usual time. */
+export const CASH_FACTOR = 0.8;
+
+/** How long a step holds for a player in the market (`invested`) or in cash. */
+export function stepHold(step: Step, invested: boolean): number {
+  return invested ? step.holdMs : step.cashMs ?? step.holdMs;
 }
 
 /*
@@ -273,13 +287,17 @@ function layoutFall(run: RunData, slow: Set<number>, fe: number): Step[] {
 
   // --- A very short fall (R23): one step a day at fixed holds (a quiet day 1 is short: a prompt start).
   if (fe < SHORT_FALL_DAYS) {
-    const steps: Step[] = [];
-    for (let d = 0; d < fe; d++) {
-      const isSlow = slow.has(d);
-      const hold = isSlow ? SHORT_SLOW_MS : d === 0 ? FIRST_STEP_MAX_MS : SHORT_QUIET_MS;
-      steps.push({ dayIndex: d, holdMs: hold, phase: 'fall', slow: isSlow });
-    }
-    return steps;
+    // R35: the quiet days after a quick day 1, and after each slow day, ramp gently to SHORT_QUIET_MS.
+    const flags = Array.from({ length: fe }, (_, d) => slow.has(d));
+    const holds = smooth(flags.map(() => SHORT_QUIET_MS), flags, SHORT_QUIET_MS, SHORT_SLOW_MS);
+    const cash = smooth(
+      flags.map((_, d) => SHORT_QUIET_MS * (d === 0 ? 1 : CASH_FACTOR)), flags, SHORT_QUIET_MS * CASH_FACTOR, SHORT_SLOW_MS,
+    );
+    return flags.map((isSlow, d) => {
+      const step: Step = { dayIndex: d, holdMs: holds[d], phase: 'fall', slow: isSlow };
+      if (cash[d] !== holds[d]) step.cashMs = cash[d];
+      return step;
+    });
   }
 
   // --- Per-day hold for the other fall days: shorter as the recent swing grows.
@@ -318,71 +336,131 @@ function layoutFall(run: RunData, slow: Set<number>, fe: number): Step[] {
     fillCapped(after, weight, budget - OPENING_TARGET_MS, MAX_QUIET_MS, ms);
   }
 
-  // --- Group quiet days into steps of at least MIN_STEP_MS. Day 0 and every slow
-  // day are steps of their own; a group never crosses a slow day.
-  const groups: Group[] = [];
-  let acc = 0;
-  const close = (d: number) => {
-    const prev = groups[groups.length - 1];
-    // A short group joins the quiet step just before it (contiguous, since slow days
-    // are steps of their own); day 0 stays alone.
-    if (acc < MIN_STEP_MS && prev && !prev.slow && prev.dayIndex !== 0 && prev.ms + acc <= MAX_QUIET_MS) {
-      prev.dayIndex = d;
-      prev.ms += acc;
-    } else {
-      groups.push({ dayIndex: d, ms: acc, slow: false });
+  // --- Steps: every fall day is its own step (R35: one step, one trading day). Only a long fall
+  // (over LONG_FALL_DAYS) that cannot fit its budget otherwise groups quiet days into steps of at
+  // least MIN_STEP_MS; a group never crosses a slow day and day 0 stays alone.
+  const group = fe > LONG_FALL_DAYS;
+  const layout = (scale: number): Group[] => {
+    const groups: Group[] = [];
+    let acc = 0;
+    const close = (d: number) => {
+      const prev = groups[groups.length - 1];
+      if (group && acc < MIN_STEP_MS && prev && !prev.slow && prev.dayIndex !== 0 && prev.ms + acc <= MAX_QUIET_MS) {
+        prev.dayIndex = d;
+        prev.ms += acc;
+      } else groups.push({ dayIndex: d, ms: acc, slow: false });
+      acc = 0;
+    };
+    for (let d = 0; d < fe; d++) {
+      if (slow.has(d)) {
+        groups.push({ dayIndex: d, ms: SLOW_MS, slow: true });
+        continue;
+      }
+      acc += (ms.get(d) ?? 0) * scale;
+      const nextBreaks = d + 1 >= fe || slow.has(d + 1);
+      if (!group || d === 0 || acc >= MIN_STEP_MS || nextBreaks) close(d);
     }
-    acc = 0;
+    return groups;
   };
-  for (let d = 0; d < fe; d++) {
-    if (slow.has(d)) {
-      groups.push({ dayIndex: d, ms: SLOW_MS, slow: true });
-      continue;
+  const ideal = (g: Group, factor: number) =>
+    g.slow ? SLOW_MS : Math.min(MAX_QUIET_MS, Math.max(MIN_STEP_MS, g.ms)) * factor;
+  // The first step is always in the market (nobody has sold yet), so it keeps its hold in both.
+  const holdsFor = (groups: Group[], factor: number) =>
+    smooth(groups.map((g, i) => ideal(g, i === 0 ? 1 : factor)), groups.map((g) => g.slow), MAX_QUIET_MS * factor);
+  const total = (scale: number) => holdsFor(layout(scale), 1).reduce((a, x) => a + x, 0);
+
+  // --- Smoothing (R35) adds time after and before slow days; shrink the quiet days until the fall
+  // fits its budget again. A fall the caps cannot fill simply finishes sooner.
+  let scale = 1;
+  if (total(1) > fallBudget) {
+    let lo = 0;
+    let hi = 1;
+    for (let k = 0; k < 40; k++) {
+      const mid = (lo + hi) / 2;
+      if (total(mid) > fallBudget) hi = mid;
+      else lo = mid;
     }
-    acc += ms.get(d) ?? 0;
-    const nextBreaks = d + 1 >= fe || slow.has(d + 1);
-    if (d === 0 || acc >= MIN_STEP_MS || nextBreaks) close(d);
+    scale = lo;
   }
-
-  // --- Floors, then give back any excess from quiet steps after the first slow step.
-  for (const g of groups) if (!g.slow) g.ms = Math.max(g.ms, MIN_STEP_MS);
-  for (let pass = 0; pass < 8; pass++) {
-    const total = groups.reduce((a, g) => a + g.ms, 0);
-    const excess = total - fallBudget;
-    if (excess <= 0.5) break;
-    const flexible = groups.filter((g) => !g.slow && g.dayIndex > firstSlow && g.ms > MIN_STEP_MS);
-    const room = flexible.reduce((a, g) => a + (g.ms - MIN_STEP_MS), 0);
-    if (room <= 0) break;
-    const take = Math.min(1, excess / room);
-    for (const g of flexible) g.ms -= (g.ms - MIN_STEP_MS) * take;
-  }
-
-  return groups.map((g, i) => ({
-    dayIndex: g.dayIndex,
-    holdMs: g.slow
-      ? SLOW_MS
-      : Math.min(i === 0 ? FIRST_STEP_MAX_MS : MAX_QUIET_MS, Math.max(MIN_STEP_MS, Math.round(g.ms))),
-    phase: 'fall' as const,
-    slow: g.slow,
-  }));
+  const groups = layout(scale);
+  const holds = holdsFor(groups, 1);
+  const cash = holdsFor(groups, CASH_FACTOR);
+  return groups.map((g, i) => {
+    const step: Step = { dayIndex: g.dayIndex, holdMs: holds[i], phase: 'fall', slow: g.slow };
+    if (cash[i] !== holds[i]) step.cashMs = cash[i];
+    return step;
+  });
 }
 
-/** Fast-forward: sample the days after the fall evenly, ending on the last day, sharing forwardBudgetFor(run). */
+/**
+ * R35: steps change pace gradually. One pass from the first step: a quiet step holds between RAMP_DOWN
+ * and RAMP_UP times the step before (so the steps after a slow day slow down step by step), and the one
+ * or two quiet steps before a slow day ramp up by RAMP_UP each (to at most `cap`); the slow day itself
+ * may then begin with a jump. A quiet first step holds at most FIRST_STEP_MAX_MS. Whole milliseconds.
+ */
+function smooth(ideal: number[], slow: boolean[], cap: number, slowMs = SLOW_MS): number[] {
+  const out: number[] = [];
+  for (let j = 0; j < ideal.length; j++) {
+    if (slow[j]) {
+      out.push(slowMs);
+      continue;
+    }
+    let x = ideal[j];
+    if (j === 0) x = Math.min(x, FIRST_STEP_MAX_MS);
+    else {
+      const prev = out[j - 1];
+      const lo = Math.ceil(RAMP_DOWN * prev);
+      const hi = Math.floor(RAMP_UP * prev);
+      x = Math.min(Math.max(x, lo), hi);
+      if (slow[j + 1] || slow[j + 2]) x = Math.max(x, Math.min(cap, hi));
+    }
+    out.push(Math.max(MIN_STEP_MS, Math.round(x)));
+  }
+  return out;
+}
+
+/**
+ * Fast-forward: sample the days after the fall evenly, ending on the last day, sharing forwardBudgetFor(run)
+ * exactly. R35: the first forward steps slow down gently from the last fall step (each at least RAMP_DOWN
+ * times the one before), then the rest share what is left; fewer steps are used when the ramp needs it.
+ */
 function appendForward(steps: Step[], run: RunData, fe: number): Step[] {
   const days = run.closes.length - fe;
-  if (days > 0) {
-    const fwd = forwardBudgetFor(run);
-    const k = Math.min(days, Math.floor(fwd / MIN_STEP_MS));
-    const base = Math.floor(fwd / k);
-    const extra = fwd - base * k;
-    for (let j = 1; j <= k; j++) {
-      steps.push({
-        dayIndex: fe - 1 + Math.ceil((j * days) / k),
-        holdMs: base + (j <= extra ? 1 : 0),
-        phase: 'forward',
-        slow: false,
-      });
+  if (days <= 0) return steps;
+  const fwd = forwardBudgetFor(run);
+  const last = steps.length ? steps[steps.length - 1].holdMs : MIN_STEP_MS;
+  const shape = (k: number, base: number) => {
+    const out: number[] = [];
+    let ramp = last;
+    for (let j = 0; j < k; j++) {
+      ramp *= RAMP_DOWN;
+      out.push(Math.max(base, ramp));
     }
+    return out;
+  };
+  const sumOf = (xs: number[]) => xs.reduce((a, x) => a + x, 0);
+  let k = Math.min(days, Math.floor(fwd / MIN_STEP_MS));
+  while (k > 1 && sumOf(shape(k, MIN_STEP_MS)) > fwd) k--;
+  // The base hold that makes the k steps add up to the budget.
+  let lo = MIN_STEP_MS;
+  let hi = fwd;
+  for (let it = 0; it < 50; it++) {
+    const mid = (lo + hi) / 2;
+    if (sumOf(shape(k, mid)) > fwd) hi = mid;
+    else lo = mid;
+  }
+  let holds = shape(k, lo).map((x) => Math.max(MIN_STEP_MS, Math.floor(x)));
+  // Hand out the leftover milliseconds one at a time from the last step back, so the total is exact.
+  let left = fwd - sumOf(holds);
+  for (let j = k - 1; left > 0; j = j > 0 ? j - 1 : k - 1, left--) holds[j]++;
+  holds = holds.slice(0, k);
+  for (let j = 1; j <= k; j++) {
+    steps.push({
+      dayIndex: fe - 1 + Math.ceil((j * days) / k),
+      holdMs: holds[j - 1],
+      phase: 'forward',
+      slow: false,
+    });
   }
   return steps;
 }

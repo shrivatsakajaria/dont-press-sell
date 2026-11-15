@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { commentaryFor, NEUTRAL_LINES } from '../../src/content/commentary';
+import { commentaryFor, isPlainLine, NEUTRAL_LINES } from '../../src/content/commentary';
 
 type Ctx = Parameters<typeof commentaryFor>[0];
 
@@ -102,30 +102,31 @@ describe('commentaryFor', () => {
     for (const l of seen) expect(l).not.toMatch(/bounce after (three|two|four) falling/);
   });
 
-  it('can say down 40% from the peak when 40% or more has gone', () => {
+  it('can say more than 35% below the peak when 40% has gone (R37: "more than", so it stays true)', () => {
     const closes = [90, 80, 70, 60];
     const seen = lines(base({ closes, balance: 6000 }));
-    expect(seen.has('The market is down 40% from the peak. Still holding?')).toBe(true);
+    expect(seen.has('The market is more than 35% below the peak. Still holding?')).toBe(true);
+    for (const l of seen) expect(l).not.toMatch(/more than 40%/);
   });
 
   it('measures the peak from the pre-run high and rounds to whole numbers', () => {
     // High 120, close 96: 20% below the high, though only 4% below the run's first close.
     const seen = lines(base({ closes: [100, 96], high: 120, preCloses: pre(105, 120) }));
-    expect(seen.has('The market is down 20% from the peak. Officially a bear market.')).toBe(true);
-    // 19.9% down must not read as 10% or 20%-as-floor-of-something-smaller.
+    expect(seen.has('More than 15% below the peak. Officially a bear market.')).toBe(true);
+    // 19.9% down must not read as more than 20%, nor as a bear market.
     const s2 = lines(base({ closes: [100, 80.1], high: 100, preCloses: pre(100, 100) }));
     for (const l of s2) {
-      expect(l).not.toMatch(/down 10% from the peak/);
+      expect(l).not.toMatch(/more than 20%/i);
       expect(l).not.toContain('bear market');
     }
-    expect(s2.has('The market is down almost 20% from the peak. The polite word for this is a correction.')).toBe(true);
+    expect(s2.has('More than 15% off the peak. The polite word for this is a correction.')).toBe(true);
   });
 
   it('rounds one-day moves instead of flooring them', () => {
     const closes = [96.01];
     const seen = lines(base({ closes, preCloses: pre(100), high: 100 }));
-    expect(seen.has('The market fell 4% in one day. Not a quiet one.')).toBe(true);
-    for (const l of seen) expect(l).not.toContain('3%');
+    expect(seen.has('The market fell 4% in a single day. Not a quiet one.')).toBe(true);
+    for (const l of seen) expect(l).not.toContain('fell 3%');
   });
 
   it('rounds the percentage on your money', () => {
@@ -218,18 +219,20 @@ describe('commentaryFor', () => {
     }
   });
 
-  it('takes every sombre line from the neutral set', () => {
+  it('takes every sombre line from the plain set (no jokes), or none when no plain line is true', () => {
     expect(NEUTRAL_LINES.length).toBeGreaterThanOrEqual(8);
     const rand = lcg(7);
     for (let k = 0; k < 500; k++) {
       const c = { ...randomCtx(rand), sombre: true };
-      expect(NEUTRAL_LINES).toContain(commentaryFor(c));
+      const l = commentaryFor(c);
+      if (l) expect(isPlainLine(l), l).toBe(true);
     }
   });
 
   it('keeps neutral lines true: no fall wording on a rising day', () => {
     const seen = lines(base({ closes: [99, 98, 99.5], sombre: true }));
-    for (const l of seen) expect(l).not.toMatch(/fall|lower|loss/i);
+    // Daily wording only: a rising day can still be lower than a week ago.
+    for (const l of seen) expect(l).not.toMatch(/fall\.|fall again|closes lower|losses|fell/i);
   });
 
   it('only says markets recover when yesterday was below the high so far', () => {
@@ -269,8 +272,8 @@ describe('commentaryFor', () => {
       const peak = Math.max(c.high, ...series);
       const dd = ((peak - px) / peak) * 100;
       let m: RegExpMatchArray | null;
-      if ((m = l.match(/down (\d+)% from the peak/))) {
-        expect(Number(m[1])).toBe(Math.round(dd));
+      if ((m = l.match(/more than (\d+)% (?:below|off) the peak/i))) {
+        expect(dd).toBeGreaterThan(Number(m[1]));
         checked++;
       }
       if ((m = l.match(/(?:fell|lost|rose) (\d+)% in (?:one|a) day/))) {
@@ -278,14 +281,14 @@ describe('commentaryFor', () => {
         expect(/rose/.test(l) ? chg > 0 : chg < 0).toBe(true);
         checked++;
       }
-      if ((m = l.match(/down (\d+)% since day one/))) {
+      if ((m = l.match(/more than (\d+)% (?:down since day one|below where it began)/))) {
         const f = c.closes[0];
-        expect(Number(m[1])).toBe(Math.round(((f - px) / f) * 100));
+        expect(((f - px) / f) * 100).toBeGreaterThan(Number(m[1]));
         checked++;
       }
-      if ((m = l.match(/up (\d+)% from its lowest close/))) {
+      if ((m = l.match(/more than (\d+)% up from its lowest close/))) {
         const low = Math.min(...c.closes.slice(0, c.dayIndex + 1));
-        expect(Number(m[1])).toBe(Math.round(((px - low) / low) * 100));
+        expect(((px - low) / low) * 100).toBeGreaterThan(Number(m[1]));
         checked++;
       }
       if ((m = l.match(/(Down|Up) (\d+)% on your money/))) {
@@ -298,7 +301,7 @@ describe('commentaryFor', () => {
         const dir = m[1].toLowerCase() === 'down' ? -1 : 1;
         let run = 0;
         for (let j = n; j >= 1 && (series[j] - series[j - 1]) * dir > 0; j--) run++;
-        expect(W[m[2]] ?? Number(m[2])).toBe(run);
+        expect(run).toBeGreaterThanOrEqual(W[m[2]] ?? Number(m[2]));
         if (dir === -1) expect(run).toBeLessThan(n);
         checked++;
       }
@@ -332,8 +335,8 @@ describe('round 2 counterexamples', () => {
 
   it('N2: never prints a bare 20% for a fall short of 20%', () => {
     const seen = lines(base({ closes: [90, 80.2], preCloses: fall(100, 91) }));
-    for (const l of seen) expect(l).not.toMatch(/down 20% from the peak/);
-    expect([...seen].some((l) => l.includes('almost 20%'))).toBe(true);
+    for (const l of seen) expect(l).not.toMatch(/more than 20%/i);
+    expect([...seen].some((l) => /more than 15%/i.test(l))).toBe(true);
   });
 
   it('N3/N5: half and third lines stay inside their bands', () => {
@@ -350,8 +353,8 @@ describe('round 2 counterexamples', () => {
 
   it('N4: held-through figure is the player’s own fall from the run high', () => {
     const seen = lines(base({ closes: [100, 90, 80], high: 120, balance: 8000, preCloses: fall(120, 101) }));
-    for (const l of seen) expect(l).not.toMatch(/held through a fall of (3\d)%/);
-    expect(seen.has('You have held through a fall of 20% so far.')).toBe(true);
+    for (const l of seen) expect(l).not.toMatch(/held through a fall of more than (2\d|3\d)%/);
+    expect(seen.has('You have held through a fall of more than 15% so far.')).toBe(true);
   });
 
   it('N6: a dip line needs a rise of at least 1% the day before', () => {
@@ -372,7 +375,32 @@ describe('round 2 counterexamples', () => {
 
   it('N8: single-day lines name the market', () => {
     const seen = lines(base({ closes: [96.01] }));
-    expect(seen.has('The market fell 4% in one day. Not a quiet one.')).toBe(true);
+    expect(seen.has('The market fell 4% in a single day. Not a quiet one.')).toBe(true);
     for (const l of seen) expect(l).not.toMatch(/^(Down|Up|A fall of) \d+%/);
+  });
+});
+
+describe('in cash, money lines say the cash is not moving (lane C finding)', () => {
+  it('no in-cash line describes the player’s money as falling or rising, over many random contexts', () => {
+    const rand = lcg(4242);
+    let cashLines = 0;
+    for (let k = 0; k < 3000; k++) {
+      const c = { ...randomCtx(rand), invested: false, neverSold: false, sombre: false };
+      if (c.dayIndex === 0) continue;
+      for (let r = 0; r < 3; r++) {
+        const l = commentaryFor({ ...c, rng: lcg(k * 13 + r) });
+        expect(l).not.toMatch(/on your money|is now \$|where you started/);
+        if (/\$/.test(l)) {
+          expect(l).toMatch(/sitting in cash/);
+          cashLines++;
+        }
+      }
+    }
+    expect(cashLines).toBeGreaterThan(0);
+  });
+
+  it('pairs the cash with a market fact', () => {
+    const seen = lines(base({ closes: [90, 85, 80], invested: false, neverSold: false, balance: 8782 }));
+    expect(seen.has('Your $8,782 is sitting in cash. The market is more than 15% below the peak.')).toBe(true);
   });
 });

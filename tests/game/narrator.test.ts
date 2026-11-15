@@ -59,12 +59,16 @@ describe('createNarrator', () => {
     expect(c.sombre).toBe(false);
   });
 
-  test('the commentary never repeats the line shown on the step before', () => {
+  test('a line, once replaced, never comes back; and no digit-years or exclamation marks', () => {
     const n = createNarrator(run, [], { real: false, rng: mulberry32(3), start: 10000 });
+    const gone = new Set<string>();
     let prev = '';
     for (let d = 0; d < closes.length; d++) {
       const { commentary } = n.step(d, d ? d - 1 : null, 10000 * (closes[d] / closes[0]), []);
-      expect(commentary).not.toBe(prev);
+      if (commentary !== prev) {
+        if (commentary) expect(gone.has(commentary)).toBe(false);
+        gone.add(prev);
+      }
       expect(commentary).not.toMatch(/!|\b(19|20)\d\d\b/);
       prev = commentary;
     }

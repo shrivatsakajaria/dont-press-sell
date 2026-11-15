@@ -59,7 +59,9 @@ test('a second first sale shows the line again when storage is blocked', async (
   await page.clock.runFor(2000);
   await page.locator('button.act').click();
   await expect(page.getByText(FIRST_SALE)).toBeVisible();
-  await page.clock.runFor(40_000);
+  // R35: quiet days in cash run quicker, so s2014 ends sooner (about 27 s after this sale); stop
+  // before the end screen's countdown starts the next game.
+  await page.clock.runFor(32_000);
   await page.getByRole('button', { name: 'Rematch this crash' }).click();
   await expect(page.locator('.folio')).toContainText('Rematch');
   await page.clock.runFor(1500);
