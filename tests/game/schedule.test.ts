@@ -7,6 +7,7 @@ import {
   FORWARD_BUDGET_MS,
   LONG_FALL_BUDGET_MS,
   MAX_QUIET_MS,
+  MAX_REFILL_MS,
   SLOW_MS,
   DECOYS,
   MAX_SLOW,
@@ -66,6 +67,13 @@ function topMoves(run: RunData, count: number): number[] {
     .map((x) => x.d)
     .sort((a, b) => a - b);
 }
+
+/**
+ * The longest ordinary fall step (R16, R27): MAX_QUIET_MS, or MAX_REFILL_MS after an R59 red day, where the
+ * quiet days take back the time the quick opening saved.
+ */
+const quietCap = (_run: RunData, red: number | null, day: number) =>
+  red !== null && day > red ? MAX_REFILL_MS + 1e-6 : MAX_QUIET_MS; // whole frames: 120 x (1000 / 60) is a hair over 2,000
 
 const absMove = (run: RunData, d: number) => Math.abs(run.closes[d] / run.closes[d - 1] - 1);
 
@@ -145,14 +153,15 @@ describe('buildSchedule on every real run (no headlines)', () => {
         expect(fallBudgetFor(run)).toBe(isLong(run) ? LONG_FALL_BUDGET_MS : FALL_BUDGET_MS);
       });
 
-      it('ordinary fall steps: at most 1,500 ms (3,000 ms in a short fall), or a ramp down from a slow day (R27, R35); a quiet day 1 is short', () => {
+      it('ordinary fall steps: at most 1,500 ms (3,000 ms in a short fall; 2,000 ms after an R59 red day the opening ran quickly to reach), or a ramp down from a slow day (R27, R35, R59); a quiet day 1 is short', () => {
+        const red = pickSlowDays(run, []).red;
         steps.forEach((s, i) => {
           if (s.phase !== 'fall' || s.slow) return;
           if (i === 0) {
             const climb = Math.ceil(steps[1].holdMs / MAX_STEP_RATIO / FRAME_MS - 1e-9) * FRAME_MS;
             expect(s.holdMs).toBeLessThanOrEqual(Math.max(FIRST_STEP_MAX_MS, climb) + 1e-6);
           } else {
-            const cap = isShortFall(run) ? SHORT_QUIET_MS : MAX_QUIET_MS;
+            const cap = isShortFall(run) ? SHORT_QUIET_MS : quietCap(run, red, s.dayIndex);
             expect(s.holdMs).toBeLessThanOrEqual(Math.max(cap, Math.ceil(RAMP_DOWN * steps[i - 1].holdMs) + 1));
           }
         });
@@ -342,10 +351,11 @@ describe('buildSchedule with the real headline files (R22)', () => {
       expect(slow.length).toBeLessThanOrEqual(MAX_SLOW);
       const first = steps.findIndex((s) => s.slow);
       expect(sum(steps.slice(0, first))).toBeLessThanOrEqual(FIRST_SLOW_BY_MS);
-      const quietCap = run.fallEndIndex < SHORT_FALL_DAYS ? SHORT_QUIET_MS : MAX_QUIET_MS;
+      const red = pickSlowDays(run, headlines).red;
       steps.forEach((s, i) => {
         if (s.phase === 'fall' && !s.slow && i > 0) {
-          expect(s.holdMs).toBeLessThanOrEqual(Math.max(quietCap, Math.ceil(RAMP_DOWN * steps[i - 1].holdMs) + 1));
+          const cap = run.fallEndIndex < SHORT_FALL_DAYS ? SHORT_QUIET_MS : quietCap(run, red, s.dayIndex);
+          expect(s.holdMs).toBeLessThanOrEqual(Math.max(cap, Math.ceil(RAMP_DOWN * steps[i - 1].holdMs) + 1));
         }
       });
       expect(sum(steps)).toBeLessThanOrEqual(150_000);
