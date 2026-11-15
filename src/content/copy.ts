@@ -137,6 +137,22 @@ export const STARTED_AT = (n: number) => `Started at ${dollars(n)}`;
 export const THE_MARKET = 'The market';
 export const SOLD = 'Sold';
 export const BOUGHT = 'Bought';
+// Round 2, lane B (R42): the chart is the market price only.
+/** The faint level at the latest sale close while in cash. */
+export const SOLD_AT = 'Sold at';
+const pctWord = (f: number) => `${Math.round(Math.abs(f) * 100)}%`;
+/** Text alternative for the play chart: the market's move since day 1 and, in cash, today's price against the sale. */
+export const marketChartLabel = (days: number, change: number, vsSale: number | null) =>
+  `Chart of the market price over ${days} ${days === 1 ? 'day' : 'days'}: ` +
+  (Math.round(change * 100) === 0 ? 'level with day 1' : `${change > 0 ? 'up' : 'down'} ${pctWord(change)} since day 1`) +
+  (vsSale === null
+    ? '.'
+    : Math.round(vsSale * 100) === 0
+      ? '. Today\'s price is about where you sold.'
+      : `. Today's price is ${pctWord(vsSale)} ${vsSale < 0 ? 'below' : 'above'} where you sold.`);
+/** The share card's score line (R49 wording). */
+export const perfectFinishedLine = (perfect: number, you: number) =>
+  `Perfect timing finished with ${dollars(perfect)}. You finished with ${dollars(you)}.`;
 
 // Result front page (spec 6.6 to 6.8, 6.12).
 export const LATE_EDITION = 'Late edition';

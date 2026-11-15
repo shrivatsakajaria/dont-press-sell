@@ -2,19 +2,19 @@
 import { describe, expect, it } from 'vitest';
 import { simulate } from '../../src/engine/simulate';
 import type { Trade } from '../../src/engine/types';
-import { CHART_W, endChart, marketInCash } from '../../src/ui/endchart';
+import { CHART_W, endChart, marketInCash, priceFromPlay } from '../../src/ui/endchart';
 import { c2007, c2020 } from '../fixtures/sample-result';
 
 const pts = (d: string): [number, number][] =>
   [...d.matchAll(/[ML]([\d.-]+) ([\d.-]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
 
-function draw(closes: number[], trades: Trade[], other?: number[], height?: number) {
+function draw(closes: number[], trades: Trade[], other?: number[], height?: number, withCloses = true) {
   const r = simulate(closes, trades);
   return {
     r,
     svg: endChart({
       balances: r.balances, trades: r.trades, start: 10000, other, label: 'x', ink: '#000', red: '#a00', paper: '#fff', height,
-      market: marketInCash(r.balances, r.trades, closes),
+      market: marketInCash(r.balances, r.trades, closes), closes: withCloses ? closes : undefined,
     }),
   };
 }
@@ -35,13 +35,48 @@ describe('the market in the result chart (audit 4)', () => {
     expect(marketInCash(simulate(closes, []).balances, [], closes).every((v) => v === null)).toBe(true);
   });
 
-  it('draws a dashed market line only for a player who sold', () => {
-    const held = draw(c2020.closes, []).svg;
-    expect(held.querySelector('[data-line="market"]')).toBeNull();
-    const sold = draw(c2020.closes, [{ dayIndex: 2, side: 'sell' }, { dayIndex: 20, side: 'buy' }]).svg;
-    const path = sold.querySelector('[data-line="market"]')!;
-    expect(path.getAttribute('stroke-dasharray')).toBeTruthy();
-    expect(pts(path.getAttribute('d')!).length).toBeGreaterThan(5);
+  it('R42: the chart is the market price only, one unbroken line through the trades; no money line, no previous go', () => {
+    const closes = [100, 90, 80, 70, 85, 100];
+    const trades: Trade[] = [{ dayIndex: 1, side: 'sell' }, { dayIndex: 3, side: 'buy' }];
+    const { svg } = draw(closes, trades, closes.map((c) => c * 97));
+    expect(svg.querySelector('[data-line="you"]')).toBeNull();
+    expect(svg.querySelector('[data-line="market"]')).toBeNull();
+    expect(svg.querySelector('[data-line="other"]')).toBeNull();
+    const price = pts(svg.querySelector('[data-line="price"]')!.getAttribute('d')!);
+    expect(price.length).toBe(6);
+    // Lower close, lower on the chart: 100, 90, 80, 70 fall, then 85, 100 rise.
+    for (let i = 1; i < 4; i++) expect(price[i][1]).toBeGreaterThan(price[i - 1][1]);
+    expect(price[5][1]).toBeCloseTo(price[0][1]);
+    // The dots sit on the price line.
+    const dots = [...svg.querySelectorAll('circle')].map((c) => [Number(c.getAttribute('cx')), Number(c.getAttribute('cy'))]);
+    expect(dots).toEqual([price[1], price[3]]);
+    expect(svg.textContent).not.toMatch(/\$/);
+  });
+
+  it('a faint dotted level at the sale close runs from each sale to its buy-back (or the end)', () => {
+    const closes = [100, 90, 80, 70, 85, 100];
+    const { svg } = draw(closes, [{ dayIndex: 1, side: 'sell' }, { dayIndex: 3, side: 'buy' }]);
+    const price = pts(svg.querySelector('[data-line="price"]')!.getAttribute('d')!);
+    const levels = [...svg.querySelectorAll('[data-line="level"]')];
+    expect(levels.length).toBe(1);
+    expect(levels[0].getAttribute('stroke-dasharray')).toBeTruthy();
+    const lv = pts(levels[0].getAttribute('d')!);
+    expect(lv).toEqual([[price[1][0], price[1][1]], [price[3][0], price[1][1]]]);
+    const held = draw(closes, []).svg;
+    expect(held.querySelector('[data-line="level"]')).toBeNull();
+    const out = draw(closes, [{ dayIndex: 2, side: 'sell' }]).svg;
+    expect(pts(out.querySelector('[data-line="level"]')!.getAttribute('d')!)[1][0]).toBeCloseTo(price[5][0]);
+  });
+
+  it('without the closes, the price is rebuilt from the balances and the market in cash', () => {
+    const closes = [100, 90, 80, 70, 85, 100, 96, 99];
+    const trades: Trade[] = [{ dayIndex: 1, side: 'sell' }, { dayIndex: 3, side: 'buy' }, { dayIndex: 5, side: 'sell' }, { dayIndex: 6, side: 'buy' }];
+    const r = simulate(closes, trades);
+    const p = priceFromPlay(r.balances, r.trades, marketInCash(r.balances, r.trades, closes));
+    p.forEach((v, i) => expect(v / p[0]).toBeCloseTo(closes[i] / closes[0], 9));
+    const a = pts(draw(closes, trades).svg.querySelector('[data-line="price"]')!.getAttribute('d')!);
+    const b = pts(draw(closes, trades, undefined, undefined, false).svg.querySelector('[data-line="price"]')!.getAttribute('d')!);
+    expect(b).toEqual(a);
   });
 });
 
@@ -108,8 +143,8 @@ describe('result chart labels and range', () => {
   it('tiny moves never fill the height: the range spans 2% either side of the start', () => {
     const closes = [100, 100.5, 101, 100.8, 101.3];
     const { svg } = draw(closes, []);
-    const you = pts(svg.querySelector('[data-line="you"]')!.getAttribute('d')!);
-    const ys = you.map((p) => p[1]);
+    const price = pts(svg.querySelector('[data-line="price"]')!.getAttribute('d')!);
+    const ys = price.map((p) => p[1]);
     expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan((104 - 40) * 0.4);
   });
 });

@@ -1,7 +1,8 @@
-// The end screen's full-run chart (spec 6.6, 9): one 2.5px ink line, a dotted start line,
-// a red dot where the player sold and a hollow dot where they bought back, labelled
-// "Sold" and "Bought". While the player was in cash the market carries on as a dashed line,
-// as on the play screen (audit 4). An optional dashed line shows a previous go or a challenger (6.7).
+// The end screen's full-run chart (spec 6.6, 9; ruling R42): the market price only, one unbroken
+// 2.5px ink line from day 1 to the last day, a dotted start line at day 1's close, a red dot where
+// the player sold and a hollow dot where they bought back, labelled "Sold" and "Bought". Each spell
+// in cash has a faint dotted level at the sale close, so a buy-back under it reads as cheaper.
+// No money line (not the player's, not a previous go's): money is shown only as numbers.
 // Hand-drawn SVG, no library.
 import type { Trade } from '../engine/types';
 import { MARKET_DASH } from './paper';
@@ -17,6 +18,7 @@ export interface EndChartInput {
   balances: number[];
   trades: Trade[];
   start: number;
+  /** A previous go or a challenger: no longer drawn (R42, money only as numbers); kept for callers. */
   other?: number[];
   label: string;
   ink: string;
@@ -26,9 +28,11 @@ export interface EndChartInput {
   height?: number;
   /** What the cash would be worth had it stayed in, for every day in cash (else null): see marketInCash. */
   market?: (number | null)[];
+  /** The run's closes: the line drawn. Without them the price is rebuilt from the play (priceFromPlay). */
+  closes?: number[];
 }
 
-/** Least vertical range, as a share of the start, either side of the start line. */
+/** Least vertical range, as a share of day 1's close, either side of it. */
 const MIN_RANGE = 0.02;
 
 /**
@@ -50,6 +54,34 @@ export function marketInCash(balances: number[], trades: Trade[], closes: number
     }
   }
   if (sell !== null) fill(sell, out.length - 1);
+  return out;
+}
+
+/**
+ * The market's moves rebuilt from a play, for callers that pass no closes: day to day, the balance's
+ * move while invested and the market-in-cash's move while out, scaled to the first balance. Borrowed
+ * money (whose balance moves more than the market) needs the closes passed instead.
+ */
+export function priceFromPlay(balances: number[], trades: Trade[], market: (number | null)[]): number[] {
+  if (!balances.length) return [];
+  const ordered = [...trades].sort((a, b) => a.dayIndex - b.dayIndex);
+  let invested = true;
+  let k = 0;
+  const applyDay = (d: number) => {
+    while (k < ordered.length && ordered[k].dayIndex === d) {
+      invested = ordered[k].side === 'buy';
+      k++;
+    }
+  };
+  applyDay(0);
+  const out = [balances[0]];
+  for (let d = 1; d < balances.length; d++) {
+    const a = invested ? balances[d - 1] : market[d - 1];
+    const b = invested ? balances[d] : market[d];
+    const ratio = a && b !== null && b !== undefined && Number.isFinite(b / a) ? b / a : 1;
+    out.push(out[d - 1] * ratio);
+    applyDay(d);
+  }
   return out;
 }
 
@@ -101,23 +133,26 @@ function crosses(b: Box, pl: [number, number][]): boolean {
   return false;
 }
 
+const pathD = (pl: [number, number][]) => pl.map(([px, py], k) => `${k ? 'L' : 'M'}${px} ${py}`).join('');
+
 export function endChart(input: EndChartInput): SVGSVGElement {
-  const { balances, trades, start, other, ink, red, paper } = input;
-  const market = input.market ?? [];
+  const { balances, trades, ink, red, paper } = input;
   const H = input.height ?? CHART_H;
-  const all = [start, ...balances, ...(other ?? []), ...market.filter((v): v is number => v !== null)].filter((v) =>
-    Number.isFinite(v),
-  );
-  // Tiny moves never fill the height: the range spans 2% of the start either side of it.
-  const lo = Math.min(...all, start * (1 - MIN_RANGE));
-  const hi = Math.max(...all, start * (1 + MIN_RANGE));
-  const n = Math.max(balances.length, other?.length ?? 0, 2);
+  const prices = input.closes?.length
+    ? input.closes.slice(0, Math.max(balances.length, 1))
+    : priceFromPlay(balances, trades, input.market ?? []);
+  const base = prices[0] ?? input.start;
+  // Tiny moves never fill the height: the range spans 2% of day 1's close either side of it.
+  const fin = prices.filter((v) => Number.isFinite(v));
+  const lo = Math.min(...fin, base * (1 - MIN_RANGE));
+  const hi = Math.max(...fin, base * (1 + MIN_RANGE));
+  const n = Math.max(prices.length, 2);
   const x = (i: number) => SIDE + (i / (n - 1)) * (CHART_W - 2 * SIDE);
   const y = (v: number) => TOP + ((hi - v) / (hi - lo)) * (H - TOP - BOTTOM);
-  const path = (vals: number[]) =>
-    keep(vals)
-      .map((i, k) => `${k ? 'L' : 'M'}${r1(x(i))} ${r1(y(vals[i]))}`)
-      .join('');
+  const inRun = (t: Trade) => t.dayIndex >= 0 && t.dayIndex < prices.length;
+  // About two days a point, with the high, the low and every trade day kept, so the dots sit on the line.
+  const kept = [...new Set([...keep(prices), ...trades.filter(inRun).map((t) => t.dayIndex)])].sort((a, b) => a - b);
+  const pricePts = kept.map((i) => [r1(x(i)), r1(y(prices[i]))] as [number, number]);
 
   const svg = el('svg', {
     viewBox: `0 0 ${CHART_W} ${H}`,
@@ -127,68 +162,52 @@ export function endChart(input: EndChartInput): SVGSVGElement {
   });
 
   svg.appendChild(
-    el('line', { x1: 0, x2: CHART_W, y1: r1(y(start)), y2: r1(y(start)), stroke: ink, 'stroke-width': 1, 'stroke-dasharray': '1 4' }),
+    el('line', { x1: 0, x2: CHART_W, y1: r1(y(base)), y2: r1(y(base)), stroke: ink, 'stroke-width': 1, 'stroke-dasharray': '1 4' }),
   );
-  if (other && other.length > 1) {
+  // Each spell in cash: a faint dotted level at the sale close, from the sale to the buy-back (or the end).
+  const levels: [number, number][][] = [];
+  const level = (from: number, to: number) => {
+    const ly = r1(y(prices[from]));
+    levels.push([[r1(x(from)), ly], [r1(x(to)), ly]]);
+  };
+  let sold: number | null = null;
+  for (const t of [...trades].filter(inRun).sort((a, b) => a.dayIndex - b.dayIndex)) {
+    if (t.side === 'sell' && sold === null) sold = t.dayIndex;
+    else if (t.side === 'buy' && sold !== null) {
+      level(sold, t.dayIndex);
+      sold = null;
+    }
+  }
+  if (sold !== null) level(sold, prices.length - 1);
+  for (const lv of levels) {
+    if (lv[1][0] - lv[0][0] < 1) continue;
     svg.appendChild(
       el('path', {
-        d: path(other),
-        fill: 'none',
-        stroke: MARKET_DASH,
-        'stroke-width': 1.5,
-        'stroke-dasharray': '5 4',
-        'stroke-linejoin': 'round',
-        'data-line': 'other',
+        d: pathD(lv), fill: 'none', stroke: MARKET_DASH, 'stroke-width': 1.5, 'stroke-dasharray': '2 4', 'stroke-linecap': 'round',
+        'data-line': 'level',
       }),
     );
   }
-  // The market while in cash: one dashed segment per cash period, thinned like the lines.
-  const marketPts: [number, number][][] = [];
-  if (market.some((v) => v !== null)) {
-    const every = Math.max(1, Math.ceil(market.length / 170));
-    let seg: [number, number][] = [];
-    market.forEach((v, i) => {
-      const edge = v !== null && (market[i - 1] == null || market[i + 1] == null);
-      if (v === null) {
-        if (seg.length > 1) marketPts.push(seg);
-        seg = [];
-      } else if (edge || i % every === 0) seg.push([r1(x(i)), r1(y(v))]);
-    });
-    if (seg.length > 1) marketPts.push(seg);
-    for (const sg of marketPts) {
-      svg.appendChild(
-        el('path', {
-          d: sg.map(([px, py], k) => `${k ? 'L' : 'M'}${px} ${py}`).join(''),
-          fill: 'none',
-          stroke: MARKET_DASH,
-          'stroke-width': 2,
-          'stroke-dasharray': '3 4',
-          'stroke-linecap': 'round',
-          'data-line': 'market',
-        }),
-      );
-    }
-  }
-  if (balances.length > 0) {
+  if (prices.length > 0) {
     svg.appendChild(
       el('path', {
-        d: path(balances),
+        d: pathD(pricePts),
         fill: 'none',
         stroke: ink,
         'stroke-width': 2.5,
         'stroke-linejoin': 'round',
         'stroke-linecap': 'round',
-        'data-line': 'you',
+        'data-line': 'price',
       }),
     );
   }
 
-  // Dots for every trade; words on the first sale and the first buy-back after it.
+  // Dots for every trade, on the price line; words on the first sale and the first buy-back after it.
   const firstSell = trades.find((t) => t.side === 'sell');
   const firstBuy = firstSell ? trades.find((t) => t.side === 'buy' && t.dayIndex >= firstSell.dayIndex) : undefined;
   const dots: Box[] = [];
   for (const t of trades) {
-    const v = balances[t.dayIndex];
+    const v = prices[t.dayIndex];
     if (v === undefined) continue;
     const cx = r1(x(t.dayIndex));
     const cy = r1(y(v));
@@ -199,19 +218,15 @@ export function endChart(input: EndChartInput): SVGSVGElement {
         : el('circle', { cx, cy, r: 5, fill: paper, stroke: ink, 'stroke-width': 2.5 }),
     );
   }
-  // Every line a word must keep clear of: the player's, the market's, the other go's and the start line.
-  const pathPts = (vals: number[]) => keep(vals).map((i) => [x(i), y(vals[i])] as [number, number]);
-  const lines: [number, number][][] = [
-    pathPts(balances), ...marketPts, ...(other && other.length > 1 ? [pathPts(other)] : []),
-    [[0, y(start)], [CHART_W, y(start)]],
-  ];
+  // Every line a word must keep clear of: the price, the levels and the start line.
+  const lines: [number, number][][] = [pricePts, ...levels, [[0, y(base)], [CHART_W, y(base)]]];
   const placed: Box[] = [];
   for (const [t, word] of [
     [firstSell, 'Sold'],
     [firstBuy, 'Bought'],
   ] as const) {
     if (!t) continue;
-    const v = balances[t.dayIndex];
+    const v = prices[t.dayIndex];
     if (v === undefined) continue;
     const cx = x(t.dayIndex);
     const cy = y(v);

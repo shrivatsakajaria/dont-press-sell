@@ -126,10 +126,26 @@ describe('screenModel', () => {
     expect(m.standfirst).toBe(FIRST_SALE_LINE);
     expect(m.regret).toEqual({ text: 'Holding today would have made you $200', rose: true });
     expect(m.deltaLabel).toBe('in cash');
-    // The dashed market line runs from the sale.
-    const ghost = m.chart.points.filter((p) => p.ghost !== null);
-    expect(ghost.map((p) => p.dayIndex)).toEqual([4, 5]);
-    expect(ghost[1].ghost).toBeCloseTo(9200);
+    // R42: the chart is the market price from day 1 to today, with the sale close as the "Sold at" level.
+    expect(m.chart.closes).toEqual([100, 101, 99, 100, 90, 92]);
+    expect(m.chart.trades).toEqual(trades);
+    expect(m.chart.soldAt).toBe(90);
+    expect(m.chart.label).toBe(
+      "Chart of the market price over 6 days: down 8% since day 1. Today's price is 2% above where you sold.",
+    );
+  });
+
+  it('chart: one unbroken price line after a buy-back, no level, and every day to today even when steps skip days', () => {
+    const v = view(8);
+    const trades: Trade[] = [{ dayIndex: 4, side: 'sell' }, { dayIndex: 6, side: 'buy' }];
+    const m = screenModel(state(v, { trades }));
+    expect(m.chart.closes).toEqual(closes);
+    expect(m.chart.soldAt).toBeNull();
+    expect(m.chart.label).toBe('Chart of the market price over 10 days: up 8% since day 1.');
+    // The new day's segment grows over the step: the session's stepMs (contract C1), else the step's hold.
+    expect(m.chart.growMs).toBe(300);
+    const withStep = screenModel(state({ ...v, stepMs: 1234 } as SessionView, { trades }));
+    expect(withStep.chart.growMs).toBe(1234);
   });
 
   it('regret on a falling day is the cost line, and none on the sale day itself', () => {
@@ -207,7 +223,8 @@ describe('screenModel', () => {
     const m = screenModel(state(view(5), { ...words, steps: slow }));
     expect(m.standfirst).toBe('This is the day you sold last time.');
     expect(m.regret).toEqual({ text: 'Score to beat: $7,150', rose: false });
-    expect(m.chart.other).toEqual([10000, 9000]);
+    // No money line on the chart (R42): the previous go is not drawn.
+    expect('other' in m.chart).toBe(false);
     expect(screenModel(state(view(8), { ...words, steps: slow })).standfirst).toBe('Commentary.');
   });
 });

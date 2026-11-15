@@ -334,3 +334,24 @@ it('a finger dragged off the button clears the capture; a touch tap (pointerleav
   play.teardown();
   vi.useRealTimers();
 });
+
+it('R43: a new day with the same headline and standfirst measures nothing (no forced layout per step)', () => {
+  vi.useFakeTimers();
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  const play = startPlay(root, run, steps.map((s) => ({ ...s, slow: false })), { // no slow day: the headline keeps its size
+    runLabel: 'Mystery crash', onEnd: vi.fn(), narrate: () => ({ headline: 'Shares slide', commentary: 'Quiet.' }),
+  });
+  vi.advanceTimersByTime(250);
+  const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect');
+  const cs = vi.spyOn(window, 'getComputedStyle');
+  const before = root.querySelector('.standfirst')!.textContent;
+  vi.advanceTimersByTime(200); // two more days
+  expect(root.querySelector('.standfirst')!.textContent).toBe(before);
+  expect(spy).not.toHaveBeenCalled();
+  expect(cs).not.toHaveBeenCalled();
+  spy.mockRestore();
+  cs.mockRestore();
+  play.teardown();
+  vi.useRealTimers();
+});

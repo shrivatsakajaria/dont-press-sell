@@ -2,7 +2,7 @@
 // screenModel() turns the session's view into what the page shows (pure, tested);
 // mountScreen() draws it; startPlay() runs one session on it.
 import {
-  FIRST_SALE_LINE, FOOTER_PLAY, MASTHEAD, OPENING_LINE, SOLD_LAST_TIME, START_LABEL, buyBackLabel, dollars, potLine,
+  FIRST_SALE_LINE, FOOTER_PLAY, MASTHEAD, OPENING_LINE, SOLD_LAST_TIME, START_LABEL, buyBackLabel, dollars, marketChartLabel, potLine,
   scoreToBeatLine, sellLabel, sellingAtTopLine,
 } from '../content/copy';
 import type { RunData, RunResult, Trade } from '../engine/types';
@@ -10,7 +10,7 @@ import type { Step } from '../game/schedule';
 import { createSession, type Session, type SessionView, type SimulateFn } from '../game/session';
 import { load, save } from '../store/store';
 import { announce, initAnnouncer } from './a11y';
-import { drawChart, type ChartModel, type ChartPoint } from './chart';
+import { drawChart, type ChartModel } from './chart';
 import { createRoll } from './digits';
 import { paperFor, type Paper } from './paper';
 
@@ -19,7 +19,7 @@ export {
   STATUS_DEFAULT, STATUS_SLOW, STATUS_CASH, STATUS_FORWARD, STATUS_PAUSED, MYSTERY_LABEL, PAUSE, RESUME, SOUND_ON, SOUND_OFF, IN_CASH, LEVEL, dayLabel, yearLabel, youHadLine, regretMadeLine, regretCostLine, upLabel, downLabel, placeholderHeadline, placeholderStandfirst, chartLabel, soldAnnouncement, boughtAnnouncement,
 } from '../content/copy';
 import {
-  STATUS_DEFAULT, STATUS_SLOW, STATUS_CASH, STATUS_FORWARD, STATUS_PAUSED, PAUSE, RESUME, SOUND_ON, SOUND_OFF, IN_CASH, LEVEL, dayLabel, yearLabel, youHadLine, regretMadeLine, regretCostLine, upLabel, downLabel, placeholderHeadline, placeholderStandfirst, chartLabel, soldAnnouncement, boughtAnnouncement,
+  STATUS_DEFAULT, STATUS_SLOW, STATUS_CASH, STATUS_FORWARD, STATUS_PAUSED, PAUSE, RESUME, SOUND_ON, SOUND_OFF, IN_CASH, LEVEL, dayLabel, yearLabel, youHadLine, regretMadeLine, regretCostLine, upLabel, downLabel, placeholderHeadline, placeholderStandfirst, soldAnnouncement, boughtAnnouncement,
 } from '../content/copy';
 
 /** How long the opening line stays up, and the first-sale line after a first sale (clock time). */
@@ -196,36 +196,23 @@ export function screenModel(s: PlayState): ScreenModel {
   };
 }
 
+/** R42: the chart is the market price from day 1 to today, with the trades as dots and, in cash, the sale close as a level. */
 function chartModel(s: PlayState, worst: boolean, inCash: boolean): ChartModel {
-  const closes = s.run.closes;
-  const days = [...s.history.keys()].filter((d) => d <= s.view.dayIndex).sort((a, b) => a - b);
-  // Cash periods: from each sale to the next buy (or today). The dashed line spans them, ends included.
-  const periods: [number, number, number][] = []; // [sellDay, endDay, cash]
-  let open: number | null = null;
-  for (const t of s.trades) {
-    if (t.side === 'sell') open = t.dayIndex;
-    else if (open !== null) {
-      periods.push([open, t.dayIndex, s.history.get(open)?.balance ?? 0]);
-      open = null;
-    }
-  }
-  if (open !== null) periods.push([open, Infinity, s.history.get(open)?.balance ?? 0]);
-  const points: ChartPoint[] = days.map((d) => {
-    const p = periods.find(([a, b]) => d >= a && d <= b);
-    return {
-      dayIndex: d,
-      balance: s.history.get(d)!.balance,
-      ghost: p ? (p[2] * closes[d]) / closes[p[0]] : null,
-    };
-  });
+  const today = s.view.dayIndex;
+  const closes = s.run.closes.slice(0, today + 1);
+  const trades = s.trades.filter((t) => t.dayIndex <= today);
+  let saleDay: number | null = null;
+  for (const t of trades) if (t.side === 'sell') saleDay = t.dayIndex;
+  const soldAt = inCash && saleDay !== null ? closes[saleDay] : null;
+  const now = closes[closes.length - 1];
   return {
-    start: s.start,
-    points,
-    trades: s.trades.slice(),
+    closes,
+    trades,
+    soldAt,
     worst,
-    inCash,
-    label: chartLabel(s.view.dayIndex + 1, s.view.balance, s.start),
-    other: s.other ?? undefined,
+    label: marketChartLabel(closes.length, now / closes[0] - 1, soldAt === null ? null : now / soldAt - 1),
+    // Contract C1: the session's stepMs when it has one, else the step's own hold.
+    growMs: (s.view as SessionView & { stepMs?: number }).stepMs ?? s.steps[s.view.stepIndex]?.holdMs ?? 0,
   };
 }
 
@@ -338,6 +325,7 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   sound.addEventListener('click', () => handlers.onSoundToggle?.());
 
   let last: ScreenModel | null = null;
+  let lastFitKey = '';
   let paintFrame = 0;
   let snapFrame = 0;
   let observer: ResizeObserver | null = null;
@@ -382,9 +370,13 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
     }
   }
 
-  function drawChartNow(m: ScreenModel) {
-    const r = chartWrap.getBoundingClientRect();
-    const w = Math.round(r.width) || 342;
+  /**
+   * R43: the chart's drawing box is kept from the resize watcher, so a new day never forces a layout.
+   * Only the first draw (before the watcher has reported) measures.
+   */
+  let chartBox: { w: number; h: number } | null = null;
+  const boxFrom = (width: number, height: number) => ({ w: Math.round(width) || 342, h: Math.max(Math.round(height) || 160, 40) });
+  function measureChart() {
     let pad = 0;
     try {
       const cs = getComputedStyle(chartWrap);
@@ -392,19 +384,29 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
     } catch {
       /* happy-dom or no layout */
     }
-    const hgt = Math.round(chartWrap.clientHeight - pad) || 160;
-    svg.style.height = `${Math.max(hgt, 40)}px`;
-    drawChart(svg, m.chart, m.paper, w, Math.max(hgt, 40));
+    chartBox = boxFrom(chartWrap.getBoundingClientRect().width, chartWrap.clientHeight - pad);
   }
 
-  // Redraw the chart when the column changes size (rotation, browser bars).
+  /** Draws the chart; on a new day its segment grows over the step (none for reduced motion). */
+  function drawChartNow(m: ScreenModel) {
+    if (!chartBox) measureChart();
+    const { w, h: hgt } = chartBox!;
+    const px = `${hgt}px`;
+    if (svg.style.height !== px) svg.style.height = px;
+    drawChart(svg, m.chart, m.paper, w, hgt, { animateMs: reducedMotion() ? 0 : m.chart.growMs ?? 0 });
+  }
+
+  // Redraw the chart when the column changes size (rotation, browser bars, the headline's size).
   if (typeof ResizeObserver === 'function') {
     let lastSize = '';
-    observer = new ResizeObserver(() => {
-      const r = chartWrap.getBoundingClientRect();
-      const key = `${Math.round(r.width)}x${Math.round(r.height)}`;
+    observer = new ResizeObserver((entries) => {
+      const r = entries[entries.length - 1]?.contentRect;
+      if (!r) return;
+      const box = boxFrom(r.width, r.height);
+      const key = `${box.w}x${box.h}`;
       if (key !== lastSize && last) {
         lastSize = key;
+        chartBox = box;
         fitHeadline();
         drawChartNow(last);
       }
@@ -462,7 +464,13 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       pot.textContent = m.pot;
       pause.textContent = m.paused ? RESUME : PAUSE;
       pause.setAttribute('aria-pressed', String(m.paused));
-      fitHeadline();
+      // R43: fitting measures the page (a forced layout), so only when what it depends on changed;
+      // any other change of the chart's height reaches the resize watcher, which fits again.
+      const fitKey = `${m.headline}|${m.standfirst}|${m.big}|${m.worst}|${page.classList.contains('is-gate')}`;
+      if (fitKey !== lastFitKey) {
+        lastFitKey = fitKey;
+        fitHeadline();
+      }
       drawChartNow(m);
       cancelRaf(paintFrame);
       paintFrame = raf(() => handlers.onPainted?.());
