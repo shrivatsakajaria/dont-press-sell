@@ -48,3 +48,21 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - Task 13 complete: final fix wave merged (918 unit tests, 49 Playwright, 37.9 KB JS). Preview: https://claude.ai/artifact/9CFSr7cypuYegZEgTs86rQ (v3).
 - Open for SK: Cloudflare Pages hook-up and pages.dev address (then set SITE_URL in Pages > Settings > Environment variables > Production); checkpoint 4 phone checklist; launch (Task 14).
 - Known, not fixed: a strategy outside the plan's bot list ("sell on the first red day, buy back on the third red day") wins 9 of 12 (it was 10 before the final fixes). Raise with SK if he wants it tightened.
+
+## Round 2 (SK feedback after the 20-person video panel), rulings R35-R50
+- R35. One screen step is still one trading day (SK: "that's the charm"). Steps speed up and slow down gradually (no abrupt jumps between 3 s slow days and fast days). Quiet days while in cash run a little quicker. Game stays about 120 s.
+- R36. A headline stays on screen at most 8 s. When the real headline has been up 8 s, the paper prints a plain price-action headline for the day (true to that day's move, never a repeat in the game) until the next real headline.
+- R37. The line under the headline (commentary) does not change every day: a new line only on slow (big/red) days, on a sale or buy, or once the current line has been up at least 4 s. No line repeats in a game. A line is only shown if it stays true for every day it will be on screen (the prices are known in advance), and never contradicts the headline above it. No filler lines.
+- R38. While in cash the button reads "Buy back $N cheaper" / "Buy back $N dearer" / "Buy back at the same price". N = round(cash x (1 - today's close / close on the day of the most recent sale)); positive is cheaper. It turns green and pulses when cheaper. One number only while in cash (the "Holding today would have..." line goes).
+- R39. Folio line: no "Price: your nerve", no "Time slowed".
+- R40. The pot is hidden on the play screen and the result screen (code stays).
+- R41. Sold and bought moments: the day clock holds 0.5 s on each press, with a short stamp ("Sold at $9,750"; "Bought back $1,120 cheaper" or "...dearer"). A cheap buy-back reads as a win.
+- R42. The chart line is always the market price, one unbroken line, with Sold and Bought dots on it; a faint flat line marks the latest sale price while in cash. Money is shown only as numbers. Same on the result chart and share card. The line moves smoothly between days.
+- R43. Smoothness: find and remove the stutters and random pauses (measure frame times at 4x CPU slowdown before and after).
+- R44. Result screen fits one 390x660 screen with its buttons, no scrolling. "Wins in a row" large after a win; after a loss "Best winning streak: N" (hidden if 0). "Double or nothing" only after a win, on that screen. No auto-start countdown. "Tap to see what that was" is a big moment.
+- R45. Every game (new mystery, rematch, double or nothing) opens on a Start screen; later games show a short version.
+- R46. The first game a player ever plays is a real crash, chosen at random from c1987, c2007, c2020, c2022. Challenge links still open their own run.
+- R47. Daily crash moves to phase 2: every link and mention hidden, code stays.
+- R48. Every tap target at least 44 px; small text at least 14 px.
+- R49. Truth: "You finished with $N" (not "You made"); the last live balance equals the result; "Held through the worst day" only if invested that day; nothing on screen contradicts the numbers. "Hot hand" and "Wins in a row" stay (SK). No "play money" on the start screen (SK). No classroom mode.
+- R50. Preview only (artifact) for this round; live link later.
