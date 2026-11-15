@@ -114,8 +114,8 @@ export function keep(vals: number[], target = 170): number[] {
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
 interface Box { x0: number; x1: number; y0: number; y1: number }
-/** Generous width of a 12px bold label, per character. */
-const WORD_W = 7.2;
+/** Generous width of a 14px bold label, per character (R48: small text at least 14px). */
+const WORD_W = 8.4;
 const hit = (a: Box, b: Box, gap: number) => a.x0 < b.x1 + gap && b.x0 < a.x1 + gap && a.y0 < b.y1 + gap && b.y0 < a.y1 + gap;
 /** True when the line passes through the box (with room for the stroke). */
 function crosses(b: Box, pl: [number, number][]): boolean {
@@ -239,7 +239,7 @@ export function endChart(input: EndChartInput): SVGSVGElement {
     for (const dy of [4, -4, 12]) spots.push({ x: cx - 10, y: cy + dy, anchor: 'end' }, { x: cx + 10, y: cy + dy, anchor: 'start' });
     const boxAt = (sp: (typeof spots)[number]): Box => {
       const x0 = sp.anchor === 'end' ? sp.x - w : sp.anchor === 'middle' ? sp.x - w / 2 : sp.x;
-      return { x0, x1: x0 + w, y0: sp.y - 11, y1: sp.y + 3 };
+      return { x0, x1: x0 + w, y0: sp.y - 13, y1: sp.y + 3 };
     };
     const spot = spots.find((sp) => {
       const b = boxAt(sp);
@@ -249,6 +249,7 @@ export function endChart(input: EndChartInput): SVGSVGElement {
     if (!spot) continue; // no clear spot: no word rather than a word through a line
     placed.push(boxAt(spot));
     const text = el('text', { x: r1(spot.x), y: r1(spot.y), 'text-anchor': spot.anchor, fill: ink, class: 'es-chart-word' });
+    text.style.fontSize = '14px'; // R48, over the page's 12px rule
     text.textContent = word;
     svg.appendChild(text);
   }

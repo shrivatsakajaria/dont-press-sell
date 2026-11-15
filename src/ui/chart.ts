@@ -322,8 +322,8 @@ function paint(s: State) {
 interface Box { x0: number; x1: number; y0: number; y1: number }
 interface Spot { x: number; y: number; anchor: 'start' | 'end' }
 
-/** Generous width of a 12px Libre Franklin label, per character. */
-const CHAR_W = 7.2;
+/** Generous width of a 14px Libre Franklin label, per character (R48: small text at least 14px). */
+const CHAR_W = 8.4;
 /** Labels keep this far from the chart's sides (on red days the chart bleeds to the screen edge). */
 const INSET = 12;
 /** Space kept between two labels. */
@@ -332,7 +332,7 @@ const GAP = 4;
 function boxOf(s: Spot, text: string): Box {
   const wd = text.length * CHAR_W;
   const x0 = s.anchor === 'end' ? s.x - wd : s.x;
-  return { x0, x1: x0 + wd, y0: s.y - 11, y1: s.y + 3 };
+  return { x0, x1: x0 + wd, y0: s.y - 13, y1: s.y + 3 };
 }
 const overlaps = (a: Box, b: Box, gap = 0) =>
   a.x0 < b.x1 + gap && b.x0 < a.x1 + gap && a.y0 < b.y1 + gap && b.y0 < a.y1 + gap;
@@ -452,7 +452,7 @@ function placeLabels(s: State, g: ChartGeometry): void {
     const wd = SOLD_AT.length * CHAR_W;
     const spots: Spot[] = [];
     for (let right = w - INSET; right - wd >= x0 + 8; right -= 12) {
-      spots.push({ x: right, y: ly - 5, anchor: 'end' }, { x: right, y: ly + 15, anchor: 'end' });
+      spots.push({ x: right, y: ly - 7, anchor: 'end' }, { x: right, y: ly + 17, anchor: 'end' });
     }
     for (const dy of [4, -6, 14]) spots.push({ x: x0 - 10, y: ly + dy, anchor: 'end' });
     place('soldAt', SOLD_AT, spots, paper.secondary, 500);
@@ -470,7 +470,7 @@ function placeLabels(s: State, g: ChartGeometry): void {
   placed.forEach((p, i) => {
     let t = texts[i] as SVGElement | undefined;
     if (!t) {
-      t = el('text', { 'font-family': LABEL_FONT, 'font-size': 12 });
+      t = el('text', { 'font-family': LABEL_FONT, 'font-size': 14 });
       els.labels.append(t);
     }
     if (t.textContent !== p.text) t.textContent = p.text;

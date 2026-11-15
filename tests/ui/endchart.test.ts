@@ -51,6 +51,9 @@ describe('the market in the result chart (audit 4)', () => {
     const dots = [...svg.querySelectorAll('circle')].map((c) => [Number(c.getAttribute('cx')), Number(c.getAttribute('cy'))]);
     expect(dots).toEqual([price[1], price[3]]);
     expect(svg.textContent).not.toMatch(/\$/);
+    // R48: the words are at least 14px, whatever the page's stylesheet says.
+    for (const t of svg.querySelectorAll('text')) expect((t as SVGElement).style.fontSize).toBe('14px');
+    expect(svg.querySelectorAll('text').length).toBeGreaterThan(0);
   });
 
   it('a faint dotted level at the sale close runs from each sale to its buy-back (or the end)', () => {
@@ -81,7 +84,7 @@ describe('the market in the result chart (audit 4)', () => {
 });
 
 describe('result chart labels and range', () => {
-  const CW = 7.2;
+  const CW = 8.4; // 14px words (R48)
   const boxOf = (t: Element) => {
     const x = Number(t.getAttribute('x'));
     const y = Number(t.getAttribute('y'));

@@ -158,13 +158,16 @@ describe('drawChart', () => {
     const g = chartGeometry(m, 342, 200);
     const t = words[0];
     const x = Number(t.getAttribute('x'));
-    const right = t.getAttribute('text-anchor') === 'end' ? x : x + 7 * 7.2;
-    const left = right - 7 * 7.2;
+    const right = t.getAttribute('text-anchor') === 'end' ? x : x + 7 * 8.4;
+    const left = right - 7 * 8.4;
     expect(left >= g.soldAt!.x0 - 2 || (right <= g.soldAt!.x0 && right >= g.soldAt!.x0 - 16)).toBe(true);
     // Bought back: the level goes.
     drawChart(svg, { ...m, closes: base.closes, trades: [...m.trades, { dayIndex: 9, side: 'buy' }], soldAt: null }, calm, 342, 200);
     expect(svg.querySelector('[data-level]')?.getAttribute('display')).toBe('none');
     expect([...svg.querySelectorAll('text')].map((t) => t.textContent)).not.toContain('Sold at');
+    // R48: small text at least 14px.
+    drawChart(svg, m, cash, 342, 200);
+    for (const t of svg.querySelectorAll('text')) expect(t.getAttribute('font-size')).toBe('14');
   });
 
   it('updates in place: the same elements are reused from one day to the next', () => {
@@ -277,7 +280,7 @@ describe('label placement holds on many charts (no crossings, 12px inset, clear 
     let s = seed >>> 0;
     return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
   }
-  const CW = 7.2;
+  const CW = 8.4; // 14px labels (R48)
   const box = (t: Element) => {
     const x = Number(t.getAttribute('x'));
     const y = Number(t.getAttribute('y'));
