@@ -34,6 +34,8 @@ export interface SessionOpts {
   onPause?(): void;
   /** Called when the clock resumes. */
   onResume?(): void;
+  /** The clock read in milliseconds (default performance.now); tests pass their own. */
+  now?(): number;
 }
 
 export interface Session {
@@ -62,8 +64,12 @@ export interface Session {
   destroy(): void;
 }
 
+/** A timer this late or more (the page was frozen) restarts the step clock rather than racing to catch up. */
+const REBASE_MS = 250;
+
 /**
- * The running game. Steps advance with setTimeout using each step's holdMs.
+ * The running game. Steps advance with setTimeout using each step's holdMs, each armed against an
+ * absolute deadline (the previous step's deadline + its hold), so late timers on a busy phone never add up.
  * When the page is hidden (phone locked, app switched) the clock pauses and
  * later resumes in the same step with the time that was left.
  */
@@ -86,9 +92,11 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
   const pressedSteps = new Set<number>();
   let peak = -Infinity;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let stepStartedAt = 0;
-  const now = () =>
-    typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+  /** When the current step ends on the clock, while it runs. */
+  let deadline = 0;
+  const now =
+    opts.now ??
+    (() => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()));
   let remaining = 0;
   let current: SessionView = compute();
 
@@ -111,24 +119,29 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
     };
   }
 
-  function arm(ms: number) {
+  /** Runs the clock to `until` (an absolute time on the clock). */
+  function armUntil(until: number) {
     clearTimeout(timer);
-    remaining = ms;
-    stepStartedAt = now();
-    timer = setTimeout(advance, ms);
+    deadline = until;
+    timer = setTimeout(advance, Math.max(0, until - now()));
   }
 
-  function enterStep() {
+  /** `from`: the previous step's deadline when the clock ran straight on; null to start from now. */
+  function enterStep(from: number | null) {
     current = compute();
     peak = current.peakBalance;
+    const hold = steps[stepIndex].holdMs;
     // Arm the clock before calling the UI, so a throwing onStep cannot freeze the run.
-    if (!paused) arm(steps[stepIndex].holdMs);
-    else remaining = steps[stepIndex].holdMs;
+    if (!paused) {
+      const t = now();
+      armUntil(from !== null && t - from < REBASE_MS ? from + hold : t + hold);
+    } else remaining = hold;
     opts.onStep({ ...current });
   }
 
   function advance() {
     timer = undefined;
+    const due = deadline;
     if (ended || destroyed) return;
     if (stepIndex >= steps.length - 1) {
       ended = true;
@@ -137,7 +150,7 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
       return;
     }
     stepIndex++;
-    enterStep();
+    enterStep(due);
   }
 
   const hasDocument = typeof document !== 'undefined';
@@ -160,8 +173,7 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
     if (started && timer !== undefined) {
       clearTimeout(timer);
       timer = undefined;
-      const hold = steps[stepIndex].holdMs;
-      remaining = Math.min(hold, Math.max(0, remaining - (now() - stepStartedAt)));
+      remaining = Math.min(steps[stepIndex].holdMs, Math.max(0, deadline - now()));
     }
     opts.onPause?.();
   }
@@ -169,7 +181,7 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
   function resumeClock() {
     if (!paused || ended || destroyed) return;
     paused = false;
-    if (started) arm(remaining);
+    if (started) armUntil(now() + remaining);
     opts.onResume?.();
   }
 
@@ -189,7 +201,7 @@ export function createSession(run: RunData, steps: Step[], opts: SessionOpts): S
           paused = true;
         }
       }
-      enterStep();
+      enterStep(null);
     },
     press(expectedStepIndex?: number) {
       if (!started || ended || destroyed || paused) return;
