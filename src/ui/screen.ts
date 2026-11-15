@@ -567,7 +567,7 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
   function draw(raw: SessionView) {
     if (ended) return;
     // Borrowed money: leadAt measures an unborrowed player, so the counter is taken from the view itself.
-    const v = opts.borrowed ? { ...raw, leadNow: raw.balance - raw.marketBalance } : raw;
+    const v = opts.borrowed ? { ...raw, leadNow: Math.round(raw.balance) - Math.round(raw.marketBalance) } : raw;
     rendered = v;
     history.set(v.dayIndex, { balance: v.balance, invested: v.invested });
     let traded: Trade['side'] | null = null;

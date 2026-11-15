@@ -50,6 +50,21 @@ describe('simulate', () => {
   });
 });
 
+describe('lead adds up with the shown figures', () => {
+  // Table shows $10,800 and $8,783: the lead must read $2,017, not $2,018 (raw 2017.5).
+  const c = [100, 108, 87.825];
+  it('is the rounded final minus the rounded holder', () => {
+    const r = simulate(c, [{ dayIndex: 1, side: 'sell' }]);
+    expect(r.final).toBeCloseTo(10800);
+    expect(r.holderFinal).toBeCloseTo(8782.5);
+    expect(r.lead).toBe(Math.round(r.final) - Math.round(r.holderFinal));
+    expect(r.lead).toBe(2017);
+  });
+  it('the live counter follows the same rule', () => {
+    expect(leadAt(c, [{ dayIndex: 1, side: 'sell' }], 2)).toBe(2017);
+  });
+});
+
 describe('leadAt', () => {
   it('is the live counter', () => {
     expect(leadAt(closes, [{ dayIndex: 1, side: 'sell' }], 2)).toBeCloseTo(1000);

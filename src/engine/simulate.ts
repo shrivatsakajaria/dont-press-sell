@@ -47,7 +47,8 @@ export function simulate(closes: number[], trades: Trade[], start = 10000): RunR
     final,
     holderFinal,
     perfectFinal,
-    lead: final - holderFinal,
+    // The lead the page prints: shown final minus shown holder, so the table always adds up.
+    lead: shownLead(final, holderFinal),
     share: gap === 0 ? 0 : (final - holderFinal) / gap,
     balances,
     daysInCash,
@@ -55,9 +56,14 @@ export function simulate(closes: number[], trades: Trade[], start = 10000): RunR
   };
 }
 
-/** The player's balance minus the holder's at the close of dayIndex. */
+/** Whole dollars: the rounded balance minus the rounded holder, as the page prints them. */
+export function shownLead(final: number, holder: number): number {
+  return Math.round(final) - Math.round(holder);
+}
+
+/** The player's balance minus the holder's at the close of dayIndex (whole dollars, as shown). */
 export function leadAt(closes: number[], trades: Trade[], dayIndex: number, start = 10000): number {
   const upTo = trades.filter((t) => t.dayIndex <= dayIndex);
   const { balances } = simulate(closes, upTo, start);
-  return balances[dayIndex] - (start / closes[0]) * closes[dayIndex];
+  return shownLead(balances[dayIndex], (start / closes[0]) * closes[dayIndex]);
 }
