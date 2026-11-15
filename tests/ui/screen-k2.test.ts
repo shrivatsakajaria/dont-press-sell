@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
-// Contract K2: a press calls the chart's extend (lane FB) with the clock's hold, so the line's growth stretches over it.
+// Contract K2: a press calls the chart's extendChart (lane FB) with the clock's hold, so the line's growth stretches over it.
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Step } from '../../src/game/schedule';
 
-const extend = vi.fn();
-vi.mock('../../src/ui/chart', async (orig) => ({ ...(await orig<typeof import('../../src/ui/chart')>()), extend }));
+const extendChart = vi.fn();
+vi.mock('../../src/ui/chart', async (orig) => ({ ...(await orig<typeof import('../../src/ui/chart')>()), extendChart }));
 
 const { startPlay, PRESS_HOLD_MS } = await import('../../src/ui/screen');
 
@@ -22,9 +22,9 @@ it('a press stretches the chart growth by the press hold', () => {
   document.body.appendChild(root);
   startPlay(root, run, steps, { runLabel: 'Mystery crash', onEnd: vi.fn() });
   vi.advanceTimersByTime(1000);
-  expect(extend).not.toHaveBeenCalled();
+  expect(extendChart).not.toHaveBeenCalled();
   (root.querySelector('button.act') as HTMLButtonElement).click();
-  expect(extend).toHaveBeenCalledTimes(1);
-  expect(extend.mock.calls[0][0]).toBe(root.querySelector('.chart svg'));
-  expect(extend.mock.calls[0][1]).toBe(PRESS_HOLD_MS);
+  expect(extendChart).toHaveBeenCalledTimes(1);
+  expect(extendChart.mock.calls[0][0]).toBe(root.querySelector('.chart svg'));
+  expect(extendChart.mock.calls[0][1]).toBe(PRESS_HOLD_MS);
 });

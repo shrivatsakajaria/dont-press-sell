@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chartGeometry, drawChart, MIN_RANGE, type ChartModel } from '../../src/ui/chart';
+import { chartGeometry, drawChart, extend, extendChart, MIN_RANGE, type ChartModel } from '../../src/ui/chart';
 import { paperFor } from '../../src/ui/paper';
 
 /** R42: the chart is the market price only, one unbroken line, with trade dots on it. */
@@ -231,14 +231,21 @@ describe('drawChart animates the new day', () => {
     drawChart(svg, { ...base, closes: closes.slice(0, 250) }, calm, 342, 200);
     drawChart(svg, { ...base, closes: closes.slice(0, 251) }, calm, 342, 200, { animateMs: 400 });
     const line = svg.querySelector('polyline')!;
+    const plot = svg.querySelector('[data-plot]')!;
     const set = vi.spyOn(line, 'setAttribute');
+    const setPlot = vi.spyOn(plot, 'setAttribute');
     flush(100);
     flush(100);
     expect(set.mock.calls.filter(([k]) => k === 'points')).toEqual([]);
-    expect(set.mock.calls.some(([k]) => k === 'transform')).toBe(true);
+    // R57: the scale moves with the tip through one transform on the plot, not on the line.
+    expect(setPlot.mock.calls.some(([k]) => k === 'transform')).toBe(true);
     set.mockRestore();
+    setPlot.mockRestore();
     // The stroke keeps its width however the scale stretches.
     expect(line.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+    // Once the tip reaches today the transform is gone: the line is drawn in today's scale.
+    flush(300);
+    expect(plot.hasAttribute('transform')).toBe(false);
   });
 
   it('a new day mid-animation carries on from where the tip is, never jumping back', () => {
@@ -272,6 +279,209 @@ describe('drawChart animates the new day', () => {
     drawChart(svg, { ...base, closes: base.closes.slice(0, 6) }, calm, 342, 200);
     expect(tipX(svg)).toBeCloseTo(chartGeometry({ ...base, closes: base.closes.slice(0, 6) }, 342, 200).today[0], 1);
     expect(queue.length).toBe(0);
+  });
+});
+
+describe('R57: the line grows at an even pace across the whole step', () => {
+  let queue: FrameRequestCallback[] = [];
+  let now = 0;
+  const origRaf = globalThis.requestAnimationFrame;
+  const origNow = performance.now.bind(performance);
+  beforeEach(() => {
+    queue = [];
+    now = 1000;
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      queue.push(cb);
+      return queue.length;
+    }) as typeof requestAnimationFrame;
+    performance.now = () => now;
+  });
+  afterEach(() => {
+    globalThis.requestAnimationFrame = origRaf;
+    performance.now = origNow;
+  });
+  const flush = (ms: number) => {
+    now += ms;
+    const q = queue;
+    queue = [];
+    for (const cb of q) cb(now);
+  };
+  /** Runs frames of 16 ms for `ms`. */
+  const run = (ms: number) => {
+    for (let t = 0; t < ms; t += 16) flush(Math.min(16, ms - t));
+  };
+  /** Today's dot where it is seen: its cx/cy through the plot's transform. */
+  const seen = (svg: SVGSVGElement): [number, number] => {
+    const dot = svg.querySelector('circle')!;
+    let x = Number(dot.getAttribute('cx'));
+    let y = Number(dot.getAttribute('cy'));
+    for (let e: Element | null = dot.parentElement; e && e !== svg.parentElement; e = e.parentElement) {
+      const t = e.getAttribute('transform');
+      const mm = t && /matrix\(([^)]+)\)/.exec(t);
+      if (mm) {
+        const [a, , , d, e1, f] = mm[1].split(/[\s,]+/).map(Number);
+        x = a * x + e1;
+        y = d * y + f;
+      }
+    }
+    return [x, y];
+  };
+  const days = (n: number) => ({ ...base, closes: Array.from({ length: n }, (_, i) => 100 - i * 0.4 + Math.sin(i) * 1.5) });
+
+  it('a 3 s day is still growing at 900 ms and at 2 s, and is about halfway at 1.5 s (no 900 ms cap, no ease-out)', () => {
+    const svg = svgEl();
+    drawChart(svg, days(5), calm, 342, 200);
+    const x0 = seen(svg)[0];
+    drawChart(svg, days(6), calm, 342, 200, { animateMs: 3000 });
+    const x1 = chartGeometry(days(6), 342, 200).today[0];
+    run(1500);
+    const half = (seen(svg)[0] - x0) / (x1 - x0);
+    expect(half).toBeGreaterThan(0.4);
+    expect(half).toBeLessThan(0.6);
+    run(500);
+    expect(seen(svg)[0]).toBeLessThan(x1 - 0.5);
+    run(1100);
+    expect(seen(svg)[0]).toBeCloseTo(x1, 1);
+  });
+
+  it('day after day at a steady step, the chart moves on every frame and never jumps back', () => {
+    // Early days (the tip walks right) and late ones (the tip holds at 90% and the line squeezes left).
+    for (const startDay of [8, 60]) {
+      const svg = svgEl();
+      drawChart(svg, days(startDay), calm, 342, 200);
+      const state = () => `${svg.querySelector('circle')!.getAttribute('cx')},${svg.querySelector('circle')!.getAttribute('cy')}|${svg.querySelector('[data-plot]')!.getAttribute('transform')}`;
+      let prev = state();
+      let prevX = seen(svg)[0];
+      let still = 0;
+      let back = 0;
+      for (let d = startDay + 1; d <= startDay + 30; d++) {
+        drawChart(svg, days(d), calm, 342, 200, { animateMs: 128 });
+        for (let k = 0; k < 8; k++) {
+          flush(16);
+          const now = state();
+          if (now === prev) still++;
+          const x = seen(svg)[0];
+          if (x < prevX - 0.1) back++;
+          prev = now;
+          prevX = x;
+        }
+      }
+      expect(still).toBe(0);
+      expect(back).toBe(0);
+    }
+  });
+
+  it('extendChart stretches the running growth by the hold, without a jump', () => {
+    const svg = svgEl();
+    drawChart(svg, days(5), calm, 342, 200);
+    drawChart(svg, days(6), calm, 342, 200, { animateMs: 1000 });
+    const x1 = chartGeometry(days(6), 342, 200).today[0];
+    run(496);
+    const before = seen(svg)[0];
+    extendChart(svg, 500);
+    expect(seen(svg)[0]).toBeCloseTo(before, 1);
+    run(560);
+    // Without the hold it would have arrived by now (1000 ms + a short trail).
+    expect(seen(svg)[0]).toBeLessThan(x1 - 0.5);
+    expect(seen(svg)[0]).toBeGreaterThan(before + 0.5);
+    run(500);
+    expect(seen(svg)[0]).toBeCloseTo(x1, 1);
+  });
+
+  it('K2: extend (the name lane FC calls) stretches the growth the same way', () => {
+    const svg = svgEl();
+    drawChart(svg, days(5), calm, 342, 200);
+    drawChart(svg, days(6), calm, 342, 200, { animateMs: 1000 });
+    const x1 = chartGeometry(days(6), 342, 200).today[0];
+    run(496);
+    extend(svg, 500);
+    run(560);
+    expect(seen(svg)[0]).toBeLessThan(x1 - 0.5);
+    run(500);
+    expect(seen(svg)[0]).toBeCloseTo(x1, 1);
+  });
+
+  it('a redraw with the step stretched by a hold stretches the growth once (not again with extendChart)', () => {
+    const svg = svgEl();
+    drawChart(svg, days(5), calm, 342, 200);
+    drawChart(svg, days(6), calm, 342, 200, { animateMs: 1000 });
+    const x1 = chartGeometry(days(6), 342, 200).today[0];
+    run(400);
+    extendChart(svg, 500);
+    drawChart(svg, days(6), calm, 342, 200, { animateMs: 1500 }); // the same hold, seen again in the step's length
+    run(1000);
+    expect(seen(svg)[0]).toBeLessThan(x1 - 0.1);
+    run(200);
+    expect(seen(svg)[0]).toBeCloseTo(x1, 1);
+  });
+
+  it('a pause holds the line where it is; on resume it carries on from there', () => {
+    const svg = svgEl();
+    drawChart(svg, days(5), calm, 342, 200);
+    drawChart(svg, days(6), calm, 342, 200, { animateMs: 1000 });
+    const x1 = chartGeometry(days(6), 342, 200).today[0];
+    run(400);
+    drawChart(svg, days(6), calm, 342, 200, { animateMs: 1000, paused: true });
+    const held = seen(svg)[0];
+    run(3000);
+    expect(seen(svg)[0]).toBeCloseTo(held, 2);
+    expect(queue.length).toBe(0); // no frames are spent while paused
+    drawChart(svg, days(6), calm, 342, 200, { animateMs: 1000 });
+    expect(seen(svg)[0]).toBeCloseTo(held, 1);
+    run(300);
+    expect(seen(svg)[0]).toBeGreaterThan(held + 0.5);
+    expect(seen(svg)[0]).toBeLessThan(x1 - 0.5);
+    run(400);
+    expect(seen(svg)[0]).toBeCloseTo(x1, 1);
+  });
+
+  it("a trade made today shows its dot at once, while the line is still growing towards it", () => {
+    const svg = svgEl();
+    drawChart(svg, days(5), calm, 342, 200);
+    drawChart(svg, days(6), calm, 342, 200, { animateMs: 1000 });
+    run(200);
+    drawChart(svg, { ...days(6), trades: [{ dayIndex: 5, side: 'sell' }], soldAt: days(6).closes[5] }, cash, 342, 200, { animateMs: 1000 });
+    const dots = [...svg.querySelectorAll('circle')].filter((c) => c.getAttribute('fill') === cash.accent);
+    expect(dots.length).toBe(1);
+    const g = chartGeometry(days(6), 342, 200);
+    expect(Number(dots[0].getAttribute('cx'))).toBeCloseTo(g.today[0], 0);
+  });
+
+  it('frames inside a day touch only the tip, the scale and positions: no line points, no label layout', () => {
+    const svg = svgEl();
+    const m = (n: number) => ({ ...days(n), trades: [{ dayIndex: 20, side: 'sell' as const }], soldAt: days(n).closes[20] });
+    drawChart(svg, m(200), cash, 342, 200);
+    drawChart(svg, m(201), cash, 342, 200, { animateMs: 1000 });
+    run(400); // past the scale's short ease
+    const writes: string[] = [];
+    const orig = Element.prototype.setAttribute;
+    const spy = vi.spyOn(Element.prototype, 'setAttribute').mockImplementation(function (this: Element, k: string, v: string) {
+      writes.push(`${this.tagName.toLowerCase()}${this.hasAttribute('data-tip') ? '[tip]' : ''}.${k}`);
+      orig.call(this, k, v);
+    });
+    run(200);
+    spy.mockRestore();
+    expect(writes.length).toBeGreaterThan(0);
+    const allowed = new Set(['path[tip].d', 'g.transform', 'circle.cx', 'circle.cy', 'text.x', 'text.y', 'rect.width']);
+    expect(writes.filter((w) => !allowed.has(w))).toEqual([]);
+  });
+});
+
+describe('the "Sold at" label keeps clear of the stamp (design minor 1)', () => {
+  it('when the level sits in the middle band, the label moves above or below the band', () => {
+    // A sale whose close lands about halfway up the chart.
+    const closes = [100, 104, 108, 110, 106, 100, 96, 92, 90, 94];
+    const m: ChartModel = { ...base, closes, trades: [{ dayIndex: 5, side: 'sell' }], soldAt: 100 };
+    const h = 200;
+    const g = chartGeometry(m, 342, h);
+    expect(Math.abs(g.soldAt!.y - h / 2)).toBeLessThan(20);
+    const svg = svgEl();
+    drawChart(svg, m, cash, 342, h);
+    const t = [...svg.querySelectorAll('text')].find((x) => x.textContent === 'Sold at')!;
+    expect(t).toBeDefined();
+    const y = Number(t.getAttribute('y'));
+    // Box y-13..y+3 must miss the stamp's band (h/2-22 .. h/2+26).
+    expect(y + 3 <= h / 2 - 22 || y - 13 >= h / 2 + 26).toBe(true);
   });
 });
 
@@ -335,6 +545,8 @@ describe('label placement holds on many charts (no crossings, 12px inset, clear 
           expect(b.x0 < o.x1 + 4 && o.x0 < b.x1 + 4 && b.y0 < o.y1 + 4 && o.y0 < b.y1 + 4).toBe(false);
         }
         if (worst) expect(g.line.some(([x, y]) => x >= b.x0 && x <= b.x1 && b.y1 > y)).toBe(false);
+        // "Sold at" reads as the level's words: it stays near the level, even when it steps off the stamp's band.
+        if (texts[i].textContent === 'Sold at') expect(Math.abs((b.y0 + b.y1) / 2 - g.soldAt!.y)).toBeLessThanOrEqual(42);
       });
     });
   }
