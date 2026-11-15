@@ -7,6 +7,11 @@ test('SITE_URL wins, then Cloudflare Pages CF_PAGES_URL, else empty; no trailing
   expect(siteUrl({})).toBe('');
 });
 
+test('a Cloudflare Workers build (WORKERS_CI) uses the live address unless SITE_URL is set', () => {
+  expect(siteUrl({ WORKERS_CI: '1' })).toBe('https://dont-press-sell.shrivatsakajaria.workers.dev');
+  expect(siteUrl({ WORKERS_CI: '1', SITE_URL: 'https://dontpresssell.com' })).toBe('https://dontpresssell.com');
+});
+
 test('index.html placeholders become absolute image and page URLs', () => {
   const html = '<meta property="og:image" content="%SITE_URL%/og.png"><meta property="og:url" content="%SITE_URL%/">';
   expect(withSiteUrl(html, 'https://a.pages.dev')).toBe(
