@@ -66,3 +66,12 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - R48. Every tap target at least 44 px; small text at least 14 px.
 - R49. Truth: "You finished with $N" (not "You made"); the last live balance equals the result; "Held through the worst day" only if invested that day; nothing on screen contradicts the numbers. "Hot hand" and "Wins in a row" stay (SK). No "play money" on the start screen (SK). No classroom mode.
 - R50. Preview only (artifact) for this round; live link later.
+- Round 2 checks (review, truth over 96 games, design, smoothness): 0 critical; 21 important across them. Rulings for the fix wave:
+- R51. The narrator owns every line under the headline. No separate opening line on the play screen (the Start screen already says it; also removes "$10,000 of play money" and wrong amounts in double or nothing). The first-sale line and "This is the day you sold last time" go through the narrator so its holds and truth checks cover them. Never a blank line for more than one step.
+- R52. On a sale or buy the line under the headline changes at the press to a true line about the trade, and is held >= 4 s from then.
+- R53. A held line stays true on every visible day: no counts that go stale ("three days in a row" when it is seven); event lines on their own day.
+- R54. Step length changes by at most 2.2x from one step to the next, up into and down out of slow days; game stays about 120 s. c1929 and c2000 keep several days per step in long quiet stretches (702 fall days cannot fit at one per step).
+- R55. Full red paper and shake only on slow falls of 2% or more; smaller slow days slow down without red.
+- R56. The sold/bought stamp is fully readable for at least 1.2 s (the clock holds 0.5 s, then play goes on under it), then fades.
+- R57. Smoothness: the chart line grows at an even pace across the whole step (holdFor stretches it), layout once per day and only the tip moves per frame; late days are caught up over several steps, not by squeezing one; sound starts after the clock, not on the Start tap; the chart and balance block keep a constant height through a game (no jumps on new headlines or at $10,000).
+- R58. Result: "You finished with $N" is never trimmed; the result chart gets at least 100 px of line height at 390x660; the Bank button reads "Keep my win" (no figure, the pot is hidden) and never removes "Challenge a friend"; "Best winning streak" is never trimmed; verdict lines fit false alarms.
