@@ -56,12 +56,14 @@ export function nearMisses(result: RunResult, run: RunData): string[] {
   }
   if (boughtAfter > 0) out.push(`Bought back ${days(boughtAfter)} after the bottom`);
 
-  // Largest daily rise and fall.
+  // Largest daily rise and fall, over the fall only: the play screen numbers those days ("Day N"), while the
+  // fast-forward after it samples days and shows years, so a day there could not be checked against anything seen.
   let bestDay = -1;
   let worstDay = -1;
   let bestRatio = 1;
   let worstRatio = 1;
-  for (let i = 1; i < run.closes.length; i++) {
+  const fallEnd = Math.min(Math.max(run.fallEndIndex, 1), run.closes.length);
+  for (let i = 1; i < fallEnd; i++) {
     const ratio = run.closes[i] / run.closes[i - 1];
     if (ratio > bestRatio) {
       bestRatio = ratio;

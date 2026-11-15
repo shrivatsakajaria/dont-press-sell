@@ -157,6 +157,22 @@ describe('verdictCopy', () => {
       headline: 'Local investor blinks at the wrong moment',
     });
   });
+  it('false alarms: Big Short names the scare, not a crash (r2 truth M5)', () => {
+    const r = result({ trades: [sell(5), buy(21)], lead: 5000 });
+    expect(verdictCopy('bigShort', r, run('scare')).headline).toBe('Local investor dodges the worst of the scare');
+    expect(verdictCopy('bigShort', r, run('crash')).headline).toBe('Local investor dodges the worst of the crash');
+  });
+  it('shakenOut: a sale long before the low did not bounce straight back (r2 truth M4)', () => {
+    // run('scare'): the low is day 20. Sold on day 3: the market fell for 17 more days.
+    const early = verdictCopy('shakenOut', result({ trades: [sell(3), buy(40)], lead: -300 }), run('scare'));
+    expect(early.line).toBe('Sold early in a scare the market got over');
+    // Sold within 10 days of the low (or after it): the dip did bounce back.
+    for (const d of [10, 18, 20, 25]) {
+      expect(verdictCopy('shakenOut', result({ trades: [sell(d), buy(40)], lead: -300 }), run('scare')).line).toBe(
+        'Sold a dip that bounced straight back',
+      );
+    }
+  });
   it('bagholder: an early first sale bought back higher reads "Sold early" (R34), headline kept', () => {
     // run(): the low is day 20, so the first third of the fall is days 0 to 6.
     const early = verdictCopy('bagholder', result({ trades: [sell(3), buy(40)], lead: -300 }), run());
