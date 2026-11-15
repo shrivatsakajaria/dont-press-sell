@@ -1,6 +1,6 @@
 // Boot and flow (spec 6): straight into a mystery run, then the result front page, from which
 // every other mode starts. Rules live in the modules; this file only joins them.
-import { BORROWED_LABEL, BORROWED_OPENING, BUST_HEADLINE, ISLAND_HEADLINE, REMATCH_LABEL, dailyLabel } from './content/copy';
+import { BORROWED_LABEL, BUST_HEADLINE, ISLAND_HEADLINE, REMATCH_LABEL, dailyLabel } from './content/copy';
 import { loadHeadlines } from './content/headlines';
 import { RUNS, RUN_IDS, loadRun, runMeta } from './content/runs';
 import { simulateBorrowed } from './engine/borrowed';
@@ -175,12 +175,14 @@ async function play(game: Game, opts: { double?: boolean; full?: boolean; retry?
   clear();
   lastGame = game;
   const steps = buildSchedule(run, headlines);
+  const prev = game.previous ?? null;
   const narrator = createNarrator(run, headlines, {
     real: game.real,
     rng: mulberry32(hashString(`${game.runId}:${Date.now()}`)),
     start: game.start,
+    steps,
+    soldLastTime: prev?.trades.find((t) => t.side === 'sell')?.dayIndex ?? null,
   });
-  const prev = game.previous ?? null;
   const borrowed = !!game.borrowed;
   const firstForward = steps.findIndex((st) => st.phase === 'forward');
   const forwardSteps = firstForward < 0 ? 0 : steps.length - firstForward;
@@ -190,7 +192,6 @@ async function play(game: Game, opts: { double?: boolean; full?: boolean; retry?
     runLabel: game.label,
     borrowed,
     simulateFn: borrowed ? simulateBorrowed : undefined,
-    opening: borrowed ? BORROWED_OPENING : undefined,
     gate: startScreen({
       full,
       label: game.mode === 'picked' ? runMeta(game.runId)!.pickName : game.label,
@@ -201,6 +202,7 @@ async function play(game: Game, opts: { double?: boolean; full?: boolean; retry?
     start: game.start,
     pot: potNow(),
     narrate: (d, prevDay, balance, trades) => narrator.step(d, prevDay, balance, trades),
+    narrateTrade: (d, trades, balance) => narrator.trade(d, trades, balance),
     soldLastTime: prev?.trades.find((t) => t.side === 'sell')?.dayIndex ?? null,
     scoreToBeat: prev ? prev.final : game.challenge ? game.challenge.final : null,
     other: prev ? prev.balances : null,
