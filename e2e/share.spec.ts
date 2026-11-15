@@ -8,7 +8,7 @@ test('with sharing unavailable, Challenge a friend shows the card full screen wi
   });
   await page.clock.install();
   await page.goto('/?run=s2018');
-  await page.clock.runFor(46_000);
+  await page.clock.runFor(119_000); // R27: s2018 runs about 118 s
   await expect(page.getByText('Late edition')).toBeVisible();
   // Before the reveal: the name is covered.
   await expect(page.locator('.es-folio')).not.toContainText('wobble');

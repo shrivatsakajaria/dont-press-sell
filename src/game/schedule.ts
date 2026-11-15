@@ -16,28 +16,33 @@ export interface Step {
   slow: boolean;
 }
 
-/** Time for the whole fall, slow steps included. SK may change it (checkpoint 2). */
-export const FALL_BUDGET_MS = 37_000;
+/*
+ * Pacing (ruling R27, after the player panel): a game lasts about 120 s so players
+ * can read the headlines and decide. Normal runs: 108 s of fall + 10 s of
+ * fast-forward. Long falls about 140 s (ceiling 150 s). Short falls finish sooner.
+ */
+/** Time for the whole fall, slow steps included (R27). */
+export const FALL_BUDGET_MS = 108_000;
 /**
  * Fall budget for the long falls (ruling R17: c1929 and c2000, whose falls run
- * past LONG_FALL_DAYS trading days); spec 7.4 lets them run to about 60 s in all.
+ * past LONG_FALL_DAYS trading days); R27: about 140 s in all, never over 150 s.
  */
-export const LONG_FALL_BUDGET_MS = 50_000;
+export const LONG_FALL_BUDGET_MS = 130_000;
 /** A fall of more than this many trading days takes LONG_FALL_BUDGET_MS (only c1929 and c2000 today). */
 export const LONG_FALL_DAYS = 500;
 /**
- * Longest hold of an ordinary fall step (ruling R16), so slow days (800 ms) always
- * feel slower. Falls too short to fill the budget under this cap finish sooner.
+ * Longest hold of an ordinary fall step (R16, R27), so slow days always feel slower.
+ * Falls too short to fill the budget under this cap finish sooner.
  */
-export const MAX_QUIET_MS = 700;
-/** Time for the whole fast-forward. SK may change it (checkpoint 2); keep it within 7,000 to 8,000. */
-export const FORWARD_BUDGET_MS = 7_500;
-/** Hold of a slow-motion (big) day. */
-export const SLOW_MS = 800;
+export const MAX_QUIET_MS = 1_500;
+/** Time for the whole fast-forward (R27). */
+export const FORWARD_BUDGET_MS = 10_000;
+/** Hold of a slow-motion (big, red or decoy) day: long enough to read the headline (R27). */
+export const SLOW_MS = 3_000;
 /** The floor: the screen never changes more than eight times a second. */
 export const MIN_STEP_MS = 125;
-/** The first slow step must begin by this time. */
-export const FIRST_SLOW_BY_MS = 10_000;
+/** The first slow step must begin by this time (R27: relaxed from 10 s to 15 s for the slower game). */
+export const FIRST_SLOW_BY_MS = 15_000;
 /** Most slow steps in a fall, decoys included (R20). */
 export const MAX_SLOW = 10;
 /** True slow days: big headline days, then the largest daily moves (either direction), up to this many (R20). */
@@ -52,23 +57,23 @@ const DECOY_LOW_PCT = 0.5;
  * and the run simply finishes sooner. Rule-based, never by run id.
  */
 export const SHORT_FALL_DAYS = 20;
-export const SHORT_FORWARD_MS_PER_DAY = 250;
-/** Short-fall fast-forward floor (R23): max(SHORT_FORWARD_MIN_MS, days x 250 ms), up to FORWARD_BUDGET_MS. */
-export const SHORT_FORWARD_MIN_MS = 3_000;
+export const SHORT_FORWARD_MS_PER_DAY = 400;
+/** Short-fall fast-forward floor (R23, R27): max(SHORT_FORWARD_MIN_MS, days x 400 ms), up to FORWARD_BUDGET_MS. */
+export const SHORT_FORWARD_MIN_MS = 5_000;
 /**
  * Pacing of a fall under SHORT_FALL_DAYS (R23): every fall day is its own step,
  * ordinary days hold SHORT_QUIET_MS and slow days SHORT_SLOW_MS (still the longer).
  * No fall budget applies; the run is as long as its days make it.
  */
-export const SHORT_QUIET_MS = 1_400;
-export const SHORT_SLOW_MS = 1_800;
+export const SHORT_QUIET_MS = 3_000;
+export const SHORT_SLOW_MS = 4_000;
 /** Fall days per true slow day, and per decoy, when the fall is too short for the full 7 + 3 (R22). */
 const DAYS_PER_TRUE_SLOW = 4;
 const DAYS_PER_DECOY = 8;
 const DECOY_HIGH_PCT = 0.85;
 
-/** Opening days are squeezed to begin the first slow step by this time (margin under 10 s for rounding and floors). */
-const OPENING_TARGET_MS = 9_000;
+/** Opening days are squeezed to begin the first slow step by this time (margin under FIRST_SLOW_BY_MS for rounding and floors). */
+const OPENING_TARGET_MS = FIRST_SLOW_BY_MS - 1_500;
 /** Days in the trailing window that measures the recent swing. */
 const SWING_WINDOW = 5;
 
@@ -86,7 +91,7 @@ export function slowCountsFor(fallDays: number): { truth: number; decoys: number
 
 /**
  * The fast-forward budget: FORWARD_BUDGET_MS; after a fall under SHORT_FALL_DAYS,
- * max(SHORT_FORWARD_MIN_MS, forward days x 250 ms) capped at FORWARD_BUDGET_MS (R22, R23).
+ * max(SHORT_FORWARD_MIN_MS, forward days x SHORT_FORWARD_MS_PER_DAY) capped at FORWARD_BUDGET_MS (R22, R23, R27).
  */
 export function forwardBudgetFor(run: RunData): number {
   const n = run.closes.length;

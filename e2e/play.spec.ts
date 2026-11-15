@@ -56,12 +56,16 @@ test('pause stops the clock and resume starts it again', async ({ page }) => {
   await expect(page.locator('.folio span').nth(1)).toHaveText(day!);
   await page.locator('button.pause').click();
   await expect(page.locator('button.pause')).toHaveText('Pause');
-  await expect(page.locator('.folio span').nth(1)).not.toHaveText(day!, { timeout: 3000 });
+  await expect(page.locator('.folio span').nth(1)).not.toHaveText(day!, { timeout: 5000 }); // R27: steps hold up to 3 s
 });
 
 test('the fast-forward shows a year counter and the run ends on the result page', async ({ page }) => {
+  // R27: s2018 runs about 118 s (108 s fall, 10 s fast-forward), so drive a fake clock.
+  await page.clock.install();
   await page.goto('/?run=s2018');
-  await expect(page.locator('.folio')).toContainText('Fast forward', { timeout: 60_000 });
+  await page.clock.runFor(109_000);
+  await expect(page.locator('.folio')).toContainText('Fast forward');
   await expect(page.locator('.folio span').nth(1)).toHaveText(/^Year \d+$/);
-  await expect(page.getByText('Late edition')).toBeVisible({ timeout: 20_000 });
+  await page.clock.runFor(12_000);
+  await expect(page.getByText('Late edition')).toBeVisible();
 });

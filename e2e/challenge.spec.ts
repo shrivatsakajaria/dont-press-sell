@@ -24,7 +24,7 @@ test('a challenge link plays that run blind with the score to beat, and the resu
   await expect(page.locator('.folio')).toContainText('Mystery crash');
   await expect(page.locator('.regret')).toHaveText('Score to beat: $11,341');
   await expect(page.locator('.standfirst')).toHaveText(OPENING);
-  await page.clock.runFor(47_000);
+  await page.clock.runFor(119_000); // R27: s2018 runs about 118 s
   await expect(page.getByText('Late edition')).toBeVisible();
   await expect(page.getByText('Tap to see what that was')).toBeVisible();
   await expect(page.locator('.es-row').filter({ hasText: 'Your challenger' })).toContainText('$11,341');
