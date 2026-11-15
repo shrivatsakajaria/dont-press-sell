@@ -11,14 +11,16 @@ export function dollars(n: number): string {
 export const MASTHEAD = "Don't Press Sell";
 export const FIRST_SALE_LINE = 'You are out. To win, buy back in for less than you sold.';
 export const sellLabel = (n: number) => `Sell for ${dollars(n)}`;
-// Round 2, lane C (R38, R41): the buy-back button names one number, the saving against the latest
+// Round 2, lane C (R38, R41); round 3, lane S (R63: "more expensive", never "dearer"): the buy-back button names one number, the saving against the latest
 // sale's close (positive is cheaper, 0 is the same price); the press stamps.
 const cheaperWords = (n: number) =>
-  Math.round(n) === 0 ? 'at the same price' : `${dollars(n)} ${n > 0 ? 'cheaper' : 'dearer'}`;
+  Math.round(n) === 0 ? 'at the same price' : `${dollars(n)} ${n > 0 ? 'cheaper' : 'more expensive'}`;
 export const buyBackLabel = (saving: number) => `Buy back ${cheaperWords(saving)}`;
 export const soldStamp = (n: number) => `Sold at ${dollars(n)}`;
 export const boughtStamp = (saving: number) => `Bought back ${cheaperWords(saving)}`;
-export const TAP_TO_REVEAL = 'Tap to see what that was';
+/** Round 3, lane S (R61): in the final hold, in place of the greyed-out button, until the result arrives. */
+export const GAME_OVER = 'Game over';
+export const TAP_TO_REVEAL ='Tap to see what that was';
 export const nextMysteryLine = (n: number) => `Next mystery crash in ${n}. Tap to stop.`;
 export const WINS_IN_A_ROW = 'Wins in a row';
 export const sellingAtTopLine = (n: number) => `Selling at the top would have saved you ${dollars(n)}`;
@@ -73,6 +75,8 @@ export const START_LINES: [string, string, string] = [
   'You have $10,000, and one button.',
   'Press the button to sell if you dare. Get back in cheaper and you win. Wait too long and the market leaves without you.',
 ];
+/** Round 3, lane S (R62): SK's fourth line, after his three, on the full Start screen only. */
+export const START_DRAW_LINE = "Do nothing and it's a draw.";
 export const START_LABEL = 'Start';
 
 export const DOUBLE_OR_NOTHING = 'Double or nothing';

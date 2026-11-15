@@ -52,7 +52,7 @@ describe('playCues', () => {
     expect(f.sfx.payout).toHaveBeenCalledWith(true);
     expect(f.buzz).toHaveBeenCalledWith([40, 60, 40]);
   });
-  test('a dearer buy-back is a plain trade: no win', () => {
+  test('a more expensive buy-back is a plain trade: no win', () => {
     const f = fake();
     playCues(f.sfx, f.buzz, { ...base, newStep: false, trade: 'buy', win: false });
     expect(f.sfx.till).toHaveBeenCalled();

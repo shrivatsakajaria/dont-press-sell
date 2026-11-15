@@ -120,7 +120,7 @@ describe('screenModel', () => {
     s.history.set(4, { balance: 9000, invested: false });
     const m = screenModel(s);
     // 9,000 x (1 - 92 / 90) = -200
-    expect(m.buttonLabel).toBe('Buy back $200 dearer');
+    expect(m.buttonLabel).toBe('Buy back $200 more expensive');
     expect(m.inCash).toBe(true);
     expect(m.status).toBe('You are in cash');
     expect(m.paper.bg).toBe('#ebe4d6');
@@ -167,7 +167,7 @@ describe('screenModel', () => {
   it('every buy-back label is set at the long size and every sell label at full size (R26)', () => {
     const v = view(5, { invested: false, balance: 900000, leadNow: -12345 });
     const m = screenModel(state(v, { trades: [{ dayIndex: 4, side: 'sell' }] }));
-    expect(m.buttonLabel).toBe('Buy back $20,000 dearer');
+    expect(m.buttonLabel).toBe('Buy back $20,000 more expensive');
     expect(m.longLabel).toBe(true);
     const short = screenModel(state(view(5, { invested: false, balance: 9000, leadNow: 0 }), { trades: [{ dayIndex: 5, side: 'sell' }] }));
     expect(short.buttonLabel).toBe('Buy back at the same price');

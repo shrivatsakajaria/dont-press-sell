@@ -33,7 +33,7 @@ for (const height of [844, 660]) {
 
       await button.click();
       // R38: sold at this close, so buying back now is the same price; one number only (no regret line).
-      await expect(button).toHaveText(/^Buy back (at the same price|\$[\d,]+ (cheaper|dearer))$/);
+      await expect(button).toHaveText(/^Buy back (at the same price|\$[\d,]+ (cheaper|more expensive))$/);
       await expect(page.locator('.regret')).toBeHidden();
       await expect(page.getByText(FIRST_SALE)).toBeVisible();
       await expect(page.locator('.folio')).toContainText(/You are in cash|Fast forward/);

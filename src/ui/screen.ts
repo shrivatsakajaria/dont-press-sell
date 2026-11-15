@@ -2,12 +2,12 @@
 // screenModel() turns the session's view into what the page shows (pure, tested);
 // mountScreen() draws it; startPlay() runs one session on it.
 import {
-  FOOTER_PLAY, MASTHEAD, START_LABEL, boughtStamp, buyBackLabel, dollars, marketChartLabel, potLine,
+  FOOTER_PLAY, GAME_OVER, MASTHEAD, START_LABEL, boughtStamp, buyBackLabel, dollars, marketChartLabel, potLine,
   scoreToBeatLine, sellLabel, sellingAtTopLine, soldStamp,
 } from '../content/copy';
 import type { RunData, RunResult, Trade } from '../engine/types';
 import { SEEN_FIRST_SALE } from '../game/narrator';
-import type { Step } from '../game/schedule';
+import { stepHold, type Step } from '../game/schedule';
 import { createSession, type Session, type SessionView, type SimulateFn } from '../game/session';
 import { load, save } from '../store/store';
 import { announce, initAnnouncer } from './a11y';
@@ -123,6 +123,139 @@ export interface PlayState {
   other?: number[] | null;
   /** No longer shown (R51: no opening line on the play screen; the Start screen says it). Kept so callers compile. */
   opening?: string;
+}
+
+// --- R60: the progress line ---------------------------------------------------
+
+/**
+ * The planned time (ms) of every step after `i`, for a player in the given position (quiet fall days run
+ * quicker in cash, R35). Suffix sums are built once per game, so each lookup is O(1).
+ */
+export function remainingPlan(steps: Step[]): (i: number, invested: boolean) => number {
+  const n = steps.length;
+  const inv = new Float64Array(n + 1);
+  const cash = new Float64Array(n + 1);
+  for (let j = n - 1; j >= 0; j--) {
+    inv[j] = inv[j + 1] + stepHold(steps[j], true);
+    cash[j] = cash[j + 1] + stepHold(steps[j], false);
+  }
+  return (i, invested) => (invested ? inv : cash)[Math.min(n, Math.max(0, i + 1))];
+}
+
+/**
+ * R60: where the line should be when this step ends. From where it is now (`at`), the rest of the line is
+ * shared out over the rest of the planned time: this step's `stepMs`, then `restMs` for the steps after it.
+ * With an unchanged plan this is exactly elapsed / total; when a trade changes the plan, the line speeds up
+ * or slows down instead of jumping or going back. Always >= at, and 1 on the last step.
+ */
+export function progressTarget(at: number, stepMs: number, restMs: number): number {
+  const a = Math.min(1, Math.max(0, at));
+  if (!(restMs > 0)) return 1;
+  if (!(stepMs > 0)) return a;
+  return a + (1 - a) * (stepMs / (stepMs + restMs));
+}
+
+export interface ProgressLine {
+  /** A new step: run from where the line is to `to` over `ms`, linearly. */
+  step(to: number, ms: number): void;
+  /** The day clock held `ms` longer (a press): the rest of the step stretches, without a jump. */
+  hold(ms: number): void;
+  pause(): void;
+  resume(): void;
+  /** The game is over: full. */
+  finish(): void;
+  /** Where the line is now (0..1), as the transition draws it. */
+  value(): number;
+}
+
+/**
+ * R60: drives the line's scaleX with one linear CSS transition per step (no per-frame work, no timer of
+ * its own: the session's steps set the pace). It keeps the same linear model in JS so a pause or a hold can
+ * stop or re-aim the line exactly where the browser has drawn it. Reduced motion: whole steps, no transition.
+ */
+export function createProgressLine(el: HTMLElement, now: () => number, reduced: () => boolean): ProgressLine {
+  let from = 0;
+  let to = 0;
+  let t0 = 0;
+  let dur = 0;
+  let paused = false;
+  let left = 0;
+  const value = () => {
+    if (paused) return from;
+    if (dur <= 0) return to;
+    const k = Math.min(1, Math.max(0, (now() - t0) / dur));
+    return from + (to - from) * k;
+  };
+  const fix = (v: number) => {
+    el.style.transition = 'none';
+    el.style.transform = `scaleX(${+v.toFixed(5)})`;
+  };
+  /**
+   * From the value drawn now to `to` over `ms`. A new target starts a new transition from wherever the
+   * browser has the line, so a new day needs no layout (R43). Only a re-timed run to the same target (a
+   * press hold) must restart: it commits the start first with one reflow, once per press.
+   */
+  const run = (ms: number, restart = false) => {
+    if (ms <= 0 || reduced()) {
+      from = to;
+      dur = 0;
+      fix(to);
+      return;
+    }
+    t0 = now();
+    dur = ms;
+    if (restart) {
+      fix(from);
+      void el.offsetWidth;
+    }
+    el.style.transition = `transform ${+ms.toFixed(1)}ms linear`;
+    el.style.transform = `scaleX(${+to.toFixed(5)})`;
+  };
+  fix(0);
+  return {
+    step(target, ms) {
+      const at = value();
+      from = at;
+      to = Math.max(at, Math.min(1, target));
+      if (paused) {
+        left = ms;
+        fix(from);
+        return;
+      }
+      run(ms); // with reduced motion: one step at a time, straight to the step's share
+    },
+    hold(ms) {
+      if (!(ms > 0)) return;
+      if (paused) {
+        left += ms;
+        return;
+      }
+      if (dur <= 0) return;
+      const rest = Math.max(0, t0 + dur - now());
+      from = value();
+      run(rest + ms, true);
+    },
+    pause() {
+      if (paused) return;
+      const at = value();
+      left = dur > 0 ? Math.max(0, t0 + dur - now()) : 0;
+      paused = true;
+      from = at;
+      fix(at);
+    },
+    resume() {
+      if (!paused) return;
+      paused = false;
+      run(left);
+    },
+    finish() {
+      paused = false;
+      from = to = 1;
+      dur = 0;
+      fix(1);
+    },
+    value,
+  };
 }
 
 function yearsSince(a: string, b: string): number {
@@ -252,7 +385,9 @@ export interface Screen {
   stamp(text: string, win: boolean, ms: number): void;
   /** K2: the day clock was held `ms` longer (a press): the chart's running growth stretches over it. */
   holdChart(ms: number): void;
-  /** The run is over: the button no longer takes presses (the last day stays on screen). */
+  /** R60: the progress line under the masthead. */
+  progress: ProgressLine;
+  /** The run is over: the button gives way to the "Game over" line (R61); the last day stays on screen. */
   freeze(): void;
   /** Disconnects the resize watcher and clears the page colours on <html>. */
   destroy(): void;
@@ -295,6 +430,23 @@ const STYLE = `
 @media (prefers-reduced-motion:reduce){.act.cheaper{animation:none}}
 .pot:empty{display:none}
 .is-over .act{opacity:0.45;animation:none}
+/* R63: "Buy back $99,999 more expensive" stays on one line down to 360 px: the buy-back size (R26, one size
+   for every buy-back label) follows the column, 20px at most. 0.059 em per px of text width: 16.8 em of label. */
+.act.long{font-size:min(20px,calc((100vw - 64px) * 0.059));white-space:nowrap}
+/* R60: the progress line. It lies on the masthead's bottom rule (absolute: nothing moves), in the ink of the
+   paper, so it turns with the red day; empty and hidden on the Start screen. */
+.masthead{position:relative}
+.masthead .progress{position:absolute;left:0;right:0;bottom:-1px;height:3px;background:currentColor;
+  transform:scaleX(0);transform-origin:left center;will-change:transform;pointer-events:none}
+.is-gate .masthead .progress{visibility:hidden}
+/* R61: in the final hold the button gives way, in its own box, to a plain "Game over" line: no jump. */
+.act-box{position:relative;flex:none}
+.over{display:none;position:absolute;inset:0;margin:0;align-items:center;justify-content:center;
+  border-top:2px solid currentColor;border-bottom:2px solid currentColor;background:var(--bg);color:var(--ink);
+  font-weight:800;font-size:44px;line-height:1;letter-spacing:-0.03em}
+.is-over .over{display:flex}
+.is-over .act{visibility:hidden}
+@media (max-height:760px){.over{font-size:40px}}
 .foot .quiet{flex:none}
 .foot .sound{margin-left:auto}
 .folio,.foot{font-size:14px}
@@ -361,6 +513,11 @@ function splitFigure(label: string): [string, string, string] {
 export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): Screen {
   const page = h('main', 'play');
   const masthead = h('div', 'masthead', MASTHEAD);
+  // R60: a thin ink line over the masthead's bottom rule, out of the flow; scaleX carries the share done.
+  const bar = h('div', 'progress');
+  bar.setAttribute('aria-hidden', 'true');
+  masthead.append(bar);
+  const progress = createProgressLine(bar, () => Date.now(), reducedMotion);
   const folio = h('div', 'folio');
   const fRun = h('span', '');
   const fDay = h('span', '');
@@ -391,6 +548,11 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   const actFig = h('span', 'fig');
   const actPost = h('span', '');
   act.append(actPre, actFig, actPost);
+  // R61: the button's box also holds the "Game over" line, laid over it, so the end moves nothing.
+  const actBox = h('div', 'act-box');
+  const over = h('p', 'over');
+  over.setAttribute('aria-live', 'polite');
+  actBox.append(act, over);
   const under = h('p', 'under');
   const foot = h('div', 'foot');
   const pot = h('span', 'pot');
@@ -400,7 +562,7 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   const pause = h('button', 'quiet pause', PAUSE);
   pause.type = 'button';
   foot.append(pot, sound, pause);
-  page.append(masthead, folio, intro, news, chartWrap, figures, regret, spacer, act, under, foot);
+  page.append(masthead, folio, intro, news, chartWrap, figures, regret, spacer, actBox, under, foot);
   root.replaceChildren(page);
 
   const balanceRoll = createRoll(balance);
@@ -716,9 +878,12 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
     holdChart(ms) {
       extendChart(svg, ms);
     },
+    progress,
     freeze() {
       frozen = true;
+      progress.finish();
       page.classList.add('is-over');
+      over.textContent = GAME_OVER;
       act.setAttribute('aria-disabled', 'true');
       pause.setAttribute('aria-disabled', 'true');
     },
@@ -800,6 +965,8 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
   let words: { headline: string; commentary: string } | undefined;
   let wordsStep = -1;
   let gated = !!opts.gate;
+  /** R60: the planned time still to come after each step, invested or in cash. */
+  const plan = remainingPlan(steps);
 
   const screen = mountScreen(root, {
     onPressStart() {
@@ -901,6 +1068,14 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       soldLastTime: opts.soldLastTime, scoreToBeat: opts.scoreToBeat, other: opts.other, opening: opts.opening,
     });
     screen.render(m);
+    if (v.stepIndex !== lastFrameStep) {
+      // R60: once per step, the line is aimed at the share of the planned game done when this step ends.
+      const ms = v.stepMs ?? steps[v.stepIndex]?.holdMs ?? 0;
+      screen.progress.step(progressTarget(screen.progress.value(), ms, plan(v.stepIndex, v.invested)), ms);
+    }
+    // R60: a press holds the day clock PRESS_HOLD_MS (below); the progress line stretches over the same hold.
+    if (stamp) screen.progress.hold(PRESS_HOLD_MS);
+
     if (stamp) {
       screen.stamp(stamp.text, stamp.win, STAMP_MS);
       // C1: the day clock holds on each press (lane A's session; absent, the stamp still shows).
@@ -932,11 +1107,13 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
     simulateFn: opts.simulateFn,
     onPause() {
       paused = true;
+      screen.progress.pause();
       opts.onPause?.();
       if (rendered) draw(session.view());
     },
     onResume() {
       paused = false;
+      screen.progress.resume();
       opts.onResume?.();
       if (rendered) draw(session.view());
     },

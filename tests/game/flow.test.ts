@@ -3,7 +3,7 @@ import type { RunResult } from '../../src/engine/types';
 import {
   bankPending, borrowedUnlocked, challengeFits, currentStreak, doubleUp, firstEverGame, settle, startScreen, verifiedChallenge,
 } from '../../src/game/flow';
-import { BORROWED_OPENING, START_LINES } from '../../src/content/copy';
+import { BORROWED_OPENING, START_DRAW_LINE, START_LINES } from '../../src/content/copy';
 import { getPot, resetPot } from '../../src/game/pot';
 import { getRecord } from '../../src/store/record';
 import { resetCells } from '../../src/store/store';
@@ -189,12 +189,13 @@ describe('verifiedChallenge (I5)', () => {
 
 describe('startScreen (R45)', () => {
   const base = { label: 'Mystery crash', borrowed: false, scoreToBeat: null, doubleStart: null };
-  test("the first game shows SK's full start text, unchanged", () => {
-    expect(startScreen({ ...base, full: true })).toEqual({ lines: [...START_LINES], extra: null, note: null });
+  test("the first game shows SK's full start text, unchanged, then the draw line (R62)", () => {
+    expect(startScreen({ ...base, full: true })).toEqual({ lines: [...START_LINES, START_DRAW_LINE], extra: null, note: null });
+    expect(START_DRAW_LINE).toBe("Do nothing and it's a draw.");
   });
   test('the full text keeps the borrowed line and the score to beat', () => {
     const g = startScreen({ ...base, full: true, borrowed: true, scoreToBeat: 11804 });
-    expect(g.lines).toEqual([...START_LINES]);
+    expect(g.lines).toEqual([...START_LINES, START_DRAW_LINE]);
     expect(g.extra).toBe(BORROWED_OPENING);
     expect(g.note).toBe('Score to beat: $11,804');
   });

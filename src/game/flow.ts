@@ -1,7 +1,7 @@
 // Settling a finished run (spec 6.8, 6.11, 6.12): the record, the pot and the double-or-nothing
 // streak in one place, so the page code only draws. Storage may be missing: every value lives
 // in memory for the visit and is written through when it can be.
-import { BORROWED_OPENING, doubleStartLine, scoreToBeatLine, START_LINES } from '../content/copy';
+import { BORROWED_OPENING, doubleStartLine, scoreToBeatLine, START_DRAW_LINE, START_LINES } from '../content/copy';
 import { RUN_IDS } from '../content/runs';
 import { simulate } from '../engine/simulate';
 import type { BorrowedResult, RunResult, Trade, VerdictId } from '../engine/types';
@@ -160,7 +160,7 @@ export interface StartScreen {
 
 /**
  * The start screen every game opens on (R45). The first game of a visit shows the owner's full start
- * text (R29, never changed); later games show a short version: the game's label, and Start.
+ * text (R29, never changed) and his draw line (R62); later games show a short version: the game's label, and Start.
  * Borrowed money always keeps its warning; the note gives the score to beat or a double's stake.
  */
 export function startScreen(o: {
@@ -172,7 +172,7 @@ export function startScreen(o: {
 }): StartScreen {
   const note = o.doubleStart !== null ? doubleStartLine(o.doubleStart) : o.scoreToBeat !== null ? scoreToBeatLine(o.scoreToBeat) : null;
   return {
-    lines: o.full ? [...START_LINES] : [o.label],
+    lines: o.full ? [...START_LINES, START_DRAW_LINE] : [o.label],
     extra: o.borrowed ? BORROWED_OPENING : null,
     note,
   };
