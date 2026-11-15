@@ -14,7 +14,7 @@ import { playCues } from './fx/cues';
 import { buzz, setHapticsEnabled } from './fx/haptics';
 import { createSfx } from './fx/sound';
 import {
-  bankPending, borrowedOn, borrowedUnlocked, challengeFits, currentStreak, doubleUp, setBorrowed, settle,
+  bankPending, borrowedOn, borrowedUnlocked, currentStreak, doubleUp, setBorrowed, settle, verifiedChallenge,
 } from './game/flow';
 import { createNarrator, tradeNews, type NarratorRun } from './game/narrator';
 import { dailyPick, pickMystery } from './game/picker';
@@ -365,6 +365,7 @@ function collection() {
 /**
  * A challenge link (#c=<code>) opens that exact run, blind, with the score to beat (spec 6.7).
  * A code that does not decode, or whose trades fall outside the run, starts a fresh mystery with no error.
+ * The score to beat is recomputed from the trades; the final in the link is ignored (I5).
  */
 async function challenge(code: string) {
   history.replaceState(null, '', location.pathname + location.search);
@@ -373,8 +374,9 @@ async function challenge(code: string) {
   if (c) {
     try {
       const run = await loadRun(c.runId);
-      if (challengeFits(c, run.closes.length)) {
-        return play({ mode: 'challenge', runId: c.runId, label: MYSTERY_LABEL, start: START, real: false, challenge: c }, { gate });
+      const checked = verifiedChallenge(c, run.closes);
+      if (checked) {
+        return play({ mode: 'challenge', runId: c.runId, label: MYSTERY_LABEL, start: START, real: false, challenge: checked }, { gate });
       }
     } catch {
       /* fall through to a mystery */

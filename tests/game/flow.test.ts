@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { RunResult } from '../../src/engine/types';
-import { bankPending, borrowedUnlocked, challengeFits, currentStreak, doubleUp, settle } from '../../src/game/flow';
+import { bankPending, borrowedUnlocked, challengeFits, currentStreak, doubleUp, settle, verifiedChallenge } from '../../src/game/flow';
 import { getPot, resetPot } from '../../src/game/pot';
 import { getRecord } from '../../src/store/record';
 import { resetCells } from '../../src/store/store';
@@ -143,5 +143,22 @@ describe('challengeFits', () => {
     expect(challengeFits(c([3, 99]), 100)).toBe(true);
     expect(challengeFits(c([3, 100]), 100)).toBe(false);
     expect(challengeFits(c([3, 5000]), 100)).toBe(false);
+  });
+});
+
+describe('verifiedChallenge (I5)', () => {
+  const closes = [100, 90, 80, 100, 107.5];
+  const c = (final: number, days: number[]) => ({
+    runId: 'c2007', final, trades: days.map((d, i) => ({ dayIndex: d, side: (i % 2 ? 'buy' : 'sell') as 'buy' | 'sell' })),
+  });
+  test('the score to beat is recomputed from the run and the trades; the encoded final is ignored', () => {
+    // Sold at 90, back in at 80: 9,000 -> 12,093.75 at the end.
+    const forged = verifiedChallenge(c(1_000_000_000, [1, 2]), closes)!;
+    expect(forged.final).toBe(12094);
+    expect(forged.trades).toEqual([{ dayIndex: 1, side: 'sell' }, { dayIndex: 2, side: 'buy' }]);
+    expect(verifiedChallenge(c(5, []), closes)!.final).toBe(10750);
+  });
+  test('a code whose trades do not fit the run is rejected', () => {
+    expect(verifiedChallenge(c(9000, [1, 5]), closes)).toBeNull();
   });
 });

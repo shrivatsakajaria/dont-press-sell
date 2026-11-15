@@ -38,6 +38,13 @@ test('a challenge link plays that run blind with the score to beat, and the resu
   expect(errors).toEqual([]);
 });
 
+test('a hand-edited final is ignored: the score to beat comes from the trades (I5)', async ({ page }) => {
+  await page.goto(`/#c=${code(S2018, 1_000_000_000, [10, 30])}`);
+  await expect(page.locator('.intro .note')).toHaveText('Score to beat: $11,341');
+  await pressStart(page);
+  await expect(page.locator('.regret')).toHaveText('Score to beat: $11,341');
+});
+
 for (const [name, hash] of [
   ['garbage', '#c=garbage!!'],
   ['truncated', `#c=${code(S2018, 11341, [10, 30]).slice(0, 9)}`],

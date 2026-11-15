@@ -1,7 +1,8 @@
 // Settling a finished run (spec 6.8, 6.11, 6.12): the record, the pot and the double-or-nothing
 // streak in one place, so the page code only draws. Storage may be missing: every value lives
 // in memory for the visit and is written through when it can be.
-import type { BorrowedResult, RunResult, VerdictId } from '../engine/types';
+import { simulate } from '../engine/simulate';
+import type { BorrowedResult, RunResult, Trade, VerdictId } from '../engine/types';
 import { dailyStreak, recordRun, recordStreak, type Mode } from '../store/record';
 import { cell } from '../store/store';
 import { applyToPot, getPot } from './pot';
@@ -126,4 +127,13 @@ export function doubleUp(): StreakState {
 /** A decoded challenge can be played only if every trade falls inside the run (spec 6.7). */
 export function challengeFits(c: { trades: { dayIndex: number }[] }, runLength: number): boolean {
   return c.trades.every((t) => Number.isInteger(t.dayIndex) && t.dayIndex >= 0 && t.dayIndex < runLength);
+}
+
+/**
+ * A challenge as it may be played (I5): the trades must fit the run, and the score to beat is
+ * recomputed from the run and the trades from $10,000. The final carried in the link is never trusted.
+ */
+export function verifiedChallenge<C extends { final: number; trades: Trade[] }>(c: C, closes: number[]): C | null {
+  if (!challengeFits(c, closes.length)) return null;
+  return { ...c, final: Math.round(simulate(closes, c.trades, 10000).final) };
 }
