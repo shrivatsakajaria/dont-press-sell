@@ -89,7 +89,7 @@ test('the layout holds two 16-word lines, a 22-word line and a score to beat at 
   await page.screenshot({ path: 'e2e/shots/S/start-660-long-lines.png' });
 });
 
-test('a challenge link shows the score to beat on the start screen, and not the start screen a second time', async ({ page }) => {
+test('a challenge link shows the score to beat on the start screen, and a start screen every time', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 660 });
   const link = `/#c=${code(S2018, 11341, [10, 30])}`;
   await page.goto(link);
@@ -99,7 +99,9 @@ test('a challenge link shows the score to beat on the start screen, and not the 
   await page.screenshot({ path: 'e2e/shots/S/start-challenge-660.png' });
   await page.goto('about:blank');
   await page.goto(link);
-  await expect(page.locator('button.act')).toHaveText(/^Sell for \$[\d,]+$/);
+  // R45: every game opens on Start; a fresh page load shows the full start text again.
+  await expect(page.locator('button.act')).toHaveText('Start');
+  await expect(page.locator('.intro .note')).toHaveText('Score to beat: $11,804');
 });
 
 test('borrowed money shows the three lines and its own line under them, in the secondary colour', async ({ page }) => {

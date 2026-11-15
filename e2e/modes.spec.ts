@@ -32,7 +32,7 @@ test('with storage blocked a full run completes, the first-sale line shows, and 
   await expect(page.getByText(FIRST_SALE)).toBeVisible();
   await page.clock.runFor(114_000); // R27: s2018 runs about 118 s
   await expect(page.getByText('Late edition')).toBeVisible();
-  await expect(page.locator('.es-pot')).toContainText('Your pot:');
+  await expect(page.getByText(/Your pot/)).toHaveCount(0); // R40: hidden
   // Foot links work without storage too.
   await page.getByRole('button', { name: 'Your collection' }).click();
   await expect(page.getByText('For this visit')).toBeVisible();
@@ -61,24 +61,26 @@ test('a second first sale shows the line again when storage is blocked', async (
   await expect(page.getByText(FIRST_SALE)).toBeVisible();
   await page.clock.runFor(40_000);
   await page.getByRole('button', { name: 'Rematch this crash' }).click();
+  await pressStart(page);
   await expect(page.locator('.folio')).toContainText('Rematch');
   await page.clock.runFor(1500);
   await page.locator('button.act').click();
   await expect(page.getByText(FIRST_SALE)).toBeVisible();
 });
 
-test('the daily crash is labelled and has no countdown; a replay is a rematch', async ({ page }) => {
+test('the daily crash waits for phase 2: nothing on the result page or the menus offers or names it (R47)', async ({ page }) => {
   await page.clock.install();
   await page.goto('/?run=s2014');
   await pressStart(page);
   await page.clock.runFor(40_000);
-  await page.getByRole('button', { name: 'Daily crash' }).click();
-  await expect(page.locator('.folio')).toContainText(/Daily crash \d+/);
-  await page.clock.runFor(150_000); // R27: any daily run ends within 150 s
   await expect(page.getByText('Late edition')).toBeVisible();
-  await page.clock.runFor(15_000);
-  await expect(page.getByText(/Next mystery crash/)).toHaveCount(0);
-  await page.getByRole('button', { name: 'Daily crash' }).click();
-  await expect(page.locator('.folio')).toContainText('Rematch');
-  await expect(page.locator('.regret')).toContainText('Score to beat');
+  await page.clock.runFor(10_000);
+  const daily = /daily/i;
+  await expect(page.locator('body')).not.toContainText(daily);
+  await expect(page.getByRole('button', { name: daily })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Your collection' }).click();
+  await expect(page.locator('body')).not.toContainText(daily);
+  await page.getByRole('button', { name: 'Back' }).click();
+  await page.getByRole('button', { name: 'Pick a crash' }).click();
+  await expect(page.locator('body')).not.toContainText(daily);
 });
