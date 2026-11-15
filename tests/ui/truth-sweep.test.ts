@@ -117,7 +117,7 @@ function checkFrame(f: Frame, run: RunData, prev: Frame | undefined, prevStepFra
     expect(m.buttonLabel, where).toBe(buyBackLabel(n));
     expect(m.buttonLabel, where).not.toMatch(/\$0\b/);
     if (n > 0) expect(m.buttonLabel, where).toMatch(/cheaper$/);
-    if (n < 0) expect(m.buttonLabel, where).toMatch(/dearer$/);
+    if (n < 0) expect(m.buttonLabel, where).toMatch(/ more expensive$/);
     expect(m.cheaper, where).toBe(n > 0);
     expect(m.deltaLabel, where).toBe(IN_CASH);
     expect(m.regret, where).toBeNull();

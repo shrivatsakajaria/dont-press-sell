@@ -216,7 +216,7 @@ describe('the front page', () => {
     expect(svg.querySelector('[data-line="you"], [data-line="market"]')).toBeNull();
     expect(svg.getAttribute('aria-label')).toContain('dots on the price line mark each sale and buy');
     mount(losingSample());
-    // losingSample sold near the low and bought back higher: the level shows the buy-back was dearer.
+    // losingSample sold near the low and bought back higher: the level shows the buy-back was more expensive.
     expect(root.querySelector('svg [data-line="level"]')).not.toBeNull();
   });
 

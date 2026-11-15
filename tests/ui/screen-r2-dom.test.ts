@@ -68,15 +68,15 @@ it('a cheaper buy-back: green pulsing button, a win stamp and the win cue', () =
   expect(buyFrame?.[2].win).toBe(true);
 });
 
-it('a dearer buy-back is not styled as a win', () => {
+it('a more expensive buy-back is not styled as a win', () => {
   const { btn, q, onFrame } = mount();
   vi.advanceTimersByTime(400); // day 5 closes at 90
   btn.click(); // sold 9,000 at 90
   vi.advanceTimersByTime(200); // day 7 closes at 95
-  expect(btn.textContent).toBe('Buy back $500 dearer');
+  expect(btn.textContent).toBe('Buy back $500 more expensive');
   expect(btn.classList.contains('cheaper')).toBe(false);
   btn.click();
-  expect(q<HTMLElement>('.stamp').textContent).toBe('Bought back $500 dearer');
+  expect(q<HTMLElement>('.stamp').textContent).toBe('Bought back $500 more expensive');
   expect(q<HTMLElement>('.stamp').classList.contains('win')).toBe(false);
   expect(onFrame.mock.calls.find((c) => c[2].trade === 'buy')?.[2].win).toBe(false);
 });

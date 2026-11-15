@@ -10,7 +10,7 @@ describe('buyBackSaving (R38): round(cash x (1 - today / close on the day of the
   it('is positive when today is cheaper than the sale', () => {
     expect(buyBackSaving(9000, 90, 100)).toBe(900);
   });
-  it('is negative when today is dearer', () => {
+  it('is negative when today is more expensive', () => {
     expect(buyBackSaving(9000, 110, 100)).toBe(-900);
   });
   it('rounds to whole dollars', () => {
@@ -28,9 +28,9 @@ describe('buyBackSaving (R38): round(cash x (1 - today / close on the day of the
 });
 
 describe('buyBackLabel (R38)', () => {
-  it('cheaper, dearer and the same price, with thousands commas and never "$0"', () => {
+  it('cheaper, more expensive and the same price, with thousands commas and never "$0"', () => {
     expect(buyBackLabel(1120)).toBe('Buy back $1,120 cheaper');
-    expect(buyBackLabel(-12345)).toBe('Buy back $12,345 dearer');
+    expect(buyBackLabel(-12345)).toBe('Buy back $12,345 more expensive');
     expect(buyBackLabel(0)).toBe('Buy back at the same price');
   });
 });
@@ -39,7 +39,7 @@ describe('press stamps (R41)', () => {
   it('reads the sale and the buy-back', () => {
     expect(soldStamp(9750)).toBe('Sold at $9,750');
     expect(boughtStamp(1120)).toBe('Bought back $1,120 cheaper');
-    expect(boughtStamp(-75)).toBe('Bought back $75 dearer');
+    expect(boughtStamp(-75)).toBe('Bought back $75 more expensive');
     expect(boughtStamp(0)).toBe('Bought back at the same price');
   });
 });
@@ -73,10 +73,10 @@ describe('screenModel in cash (R38)', () => {
     expect(m.regret).toBeNull();
   });
 
-  it('dearer when today is above the sale close, and not cheaper', () => {
+  it('more expensive when today is above the sale close, and not cheaper', () => {
     const m = screenModel(state({ stepIndex: 8, invested: false, balance: 9000 }, [{ dayIndex: 4, side: 'sell' }]));
     // 9,000 x (1 - 104 / 90) = -1,400
-    expect(m.buttonLabel).toBe('Buy back $1,400 dearer');
+    expect(m.buttonLabel).toBe('Buy back $1,400 more expensive');
     expect(m.cheaper).toBe(false);
   });
 
@@ -90,7 +90,7 @@ describe('screenModel in cash (R38)', () => {
     const trades: Trade[] = [{ dayIndex: 1, side: 'sell' }, { dayIndex: 2, side: 'buy' }, { dayIndex: 4, side: 'sell' }];
     const m = screenModel(state({ stepIndex: 6, invested: false, balance: 9000 }, trades));
     // 9,000 x (1 - 95 / 90) = -500
-    expect(m.buttonLabel).toBe('Buy back $500 dearer');
+    expect(m.buttonLabel).toBe('Buy back $500 more expensive');
   });
 
   it('no second number while in cash: no score to beat, no regret', () => {
