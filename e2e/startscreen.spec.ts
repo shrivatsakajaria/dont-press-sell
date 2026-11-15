@@ -2,10 +2,11 @@ import { expect, test } from '@playwright/test';
 
 // The start screen (ruling R28): a fresh page load stands still until Start is pressed.
 const LINES = [
-  "You have $10,000 of play money in a stock market that's started to fall.",
-  'It might be a real crash, or a scare that blows over. Every instinct will say sell.',
-  "Hold your nerve, or don't. Most money at the end wins.",
+  'The market is falling. Nobody knows how far.',
+  'You have $10,000, and one button.',
+  'Press the button to sell if you dare. Get back in cheaper and you win. Wait too long and the market leaves without you.',
 ];
+const BORROWED = 'You have borrowed $20,000. Every move is three times bigger. Fall a third and you are wiped out.';
 const S2018 = 9; // index in RUN_IDS
 
 function code(runIndex: number, final: number, days: number[]): string {
@@ -64,14 +65,15 @@ for (const height of [660, 844]) {
   });
 }
 
-test('the layout holds three 16-word lines and a score to beat at 390 x 660', async ({ page }) => {
+test('the layout holds two 16-word lines, a 22-word line and a score to beat at 390 x 660', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 660 });
   await page.goto('/?run=c2007');
   await expect(page.locator('button.act')).toHaveText('Start');
   await page.evaluate(() => {
-    const long = 'Every word of this line is here to test how sixteen plain words wrap on a phone.';
+    const sixteen = 'Every word of this line is here to test how sixteen plain words wrap on a phone.';
+    const long = 'Every word of this line is here to test how twenty two plain words wrap on a phone, and still leave room.';
     const intro = document.querySelector('.intro')!;
-    intro.querySelectorAll('p').forEach((p) => (p.textContent = long));
+    intro.querySelectorAll('p').forEach((p, i) => (p.textContent = i < 2 ? sixteen : long));
     const note = document.createElement('p');
     note.className = 'note';
     note.textContent = 'Score to beat: $11,341';
@@ -96,15 +98,22 @@ test('a challenge link shows the score to beat on the start screen, and not the 
   await expect(page.locator('button.act')).toHaveText(/^Sell for \$[\d,]+$/);
 });
 
-test('borrowed money shows its own second line on the start screen', async ({ page }) => {
+test('borrowed money shows the three lines and its own line under them, in the secondary colour', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 660 });
   await page.addInitScript(() => {
     localStorage.setItem('dps:borrowedUnlocked', 'true');
     localStorage.setItem('dps:borrowed', 'true');
   });
   await page.goto('/?run=c2007');
-  await expect(page.locator('.intro p').nth(1)).toHaveText(
-    'You have borrowed $20,000. Every move is three times bigger. Fall a third and you are wiped out.',
-  );
+  await expect(page.locator('.intro p')).toHaveText([...LINES, BORROWED]);
+  const colours = await page.evaluate(() => {
+    const c = (q: string) => getComputedStyle(document.querySelector(q)!).color;
+    return { extra: c('.intro .extra'), line: c('.intro p:nth-child(2)'), sec: c('.under') };
+  });
+  expect(colours.extra).toBe(colours.sec);
+  expect(colours.extra).not.toBe(colours.line);
+  const m = await layout(page);
+  expect(m.scrollHeight).toBeLessThanOrEqual(m.clientHeight);
+  expect(660 - m.bottom).toBeGreaterThanOrEqual(40);
   await page.screenshot({ path: 'e2e/shots/S/start-borrowed-660.png' });
 });

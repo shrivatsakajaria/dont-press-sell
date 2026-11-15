@@ -242,3 +242,18 @@ it('start screen without a note shows exactly the three lines', () => {
   play.teardown();
   vi.useRealTimers();
 });
+
+it('start screen with borrowed money: the three lines, then the borrowed line in the secondary colour', () => {
+  vi.useFakeTimers({ toFake: [...FAKE] });
+  document.body.innerHTML = '';
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  const play = startPlay(root, run, steps, {
+    runLabel: 'Borrowed money', onEnd: vi.fn(), gate: { lines: ['a', 'b', 'c'], extra: 'Borrowed line.' },
+  });
+  const ps = [...root.querySelectorAll('.intro p')];
+  expect(ps.map((p) => p.textContent)).toEqual(['a', 'b', 'c', 'Borrowed line.']);
+  expect(ps[3].className).toBe('extra');
+  play.teardown();
+  vi.useRealTimers();
+});

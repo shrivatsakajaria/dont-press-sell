@@ -235,8 +235,11 @@ export interface ScreenHandlers {
 
 export interface Screen {
   render(v: ScreenModel): void;
-  /** The start screen (R28): lines in place of the headline and standfirst; null takes them away. */
-  setGate(lines: string[] | null): void;
+  /**
+   * The start screen (R28): lines in place of the headline and standfirst, then an optional line in the
+   * secondary colour (borrowed money) and a note (score to beat); null takes them away.
+   */
+  setGate(g: { lines: string[]; extra?: string | null; note?: string | null } | null): void;
   setSound(on: boolean): void;
   /** Disconnects the resize watcher and clears the page colours on <html>. */
   destroy(): void;
@@ -431,9 +434,12 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
         );
       }
     },
-    setGate(lines) {
-      page.classList.toggle('is-gate', !!lines);
-      intro.replaceChildren(...(lines ?? []).map((t, i) => h('p', i === 0 ? 'lead' : i < 3 ? '' : 'note', t)));
+    setGate(g) {
+      page.classList.toggle('is-gate', !!g);
+      const ps = g ? g.lines.map((t, i) => h('p', i === 0 ? 'lead' : '', t)) : [];
+      if (g?.extra) ps.push(h('p', 'extra', g.extra));
+      if (g?.note) ps.push(h('p', 'note', g.note));
+      intro.replaceChildren(...ps);
     },
     setSound(on) {
       sound.textContent = on ? SOUND_ON : SOUND_OFF;
@@ -469,7 +475,7 @@ export interface PlayOpts {
    * The start screen (R28): the front page stands still on day 1 with these lines in place of the
    * headline and standfirst, and a Start button. The clock starts only when Start is pressed.
    */
-  gate?: { lines: string[]; note?: string | null };
+  gate?: { lines: string[]; extra?: string | null; note?: string | null };
   /** Rule book for balances (borrowed money plugs in simulateBorrowed). */
   simulateFn?: SimulateFn;
   /**
@@ -634,7 +640,7 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       run, steps, start, view: v, runLabel: opts.runLabel, history: still, trades: [], firstSaleStep: null, paused: false,
       pot: opts.pot ?? start, headline: '', commentary: '', other: opts.other,
     });
-    screen.setGate(g.note ? [...g.lines, g.note] : g.lines);
+    screen.setGate(g);
     screen.render({ ...m, buttonLabel: START_LABEL, longLabel: false, regret: null, underButton: FOOTER_PLAY });
   }
 

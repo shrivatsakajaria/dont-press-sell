@@ -1,7 +1,7 @@
 // Boot and flow (spec 6): straight into a mystery run, then the result front page, from which
 // every other mode starts. Rules live in the modules; this file only joins them.
 import {
-  BORROWED_LABEL, BORROWED_OPENING, BUST_HEADLINE, ISLAND_HEADLINE, REMATCH_LABEL, dailyLabel, scoreToBeatLine, startLines,
+  BORROWED_LABEL, BORROWED_OPENING, BUST_HEADLINE, ISLAND_HEADLINE, REMATCH_LABEL, dailyLabel, scoreToBeatLine, START_LINES,
 } from './content/copy';
 import { loadHeadlines } from './content/headlines';
 import { RUNS, RUN_IDS, loadRun, runMeta } from './content/runs';
@@ -147,7 +147,11 @@ async function play(game: Game, opts: { double?: boolean; gate?: boolean } = {})
     simulateFn: borrowed ? simulateBorrowed : undefined,
     opening: borrowed ? BORROWED_OPENING : undefined,
     gate: opts.gate
-      ? { lines: startLines(borrowed), note: game.challenge ? scoreToBeatLine(game.challenge.final) : null }
+      ? {
+        lines: START_LINES,
+        extra: borrowed ? BORROWED_OPENING : null,
+        note: game.challenge ? scoreToBeatLine(game.challenge.final) : null,
+      }
       : undefined,
     start: game.start,
     pot: potNow(),
