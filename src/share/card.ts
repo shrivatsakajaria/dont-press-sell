@@ -3,7 +3,7 @@
 
 import {
   BEAT_ME, BOUGHT, CARD_GUESS, FOOTER_RESULT, LATE_EDITION, MASTHEAD, MYSTERY_LABEL, PERFECT_TIMING, SOLD, SOMEONE_WHO_DID_NOTHING, YOU,
-  dailyLabel, dollars, leadLine, perfectFinishedLine, practiceFolio, practiceGo, shareAhead, shareAheadPractice, shareBehind, shareBehindPractice,
+  dailyLabel, dollars, leadLine, perfectLine, practiceFolio, practiceGo, shareAhead, shareAheadPractice, shareBehind, shareBehindPractice,
   SHARE_LEVEL, shareLevelPractice, survivedLine,
 } from '../content/copy';
 import type { Trade } from '../engine/types';
@@ -99,7 +99,7 @@ export function cardLines(m: ResultCardModel): CardLines {
     ],
     lead: leadLine(m.lead),
     leadBehind: Math.round(m.lead) < 0,
-    perfect: perfectFinishedLine(m.perfect, m.you),
+    perfect: perfectLine(m.perfect, m.you), // R49: lane D words it ("You finished with")
     streak: !practice && m.streak !== undefined && m.streak >= 2 ? survivedLine(m.streak) : null,
     beatMe: BEAT_ME,
     url: m.url,

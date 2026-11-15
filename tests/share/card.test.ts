@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { perfectLine } from '../../src/content/copy';
 import { cardChart, cardLines, drawCard, shareLine, type ResultCardModel } from '../../src/share/card';
 
 const base: ResultCardModel = {
@@ -44,7 +45,7 @@ describe('cardLines', () => {
       ['Someone who did nothing', '$9,450'],
       ['Perfect timing', '$17,900'],
     ]);
-    expect(l.perfect).toBe('Perfect timing finished with $17,900. You finished with $7,150.'); // R49 wording
+    expect(l.perfect).toBe(perfectLine(17900, 7150)); // the result screen's own line (R49 wording, lane D)
     expect(l.beatMe).toBe('Beat me');
     expect(l.url).toBe('https://example.pages.dev/');
     expect(l.footer).toBe('US stock market · A Still Signal build');

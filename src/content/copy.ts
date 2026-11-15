@@ -150,9 +150,6 @@ export const marketChartLabel = (days: number, change: number, vsSale: number | 
     : Math.round(vsSale * 100) === 0
       ? '. Today\'s price is about where you sold.'
       : `. Today's price is ${pctWord(vsSale)} ${vsSale < 0 ? 'below' : 'above'} where you sold.`);
-/** The share card's score line (R49 wording). */
-export const perfectFinishedLine = (perfect: number, you: number) =>
-  `Perfect timing finished with ${dollars(perfect)}. You finished with ${dollars(you)}.`;
 
 // Result front page (spec 6.6 to 6.8, 6.12).
 export const LATE_EDITION = 'Late edition';
