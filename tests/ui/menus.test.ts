@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mountPickCrash, mountCollection, recordSentence, VERDICT_TITLES } from '../../src/ui/menus';
+import { MENU_TEXT, mountPickCrash, mountCollection, recordSentence, VERDICT_TITLES } from '../../src/ui/menus';
 import { RUNS } from '../../src/content/runs';
 import { verdictCopy } from '../../src/engine/verdict';
 import type { RunData, RunResult, VerdictId } from '../../src/engine/types';
@@ -52,7 +52,7 @@ describe('pick a crash', () => {
       expect(t).toContain(r.kind === 'scare' ? 'False alarm' : 'Crash');
     });
     expect(root.textContent).toContain('Practice');
-    expect(root.textContent).toContain('do not count towards your pot or your collection');
+    expect(root.textContent).toContain('do not count towards your record or your collection');
     (rows[6] as HTMLElement).click();
     expect(onPick).toHaveBeenCalledWith(RUNS[6].id);
   });
@@ -119,14 +119,35 @@ describe('collection', () => {
     expect(collection({ storageOk: true }).querySelector('.dps-folio')!.textContent).toContain('Kept on this phone');
     expect(collection({ storageOk: false }).querySelector('.dps-folio')!.textContent).toContain('For this visit');
   });
-  it('shows the record line, pot, busts and best streak title', () => {
-    const t = collection({ busts: 2, bestStreak: 3 }).textContent!;
+  it('hides the pot and busts while the pot is hidden (R40); the code stays', () => {
+    const t = collection({ busts: 2 }).textContent!;
+    expect(t).not.toContain('Your pot');
+    expect(t).not.toContain('bust');
+    expect(collection({ showPot: true, busts: 2 }).textContent).toContain('Your pot: $12,300');
+  });
+  it('the vibration switch lives here, off the result page (R44)', () => {
+    expect(collection().textContent).not.toContain('Vibration');
+    const onToggle = vi.fn();
+    const root = collection({ vibration: true, onToggleVibration: onToggle });
+    const sw = Array.from(root.querySelectorAll('[role="switch"]')).find((e) => e.textContent!.includes('Vibration')) as HTMLElement;
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+    expect(sw.textContent).toContain('On');
+    sw.click();
+    expect(onToggle).toHaveBeenCalledWith(false);
+    expect(sw.getAttribute('aria-checked')).toBe('false');
+    expect(sw.textContent).toContain('Off');
+  });
+  it('says nothing about the pot on the pick-a-crash page', () => {
+    expect(MENU_TEXT.pickStand).not.toContain('pot');
+  });
+  it('shows the record line, busts (with the pot) and best streak title', () => {
+    const t = collection({ busts: 2, bestStreak: 3, showPot: true }).textContent!;
     expect(t).toContain('9 games, 3 wins, sold too early 4 times');
     expect(t).toContain('Your pot: $12,300');
     expect(t).toContain('Gone bust 2 times');
     expect(t).toContain('3 wins in a row');
     expect(t).toContain('Shark');
-    expect(collection({ busts: 1 }).textContent).toContain('Gone bust once');
+    expect(collection({ busts: 1, showPot: true }).textContent).toContain('Gone bust once');
     expect(collection({ busts: 0 }).textContent).not.toContain('bust');
     expect(collection({ bestStreak: 0 }).textContent).toContain('No streak yet');
     expect(collection({ bestStreak: 1 }).textContent).toContain('1 win in a row');

@@ -1,5 +1,4 @@
 // Dev page for the end screen (not part of the build): /dev/end.html?s=c2007|won|lost
-// Add &nocount=1 to turn the countdown off.
 import { runMeta } from '../src/content/runs';
 import { mountEndScreen } from '../src/ui/endscreen';
 import { c2007Sample, losingSample, winningSample } from '../tests/fixtures/sample-result';
@@ -10,22 +9,17 @@ const make = samples[(q.get('s') ?? 'c2007') as keyof typeof samples] ?? c2007Sa
 const model = make();
 const log = (what: string) => () => console.log(what);
 let sound = true;
-let vib = true;
 model.sound = { on: sound };
-model.vibration = { on: vib };
 model.actions = {
   onNewMystery: log('new mystery'),
   onRematch: log('rematch'),
   onChallenge: log('challenge'),
   onDouble: log('double'),
   onBank: log('bank'),
-  onDaily: log('daily'),
   onPick: log('pick'),
   onCollection: log('collection'),
   onToggleSound: () => (sound = !sound),
-  onToggleVibration: () => (vib = !vib),
 };
-// &scare=1 tries the long false-alarm reveal line in the folio.
+// &scare=1 tries the long false-alarm reveal line.
 if (q.get('scare')) model.run = { ...model.run, revealLine: runMeta('s1998')!.revealLine, kind: 'scare' };
-if (q.get('nocount')) model.flags.showCountdown = false;
 mountEndScreen(document.getElementById('app')!, model);

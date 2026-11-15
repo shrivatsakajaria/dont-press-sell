@@ -1,8 +1,9 @@
-// The result front page and its reveal (spec 6.6, 6.7, 6.8, 6.12, 8.2, 8.3, 9; mock-ups 4 and 6).
+// The result front page and its reveal (spec 6.6, 6.7, 6.8, 6.12, 8.2, 8.3, 9; mock-ups 4 and 6; R40, R44, R48, R49).
 // Plain DOM. The lead wires the callbacks; this module only draws and times.
+// R44: the whole page, buttons included, fits one screen. What does not fit is left out, extras first.
 import {
   bankLabel,
-  BORROWED_ON,
+  bestWinningStreakLine,
   CHALLENGE,
   COPIED,
   COPY_RESULT,
@@ -13,17 +14,15 @@ import {
   leadLine,
   MASTHEAD,
   NEW_MYSTERY,
-  nextMysteryLine,
-  PLAY_BORROWED,
   perfectLine,
   REMATCH,
   TAP_TO_REVEAL,
-  WINS_IN_A_ROW,
   aheadBehindLine,
+  winsInRowLine,
 } from '../content/copy';
 import type { RunKind, RunResult, VerdictId } from '../engine/types';
 import type { Sfx } from '../fx/sound';
-import { ladder, RUNG_TITLES } from '../game/streak';
+import { ladder } from '../game/streak';
 import { load, save } from '../store/store';
 import { announce } from './a11y';
 import { endChart, marketInCash } from './endchart';
@@ -31,22 +30,23 @@ import { paperFor } from './paper';
 
 // Strings this screen shows live in src/content/copy.ts; re-exported for existing importers.
 export {
-  LATE_EDITION, SCORE_TO_BEAT, YOUR_CHALLENGER, SOMEONE_WHO_DID_NOTHING, PERFECT_TIMING, YOU, DAILY_CRASH, PICK_A_CRASH, YOUR_COLLECTION, soundLabel, vibrationLabel, tradeNewsLabel, doubleStakeLine, potResultLine, challengerLine,
+  LATE_EDITION, SCORE_TO_BEAT, YOUR_CHALLENGER, SOMEONE_WHO_DID_NOTHING, PERFECT_TIMING, YOU, DAILY_CRASH, PICK_A_CRASH, YOUR_COLLECTION, soundLabel, tradeNewsLabel, doubleStakeLine, potResultLine, challengerLine,
 } from '../content/copy';
 import {
-  LATE_EDITION, SCORE_TO_BEAT, YOUR_CHALLENGER, SOMEONE_WHO_DID_NOTHING, PERFECT_TIMING, YOU, DAILY_CRASH, PICK_A_CRASH, YOUR_COLLECTION, soundLabel, vibrationLabel, tradeNewsLabel, doubleStakeLine, potResultLine, challengerLine,
+  LATE_EDITION, SCORE_TO_BEAT, YOUR_CHALLENGER, SOMEONE_WHO_DID_NOTHING, PERFECT_TIMING, YOU, DAILY_CRASH, PICK_A_CRASH, YOUR_COLLECTION, soundLabel, tradeNewsLabel, doubleStakeLine, potResultLine, challengerLine,
 } from '../content/copy';
 
 export const REVEAL_AFTER_MS = 4000;
+/** The beat between the crash's name printing and the score appearing (R44: the reveal is a moment). */
+export const REVEAL_BEAT_MS = 450;
 export const COUNT_MS = 1500;
 const COUNT_STEP_MS = 30;
-export const COUNTDOWN_FROM = 10;
 /** After the score appears, buttons ignore taps this long (they have just moved). */
 const SETTLE_MS = 350;
 
 export interface EndModel {
   run: { pickName: string; revealLine: string; kind: RunKind };
-  /** Folio run label: "Mystery crash", "Daily crash 12", "Rematch", "Borrowed money", "2008"... */
+  /** Folio run label: "Mystery crash", "Rematch", "Borrowed money", "2008"... */
   modeLabel: string;
   result: RunResult;
   closes: number[];
@@ -61,8 +61,14 @@ export interface EndModel {
   other?: { kind: 'previous' | 'challenger'; balances: number[]; final: number };
   /** Present only when the model offers double or nothing. `wins` counts this win; `net` is the streak's whole win (what banking adds). */
   double?: { net: number; final: number; wins: number };
+  /** Wins in a row to print large after a win (defaults to double.wins); a banked streak keeps it. */
+  wins?: number;
+  /** After a loss: the best winning streak ever ended. Printed only when above 0 and there is no win to show. */
+  bestStreak?: number;
+  /** The pot is hidden this round (R40); the line is still here for when it comes back. */
   pot: { pot: number; tonight: number };
-  flags: { showCountdown: boolean; blind: boolean };
+  showPot?: boolean;
+  flags: { blind: boolean };
   /** Print the plain line about someone who did nothing under the table (R28: first result only). */
   holderNote?: boolean;
   /** Plain lines printed under the score, such as "4 days in a row" on a daily result. */
@@ -72,9 +78,6 @@ export interface EndModel {
   /** The black-bordered front page for the eighth win in a row (6.8). */
   blackBorder?: boolean;
   sound?: { on: boolean };
-  vibration?: { on: boolean };
-  /** The borrowed money switch, once unlocked (spec 6.13). */
-  borrowed?: { on: boolean };
   sfx?: Pick<Sfx, 'rise' | 'thud' | 'payout'>;
   actions: {
     onNewMystery: () => void;
@@ -82,13 +85,12 @@ export interface EndModel {
     onChallenge?: () => void;
     onDouble?: () => void;
     onBank?: () => void;
+    /** The daily crash waits for phase 2 (R47): main passes none while it is off. */
     onDaily?: () => void;
     onPick?: () => void;
     onCollection?: () => void;
     /** Returns the new state (true = on). */
     onToggleSound?: () => boolean;
-    onToggleVibration?: () => boolean;
-    onToggleBorrowed?: () => boolean;
     /** Daily crash: copy the short text result (spec 6.9). Resolves true when copied. */
     onCopyResult?: () => Promise<boolean>;
   };
@@ -102,74 +104,84 @@ function css(p: ReturnType<typeof paperFor>): string {
   return `
 .es{--bg:${p.bg};--ink:${p.ink};--sec:${p.secondary};--red:${p.accent};--soft:rgba(28,26,23,0.25);display:flex;flex-direction:column;min-height:calc(100dvh - 48px);padding-bottom:env(safe-area-inset-bottom);color:var(--ink);background:var(--bg);font-family:'Newsreader',Georgia,serif;font-variant-numeric:lining-nums tabular-nums}
 .es ::selection{background:var(--ink);color:var(--bg)}
+.es [data-trim],.es [hidden]{display:none!important}
 :where(.es) button{font:inherit;color:inherit;background:none;border:0;border-radius:0;padding:0;margin:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
 :where(.es) :is(p,h1,h2,ul){margin:0}
 .es button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .es-black{outline:4px solid var(--ink);outline-offset:12px}
 .es-mast{border-top:4px solid var(--ink);border-bottom:1px solid var(--ink);padding:8px 0 4px;text-align:center;font-weight:700;font-size:30px;line-height:1;letter-spacing:-0.02em}
-.es-folio{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;column-gap:12px;row-gap:4px;padding:8px 0;border-bottom:1px solid var(--ink);font-family:${SANS};font-weight:500;font-size:12px;line-height:1;color:var(--sec)}
-.es-folio-long .es-reveal{flex-basis:100%;line-height:1.35}
-.es-cover{display:flex;align-items:center;min-height:44px;margin:-12px 0}
-.es-cover span{display:block;padding:4px 8px;background:var(--ink);color:var(--bg);font-weight:700;font-size:12px;line-height:1}
-.es-name{display:inline-block;color:var(--ink);font-weight:700}
-.es-name.es-wipe{animation:es-wipe 420ms ${EASE} both}
-@keyframes es-wipe{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
-.es-score[hidden]{display:none}
-.es[data-settling] button{pointer-events:none}
-.es-h1{margin-top:20px;font-weight:700;font-size:40px;line-height:0.98;letter-spacing:-0.02em;text-wrap:balance}
+.es-folio{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--ink);font-family:${SANS};font-weight:500;font-size:14px;line-height:1;color:var(--sec)}
+.es-h1{margin-top:16px;font-weight:700;font-size:36px;line-height:0.98;letter-spacing:-0.02em;text-wrap:balance}
 .es-verdict{margin-top:8px;font-size:18px;line-height:1.3;color:var(--sec)}
 .es-verdict b{font-weight:700;color:var(--ink)}
 .es-verdict.es-behind b{color:var(--red)}
-.es-chart{display:block;width:100%;height:auto;margin-top:16px;padding:8px 0;border-top:1px solid var(--ink);border-bottom:1px solid var(--ink);box-sizing:content-box;overflow:visible}
-.es-chart-word{font-family:${SANS};font-weight:700;font-size:12px;paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
-.es-news{margin-top:8px;font-family:${SANS};font-weight:500;font-size:13px;line-height:1.35;color:var(--sec)}
+.es-chart{display:block;width:100%;height:auto;margin-top:12px;padding:8px 0;border-top:1px solid var(--ink);border-bottom:1px solid var(--ink);box-sizing:content-box;overflow:visible}
+.es-chart-word{font-family:${SANS};font-weight:700;font-size:14px;paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+.es-moment{margin-top:12px}
+.es-cover{position:relative;display:flex;align-items:center;justify-content:center;width:100%;min-height:88px;padding:12px 16px;overflow:hidden;background:var(--ink);color:var(--bg);font-weight:700;font-size:26px;line-height:1.1;letter-spacing:-0.02em;text-align:center}
+.es-cover i{position:absolute;left:0;right:0;bottom:0;height:4px;background:var(--red);transform-origin:left;transform:scaleX(0);animation:es-fill ${REVEAL_AFTER_MS}ms linear both}
+@keyframes es-fill{to{transform:scaleX(1)}}
+.es-name{font-weight:700;font-size:34px;line-height:1.02;letter-spacing:-0.025em;text-wrap:balance}
+.es-name.es-wipe{animation:es-wipe 420ms ${EASE} both}
+@keyframes es-wipe{from{clip-path:inset(0 100% 0 0);transform:translateY(6px)}to{clip-path:inset(0 0 0 0);transform:none}}
+.es-name-sub{margin-top:4px;font-family:${SANS};font-weight:500;font-size:14px;line-height:1.35;color:var(--sec)}
+.es-score{margin-top:8px}
+.es[data-settling] button{pointer-events:none}
+.es-news{font-family:${SANS};font-weight:500;font-size:14px;line-height:1.35;color:var(--sec)}
 .es-news b{font-weight:700;color:var(--ink)}
 .es-news+.es-news{margin-top:4px}
-.es-table{margin-top:16px;font-family:${SANS};font-size:16px;line-height:1}
+.es-newsbox:not(:empty){margin-bottom:8px}
+.es-lead{font-weight:700;font-size:26px;line-height:1.08;letter-spacing:-0.02em}
+.es-lead.es-behind{color:var(--red)}
+.es-perfect{margin-top:4px;font-size:16px;line-height:1.3}
+.es-vs{margin-top:4px;font-family:${SANS};font-weight:700;font-size:14px;line-height:1.35}
+.es-best{margin-top:8px;font-family:${SANS};font-weight:700;font-size:16px;line-height:1.3}
+.es-double{margin-top:12px;border-top:4px solid var(--ink);padding-top:8px}
+.es-wins{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:12px}
+.es-double h2{font-weight:700;font-size:30px;line-height:1.05;letter-spacing:-0.02em}
+.es-title{font-family:${SANS};font-weight:700;font-size:14px;line-height:1.3;color:var(--sec)}
+.es-stake{margin-top:4px;font-family:${SANS};font-weight:500;font-size:14px;line-height:1.35;color:var(--sec)}
+.es-pair{display:flex;gap:12px;margin-top:12px}
+.es-double .es-pair{margin-top:8px}
+.es-pair button{flex:1 1 0;min-height:52px;padding:0 4px;font-family:${SANS};font-weight:700;font-size:16px;line-height:1.1;letter-spacing:-0.01em}
+.es-main{background:var(--ink);color:var(--bg)}
+.es-dbl{background:var(--red);color:#fbeee2}
+.es-out{border:2px solid var(--ink)}
+.es-link{display:flex;align-items:center;justify-content:center;width:100%;min-height:44px;margin-top:4px;font-family:${SANS};font-weight:700;font-size:16px;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
+.es-table{margin-top:12px;font-family:${SANS};font-size:16px;line-height:1}
 .es-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--soft);font-weight:500}
 .es-row:last-child{border-bottom-color:var(--ink)}
 .es-row-you{font-weight:700}
 .es-key{display:inline-block;width:16px;margin-right:8px;vertical-align:middle;border-top:2.5px solid var(--ink)}
 .es-key-dash{border-top:2px dashed #6b6558}
-.es-note{margin-top:8px;font-family:${SANS};font-weight:500;font-size:13px;line-height:1.35;color:var(--sec)}
-.es-lead{margin-top:16px;font-weight:700;font-size:28px;line-height:1.05;letter-spacing:-0.02em}
-.es-lead.es-behind{color:var(--red)}
-.es-perfect{margin-top:8px;font-size:18px;line-height:1.3}
-.es-vs{margin-top:8px;font-family:${SANS};font-weight:700;font-size:14px;line-height:1.35}
-.es-misses{list-style:none;padding:0;margin-top:16px;border-top:1px solid var(--soft)}
+.es-note{margin-top:8px;font-family:${SANS};font-weight:500;font-size:14px;line-height:1.35;color:var(--sec)}
+.es-misses{list-style:none;padding:0;margin-top:12px;border-top:1px solid var(--soft)}
 .es-misses li{padding:8px 0;border-bottom:1px solid var(--soft);font-family:${SANS};font-weight:500;font-size:14px;line-height:1.3}
-.es-grow{flex-grow:1;min-height:16px}
-.es-double{margin-top:12px;border-top:4px solid var(--ink);padding-top:8px;margin-bottom:4px}
-.es-double h2{font-weight:700;font-size:24px;line-height:1.05;letter-spacing:-0.02em}
-.es-stake{margin-top:4px;font-size:16px;line-height:1.3;color:var(--sec)}
-.es-ladder-label{margin-top:12px;font-family:${SANS};font-weight:700;font-size:12px;line-height:1}
-.es-ladder{list-style:none;padding:0;margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
-.es-rung{display:flex;align-items:center;gap:4px;font-family:${SANS};font-weight:500;font-size:12px;line-height:1;color:var(--sec);white-space:nowrap}
-.es-rung b{font-weight:inherit}
-.es-rung i{font-style:normal;display:flex;align-items:center;justify-content:center;width:24px;height:24px;box-sizing:border-box;font-family:'Newsreader',Georgia,serif;font-weight:500;font-size:16px;color:var(--sec)}
-.es-rung[data-rung=reached]{color:var(--ink)}
-.es-rung[data-rung=reached] i{background:var(--ink);color:var(--bg);font-weight:700}
-.es-rung[data-rung=next]{color:var(--ink);font-weight:700}
-.es-rung[data-rung=next] i{color:var(--ink);font-weight:700;border-bottom:2px solid var(--ink)}
-.es-pair{display:flex;gap:12px;margin-top:16px}
-.es-double .es-pair{margin-top:12px}
-.es-count-gap{margin-top:4px}
-.es-pair button{flex:1 1 0;min-height:56px;padding:0 4px;font-family:${SANS};font-weight:700;font-size:16px;line-height:1.1;letter-spacing:-0.01em}
-.es-main{background:var(--ink);color:var(--bg)}
-.es-dbl{background:var(--red);color:#fbeee2}
-.es-out{border:2px solid var(--ink)}
-.es-link{display:flex;align-items:center;justify-content:center;width:100%;min-height:44px;margin-top:4px;font-family:${SANS};font-weight:700;font-size:14px;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
-.es-count{display:flex;align-items:center;width:100%;min-height:44px;margin-top:4px;text-align:left;font-family:${SANS};font-weight:700;font-size:14px;line-height:1.3;color:var(--ink)}
+.es-grow{flex-grow:1;min-height:8px}
 .es-pot{margin-top:8px;padding-top:8px;border-top:1px solid var(--ink);font-family:${SANS};font-weight:700;font-size:14px;line-height:1.35}
-.es-foot{display:flex;flex-wrap:wrap;column-gap:16px}
-.es-foot button{min-height:44px;font-family:${SANS};font-weight:500;font-size:13px;color:var(--sec);text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
-.es-foot+.es-foot{margin-top:-8px}
-.es-footer{margin-top:4px;font-family:${SANS};font-weight:500;font-size:12px;line-height:1.35;color:var(--sec)}
-.es :is(.es-verdict,.es-news,.es-perfect,.es-stake,.es-vs,.es-misses li,.es-pot){text-wrap:pretty}
-@media (max-height: 700px){.es-h1{margin-top:12px;font-size:34px}.es-chart{margin-top:8px}.es-row{padding:4px 0}.es-lead{margin-top:12px}.es-perfect{font-size:16px}}
+.es-foot{display:flex;flex-wrap:wrap;column-gap:20px;border-top:1px solid var(--ink)}
+.es-foot button{min-height:44px;font-family:${SANS};font-weight:500;font-size:14px;color:var(--sec);text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
+.es-footer{font-family:${SANS};font-weight:500;font-size:14px;line-height:1.35;color:var(--sec)}
+.es :is(.es-verdict,.es-news,.es-perfect,.es-stake,.es-vs,.es-misses li,.es-pot,.es-name-sub){text-wrap:pretty}
+@media (max-height: 700px){
+  .es-mast{font-size:26px}
+  .es-folio{padding:6px 0}
+  .es-h1{margin-top:8px;font-size:28px}
+  .es-verdict{margin-top:4px;font-size:16px}
+  .es-chart{margin-top:8px;padding:4px 0}
+  .es-moment{margin-top:8px}
+  .es-cover{min-height:72px;font-size:24px}
+  .es-name{font-size:28px}
+  .es-lead{font-size:24px}
+  .es-double{margin-top:8px;padding-top:4px}
+  .es-double h2{font-size:28px}
+  .es-pair{margin-top:8px}
+  .es-pair button{min-height:48px}
+  .es-link{margin-top:0}
+}
 /* Hover colours only where there is a pointer that hovers: on phones :hover sticks after a tap. */
-@media (hover: hover){.es-cover:hover span{background:var(--red)}.es-main:hover{background:#3a362f}.es-dbl:hover{background:#8f0f22}.es-out:hover{background:rgba(28,26,23,0.06)}.es-link:hover{color:var(--red)}.es-foot button:hover{color:var(--ink)}}
-@media (prefers-reduced-motion: reduce){.es-name.es-wipe{animation:none}}
+@media (hover: hover){.es-cover:hover{background:#3a362f}.es-main:hover{background:#3a362f}.es-dbl:hover{background:#8f0f22}.es-out:hover{background:rgba(28,26,23,0.06)}.es-link:hover{color:var(--red)}.es-foot button:hover{color:var(--ink)}}
+@media (prefers-reduced-motion: reduce){.es-name.es-wipe{animation:none}.es-cover i{display:none}}
 `;
 }
 
@@ -214,22 +226,17 @@ function ease(t: number): number {
   return by((lo + hi) / 2);
 }
 
-/** In-app browsers show about 660px: draw a shorter chart so the score is above the fold. */
-function shortViewport(): boolean {
+function matches(query: string): boolean {
   try {
-    return typeof window.matchMedia === 'function' && window.matchMedia('(max-height: 700px)').matches;
+    return typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
   } catch {
     return false;
   }
 }
 
-function reducedMotion(): boolean {
-  try {
-    return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  } catch {
-    return false;
-  }
-}
+/** In-app browsers show about 660px: draw a shorter chart there. */
+const shortViewport = () => matches('(max-height: 700px)');
+const reducedMotion = () => matches('(prefers-reduced-motion: reduce)');
 
 /** The lead line: the final one at the end of the count; on the way, the final's words ("ahead"/"behind") at every figure, $0 included. */
 function leadText(value: number, finalLead: number): string {
@@ -238,10 +245,11 @@ function leadText(value: number, finalLead: number): string {
   return aheadBehindLine(Math.max(1, Math.abs(Math.round(value))), Math.round(finalLead) < 0);
 }
 
-/** The folio's reveal text: one-sentence lines lose their full stop ("That was 2008"). */
-function revealText(line: string): string {
-  const parts = line.split('. ').length;
-  return parts === 1 ? line.replace(/\.$/, '') : line;
+/** The reveal in two parts: the name, large ("That was 2008"), and any second sentence under it. */
+function revealParts(line: string): { name: string; rest: string } {
+  const i = line.indexOf('. ');
+  if (i < 0) return { name: line.replace(/\.$/, ''), rest: '' };
+  return { name: line.slice(0, i), rest: line.slice(i + 2) };
 }
 
 export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy(): void } {
@@ -249,6 +257,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   const start = model.start ?? 10000;
   const { result, actions } = model;
   const behind = Math.round(result.lead) < 0;
+  const won = Math.round(result.lead) > 0;
 
   if (!document.getElementById(STYLE_ID)) {
     const style = h('style');
@@ -267,24 +276,28 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   };
   let destroyed = false;
 
+  /** Elements left out first when the page does not fit the screen, in that order (see fit). */
+  const trimmable: HTMLElement[] = [];
+  const optional = <T extends HTMLElement>(e: T, rank: number): T => {
+    e.setAttribute('data-trimmable', String(rank));
+    trimmable.push(e);
+    return e;
+  };
+
   const page = h('main', 'es' + (model.blackBorder ? ' es-black' : ''));
 
   page.appendChild(h('div', 'es-mast', MASTHEAD));
 
-  // Folio: run label, "Late edition", the reveal.
-  const name = revealText(model.run.revealLine);
-  const folio = h('div', 'es-folio' + (name.length > 22 ? ' es-folio-long' : ''));
+  const folio = h('div', 'es-folio');
   folio.appendChild(h('span', '', model.modeLabel));
   folio.appendChild(h('span', '', LATE_EDITION));
-  const revealSlot = h('span', 'es-reveal');
-  folio.appendChild(revealSlot);
   page.appendChild(folio);
 
   page.appendChild(h('h1', 'es-h1', model.headlineOverride ?? model.verdict.headline));
 
   const verdict = h('p', 'es-verdict' + (behind ? ' es-behind' : ''));
   verdict.appendChild(h('b', '', `${model.verdict.title}.`));
-  verdict.appendChild(document.createTextNode(` ${model.verdict.line}.`));
+  verdict.appendChild(optional(h('span', '', ` ${model.verdict.line}.`), 5));
   page.appendChild(verdict);
 
   const sold = result.trades.filter((t) => t.side === 'sell').length;
@@ -307,10 +320,16 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       ink: paper.ink,
       red: paper.accent,
       paper: paper.bg,
-      height: shortViewport() ? 68 : undefined,
+      height: shortViewport() ? 52 : 76,
       market: marketInCash(result.balances, result.trades, model.closes),
     }),
   );
+
+  // The moment (R44): on a blind page a large "Tap to see what that was" stands where the name and the
+  // score will print. The name comes first, in big type; the score a beat later.
+  const moment = h('div', 'es-moment');
+  page.appendChild(moment);
+  const parts = revealParts(model.run.revealLine);
 
   // The score block (trade headlines, the lead, perfect timing and the lines under it) stays out of the
   // page until the reveal: real headlines name the crash and the score gives the ending away.
@@ -318,7 +337,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   score.hidden = true;
   page.appendChild(score);
   const news = (model.tradeNews ?? []).filter((n) => n.real);
-  const newsBox = h('div', 'es-newsbox');
+  const newsBox = optional(h('div', 'es-newsbox'), 3);
   score.appendChild(newsBox);
   const printNews = () => {
     for (const n of news) {
@@ -329,7 +348,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     }
   };
 
-  // Figures that give the score away (the table's money, "Keep your $N win") keep their space but stay
+  // Figures that give the score away (the table's money, money near misses) keep their space but stay
   // hidden until the reveal, so nothing moves when they show.
   const secret: HTMLElement[] = [];
   const hideUntilReveal = (e: HTMLElement) => {
@@ -338,8 +357,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     secret.push(e);
     return e;
   };
-  let doubleBlock: HTMLElement | null = null;
-  const table = h('div', 'es-table');
+  const table = optional(h('div', 'es-table'), 2);
   const row = (label: string, value: number, cls = '', key?: 'solid' | 'dash') => {
     const r = h('div', 'es-row ' + cls);
     const l = h('span');
@@ -361,54 +379,47 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   const lead = h('p', 'es-lead' + (behind ? ' es-behind' : ''), leadText(result.lead, result.lead));
   lead.setAttribute('data-lead', '');
   score.appendChild(lead);
-  let scoreEnd: HTMLElement = h('p', 'es-perfect', perfectLine(result.perfectFinal, result.final));
-  score.appendChild(scoreEnd);
+  // The last to go, and only on a very short screen: the lead above says the score.
+  score.appendChild(optional(h('p', 'es-perfect', perfectLine(result.perfectFinal, result.final)), 9));
   if (model.other?.kind === 'challenger') {
-    scoreEnd = h('p', 'es-vs', challengerLine(result.final, model.other.final));
-    score.appendChild(scoreEnd);
+    score.appendChild(optional(h('p', 'es-vs', challengerLine(result.final, model.other.final)), 8));
   }
+  for (const line of model.extraLines ?? []) score.appendChild(optional(h('p', 'es-vs', line), 8));
 
-  for (const line of model.extraLines ?? []) {
-    scoreEnd = h('p', 'es-vs', line);
-    score.appendChild(scoreEnd);
-  }
-
-  if (model.double) {
-    const d = model.double;
+  // After a win, "Wins in a row: N" large with its title, and double or nothing under it (R44).
+  // After anything else, the best winning streak, when there has been one.
+  const wins = model.double?.wins ?? model.wins ?? 0;
+  let winBlock: HTMLElement | null = null;
+  if (wins > 0) {
     const block = h('section', 'es-double');
-    block.appendChild(h('h2', '', DOUBLE_OR_NOTHING));
-    block.appendChild(h('p', 'es-stake', doubleStakeLine(d.net, d.final)));
-    const lad = ladder(d.wins);
-    block.appendChild(h('p', 'es-ladder-label', WINS_IN_A_ROW));
-    const ul = h('ul', 'es-ladder');
-    lad.rungs.forEach((r, i) => {
-      const state = d.wins >= r ? 'reached' : r === lad.next ? 'next' : 'ahead';
-      const title = RUNG_TITLES[i];
-      const li = h('li', 'es-rung');
-      li.setAttribute('data-rung', state);
-      li.setAttribute('aria-label', `${r} ${r === 1 ? 'win' : 'wins'}: ${title}${state === 'reached' ? ', reached' : state === 'next' ? ', next' : ''}`);
-      li.appendChild(h('i', '', String(r)));
-      // One line: only the rung just reached and the next one print their titles.
-      if (r === lad.reached || r === lad.next) li.appendChild(h('b', '', title));
-      ul.appendChild(li);
-    });
-    block.appendChild(ul);
-    const pair = h('div', 'es-pair');
-    pair.appendChild(button('es-dbl', DOUBLE_OR_NOTHING, actions.onDouble));
-    pair.appendChild(button('es-out', bankLabel(d.net), actions.onBank));
-    block.appendChild(pair);
-    // Only a win has this block, so on a blind page it is not even there (no space kept: a gap would be
-    // a tell) until the reveal, when it is put in place and slides in; the tap guard covers the move.
-    if (model.flags.blind) doubleBlock = block;
-    else page.appendChild(block);
+    const head = h('div', 'es-wins');
+    head.appendChild(h('h2', '', winsInRowLine(wins)));
+    const title = ladder(wins).title;
+    if (title) head.appendChild(h('p', 'es-title', title));
+    block.appendChild(head);
+    if (model.double) {
+      const d = model.double;
+      block.appendChild(optional(h('p', 'es-stake', doubleStakeLine(d.net, d.final)), 4));
+      const pair = h('div', 'es-pair');
+      pair.appendChild(button('es-dbl', DOUBLE_OR_NOTHING, actions.onDouble));
+      pair.appendChild(button('es-out', bankLabel(d.net), actions.onBank));
+      block.appendChild(pair);
+    }
+    winBlock = block;
+  } else if (!won && (model.bestStreak ?? 0) > 0) {
+    score.appendChild(optional(h('p', 'es-best', bestWinningStreakLine(model.bestStreak!)), 7));
   }
+  // Only a win has this block, so on a blind page it is not even there (no space kept: a gap would be
+  // a tell) until the reveal, when it is put in place and slides in; the tap guard covers the move.
+  if (winBlock && !model.flags.blind) page.appendChild(winBlock);
 
   const pair = h('div', 'es-pair');
   // R24: with the double block, its red button is the only filled one.
   // A blind page keeps Rematch filled until the reveal brings the double block (an outline would be a tell).
+  const outlined = !!model.double && !model.flags.blind;
   let rematchButton: HTMLButtonElement | null = null;
   if (actions.onRematch) {
-    rematchButton = button(model.double && !doubleBlock ? 'es-out' : 'es-main', REMATCH, actions.onRematch);
+    rematchButton = button(outlined ? 'es-out' : 'es-main', REMATCH, actions.onRematch);
     pair.appendChild(rematchButton);
   }
   if (actions.onChallenge) pair.appendChild(button('es-out', CHALLENGE, actions.onChallenge));
@@ -423,13 +434,16 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     pair.appendChild(b);
   }
   if (pair.childElementCount) page.appendChild(pair);
-  page.appendChild(button('es-link', NEW_MYSTERY, actions.onNewMystery));
+  // With double or nothing on offer the choice is double or bank; "Play a new mystery crash" (which banks)
+  // comes back once the win is banked. On a blind page it stays until the reveal (no tell).
+  const newLink = button('es-link', NEW_MYSTERY, actions.onNewMystery);
+  page.appendChild(newLink);
 
-  // R28: the table and the near misses come after the buttons, so a short screen reaches them first.
+  // R28: the table and the near misses come after the buttons; on a short screen they are left out.
   page.appendChild(table);
-  if (model.holderNote) page.appendChild(h('p', 'es-note', HOLDER_NOTE));
+  if (model.holderNote) page.appendChild(optional(h('p', 'es-note', HOLDER_NOTE), 1));
   if (model.nearMisses.length) {
-    const ul = h('ul', 'es-misses');
+    const ul = optional(h('ul', 'es-misses'), 0);
     // A near miss with a figure in it ("perfect timing made $N") gives the score away: it waits too.
     for (const m of model.nearMisses) ul.appendChild(m.includes('$') ? hideUntilReveal(h('li', '', m)) : h('li', '', m));
     page.appendChild(ul);
@@ -437,29 +451,24 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
 
   page.appendChild(h('div', 'es-grow'));
 
-  page.appendChild(hideUntilReveal(h('p', 'es-pot', potResultLine(model.pot.pot, model.pot.tonight))));
+  if (model.showPot) page.appendChild(hideUntilReveal(h('p', 'es-pot', potResultLine(model.pot.pot, model.pot.tonight))));
 
   const links = h('div', 'es-foot');
-  const foot = h('div', 'es-foot');
   if (actions.onDaily) links.appendChild(button('', DAILY_CRASH, actions.onDaily));
   if (actions.onPick) links.appendChild(button('', PICK_A_CRASH, actions.onPick));
   if (actions.onCollection) links.appendChild(button('', YOUR_COLLECTION, actions.onCollection));
-  const toggle = (state: { on: boolean } | undefined, fn: (() => boolean) | undefined, label: (on: boolean) => string) => {
-    if (!state || !fn) return;
-    const b = button('', label(state.on));
-    b.setAttribute('aria-pressed', String(state.on));
+  if (model.sound && actions.onToggleSound) {
+    const fn = actions.onToggleSound;
+    const b = button('', soundLabel(model.sound.on));
+    b.setAttribute('aria-pressed', String(model.sound.on));
     b.addEventListener('click', () => {
       const on = fn();
-      b.textContent = label(on);
+      b.textContent = soundLabel(on);
       b.setAttribute('aria-pressed', String(on));
     });
-    foot.appendChild(b);
-  };
-  toggle(model.sound, actions.onToggleSound, soundLabel);
-  toggle(model.vibration, actions.onToggleVibration, vibrationLabel);
-  toggle(model.borrowed, actions.onToggleBorrowed, (on) => (on ? BORROWED_ON : PLAY_BORROWED));
+    links.appendChild(b);
+  }
   if (links.childElementCount) page.appendChild(links);
-  if (foot.childElementCount) page.appendChild(foot);
   page.appendChild(h('p', 'es-footer', FOOTER_RESULT));
 
   // While the page settles after the reveal, taps on buttons do nothing (they have just moved).
@@ -474,8 +483,56 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   );
   root.replaceChildren(page);
 
+  /**
+   * One screen (R44): when the page is taller than the window, the extras are left out. Each is put
+   * back in rank order, highest first, and kept only if the page still fits, so a small extra can stay
+   * where a bigger, higher one could not. Buttons, the score and the name are never left out.
+   */
+  const fit = () => {
+    if (destroyed) return;
+    const over = () => document.documentElement.scrollHeight > window.innerHeight + 0.5;
+    for (const e of trimmable) e.removeAttribute('data-trim');
+    if (!over()) return;
+    const ranked = trimmable
+      .slice()
+      .sort((a, b) => Number(b.getAttribute('data-trimmable')) - Number(a.getAttribute('data-trimmable')));
+    for (const e of ranked) e.setAttribute('data-trim', '');
+    for (const e of ranked) {
+      e.removeAttribute('data-trim');
+      if (over()) e.setAttribute('data-trim', '');
+    }
+  };
+  /**
+   * Before the reveal: fit as the page will be once revealed (the score and any win block laid out,
+   * unseen), so nothing that shows now has to vanish when the score arrives.
+   */
+  let scoreShown = false;
+  const refit = () => {
+    if (scoreShown || destroyed) return fit();
+    const insertWin = !!winBlock && !winBlock.isConnected;
+    score.hidden = false;
+    score.style.visibility = 'hidden';
+    if (insertWin) {
+      winBlock!.style.visibility = 'hidden';
+      score.after(winBlock!);
+    }
+    if (model.double) newLink.hidden = true;
+    printNews();
+    fit();
+    newsBox.replaceChildren();
+    score.hidden = true;
+    score.style.visibility = '';
+    if (insertWin) {
+      winBlock!.remove();
+      winBlock!.style.visibility = '';
+    }
+    newLink.hidden = false;
+  };
+  const onResize = () => refit();
+  window.addEventListener('resize', onResize);
+
   // The score counts to the lead over about 1.5 s (spec 6.6), at once with reduced motion.
-  const count = (done: () => void) => {
+  const count = () => {
     const target = result.lead;
     const up = Math.round(target) > 0;
     const down = Math.round(target) < 0;
@@ -483,7 +540,6 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       lead.textContent = leadText(target, target);
       if (up) model.sfx?.payout(true);
       if (down) model.sfx?.thud();
-      done();
       return;
     }
     lead.textContent = leadText(0, target);
@@ -500,86 +556,76 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
         return;
       }
       if (up) model.sfx?.payout(true);
-      done();
     };
     later(step, COUNT_STEP_MS);
   };
 
-  // "Next mystery crash in N. Tap to stop." Any touch on the page stops it (spec 6.6).
-  // It starts once the count-up has finished, sits right under the score and is announced once.
-  let stopCountdown = () => {};
-  let revealNote: string | null = null;
-  const startCountdown = () => {
-    if (!model.flags.showCountdown || destroyed) return;
-    let n = COUNTDOWN_FROM;
-    const line = button('es-count', nextMysteryLine(n));
-    scoreEnd.after(line);
-    if (revealNote !== null) revealNote += ` ${nextMysteryLine(n)}`;
-    else announce(nextMysteryLine(n));
-    const events = ['pointerdown', 'touchstart', 'keydown', 'wheel'] as const;
-    let interval: ReturnType<typeof setInterval> | null = null;
-    stopCountdown = () => {
-      if (interval !== null) clearInterval(interval);
-      interval = null;
-      for (const e of events) document.removeEventListener(e, stopCountdown, true);
-      // The line sits above the buttons: keep its space, so a tap that stops it does not move them under the finger.
-      if (line.isConnected) {
-        const gap = h('div', 'es-count-gap');
-        gap.setAttribute('aria-hidden', 'true');
-        gap.style.height = `${line.offsetHeight}px`;
-        line.replaceWith(gap);
-      }
-      stopCountdown = () => {};
-    };
-    for (const e of events) document.addEventListener(e, stopCountdown, true);
-    interval = setInterval(() => {
-      n--;
-      if (n > 0) {
-        line.textContent = nextMysteryLine(n);
-        return;
-      }
-      stopCountdown();
-      actions.onNewMystery();
-    }, 1000);
+  const printName = (animate: boolean) => {
+    const name = h('p', 'es-name' + (animate ? ' es-wipe' : ''), parts.name);
+    const nodes: HTMLElement[] = [name];
+    if (parts.rest) nodes.push(h('p', 'es-name-sub', parts.rest));
+    moment.replaceChildren(...nodes);
   };
 
-  let revealed = false;
-  const reveal = (animate: boolean) => {
-    if (revealed || destroyed) return;
-    revealed = true;
-    const span = h('span', 'es-name' + (animate && !reducedMotion() ? ' es-wipe' : ''), name);
-    revealSlot.replaceChildren(span);
+  const showScore = (animate: boolean) => {
+    if (destroyed) return;
+    scoreShown = true;
     printNews();
     score.hidden = false;
     for (const e of secret) e.style.visibility = '';
-    if (doubleBlock) {
-      score.after(doubleBlock);
-      if (rematchButton) rematchButton.className = 'es-out';
-    }
-    if (doubleBlock && animate && !reducedMotion() && typeof doubleBlock.animate === 'function') {
-      doubleBlock.animate([{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], {
-        duration: 320, easing: EASE,
-      });
+    if (model.double) newLink.remove();
+    if (winBlock && model.flags.blind) {
+      score.after(winBlock);
+      if (rematchButton && model.double) rematchButton.className = 'es-out';
+      if (animate && typeof winBlock.animate === 'function') {
+        winBlock.animate([{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], {
+          duration: 320, easing: EASE,
+        });
+      }
     }
     // The score pushes the buttons down: for a moment a tap meant for where a button was does nothing.
     if (animate) {
       page.setAttribute('data-settling', '');
       later(() => page.removeAttribute('data-settling'), SETTLE_MS);
     }
-    // One announcement for the reveal; a countdown that starts at once joins it.
-    revealNote = `${model.run.revealLine} ${leadText(result.lead, result.lead)}.`;
-    count(startCountdown);
-    announce(revealNote);
-    revealNote = null;
+    fit();
+    count();
+  };
+
+  let revealed = false;
+  const reveal = (tapped: boolean) => {
+    if (revealed || destroyed) return;
+    revealed = true;
+    const animate = tapped && !reducedMotion();
+    printName(animate);
+    // One announcement for the reveal.
+    announce(`${model.run.revealLine} ${leadText(result.lead, result.lead)}.`);
+    if (animate) {
+      page.setAttribute('data-settling', '');
+      later(() => showScore(true), REVEAL_BEAT_MS);
+    } else {
+      showScore(false);
+    }
   };
 
   if (model.flags.blind) {
-    const cover = button('es-cover', '', () => reveal(true));
-    cover.appendChild(h('span', '', TAP_TO_REVEAL));
-    revealSlot.appendChild(cover);
+    const cover = button('es-cover', TAP_TO_REVEAL, () => reveal(true));
+    // A thin line fills under the words over the 4 s before the page shows it anyway.
+    const bar = h('i');
+    bar.setAttribute('aria-hidden', 'true');
+    cover.appendChild(bar);
+    moment.appendChild(cover);
     later(() => reveal(true), REVEAL_AFTER_MS);
   } else {
-    reveal(false);
+    printName(false);
+    showScore(false);
+  }
+  refit();
+  // Webfonts can change line breaks after the first layout.
+  try {
+    void document.fonts?.ready.then(() => refit());
+  } catch {
+    /* no font loading API */
   }
 
   return {
@@ -587,7 +633,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       destroyed = true;
       for (const id of timers) clearTimeout(id);
       timers.clear();
-      stopCountdown();
+      window.removeEventListener('resize', onResize);
       root.replaceChildren();
       document.getElementById(STYLE_ID)?.remove();
     },

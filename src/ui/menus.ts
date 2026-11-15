@@ -43,7 +43,7 @@ const CSS = `
   font-family:'Newsreader',Georgia,serif;color:var(--ink)}
 .dps-menu *{box-sizing:border-box}
 .dps-mast{border-top:4px solid var(--ink);border-bottom:1px solid var(--ink);padding:8px 0 4px;text-align:center;font-weight:700;font-size:30px;line-height:1;letter-spacing:-0.02em}
-.dps-folio{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--ink);font-family:'Libre Franklin',Arial,sans-serif;font-weight:500;font-size:12px;line-height:1;color:var(--sec);font-variant-numeric:tabular-nums}
+.dps-folio{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--ink);font-family:'Libre Franklin',Arial,sans-serif;font-weight:500;font-size:14px;line-height:1;color:var(--sec);font-variant-numeric:tabular-nums}
 .dps-h1{margin:20px 0 0;font-weight:700;font-size:40px;line-height:1;letter-spacing:-0.02em;text-wrap:balance}
 .dps-stand{margin:8px 0 0;font-size:18px;line-height:1.3;color:var(--sec);font-variant-numeric:lining-nums tabular-nums}
 .dps-h2{margin:28px 0 0;padding-bottom:8px;border-bottom:1px solid var(--ink);font-family:'Libre Franklin',Arial,sans-serif;font-weight:700;font-size:16px;line-height:1.25}
@@ -51,7 +51,7 @@ const CSS = `
 .dps-list>li{border-bottom:1px solid var(--rule)}
 .dps-row{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;min-height:52px;padding:8px 0;margin:0;border:0;border-radius:0;background:none;color:var(--ink);text-align:left;font:inherit;cursor:pointer}
 .dps-row .n{font-weight:700;font-size:20px;line-height:1.15}
-.dps-row .k{flex:none;font-family:'Libre Franklin',Arial,sans-serif;font-weight:500;font-size:12px;color:var(--sec)}
+.dps-row .k{flex:none;font-family:'Libre Franklin',Arial,sans-serif;font-weight:500;font-size:14px;color:var(--sec)}
 .dps-item{display:flex;justify-content:space-between;align-items:baseline;gap:16px;min-height:44px;padding:8px 0}
 .dps-item .n{font-weight:700;font-size:20px;line-height:1.15}
 .dps-item .l{font-size:16px;line-height:1.25;color:var(--sec);text-align:right}
@@ -63,16 +63,17 @@ const CSS = `
 .dps-count{margin:8px 0 0;font-size:16px;line-height:1.25;color:var(--sec);font-variant-numeric:lining-nums tabular-nums}
 .dps-fact{margin:12px 0 0;font-size:20px;line-height:1.3;font-variant-numeric:lining-nums tabular-nums}
 .dps-fact.sec{margin-top:4px;color:var(--sec);font-size:18px}
-.dps-switch{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;min-height:56px;margin:24px 0 0;padding:8px 0;border:0;border-top:1px solid var(--ink);border-bottom:1px solid var(--ink);border-radius:0;background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.dps-switches{margin-top:24px;border-top:1px solid var(--ink)}
+.dps-switch{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;min-height:56px;margin:0;padding:8px 0;border:0;border-bottom:1px solid var(--ink);border-radius:0;background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
 .dps-switch .t{font-family:'Libre Franklin',Arial,sans-serif;font-weight:700;font-size:16px}
-.dps-switch .s{flex:none;display:flex;align-items:center;gap:8px;font-family:'Libre Franklin',Arial,sans-serif;font-weight:500;font-size:12px;color:var(--sec)}
+.dps-switch .s{flex:none;display:flex;align-items:center;gap:8px;font-family:'Libre Franklin',Arial,sans-serif;font-weight:500;font-size:14px;color:var(--sec)}
 .dps-switch .track{width:40px;height:24px;border:2px solid var(--ink);padding:2px;display:flex;justify-content:flex-start}
 .dps-switch .track i{display:block;width:16px;height:16px;background:var(--ink);transition:transform .2s cubic-bezier(0.22,1,0.36,1)}
 .dps-switch[aria-checked="true"] .track{background:var(--ink)}
 .dps-switch[aria-checked="true"] .track i{background:var(--bg);transform:translateX(16px)}
 .dps-grow{flex-grow:1;min-height:24px}
 .dps-back{display:block;width:100%;min-height:48px;margin:24px 0 0;padding:0;border:1px solid var(--ink);border-radius:0;background:none;color:var(--ink);font-family:'Libre Franklin',Arial,sans-serif;font-weight:700;font-size:16px;cursor:pointer}
-.dps-foot{margin-top:12px;font-family:'Libre Franklin',Arial,sans-serif;font-weight:500;font-size:12px;line-height:1.35;color:var(--sec)}
+.dps-foot{margin-top:12px;font-family:'Libre Franklin',Arial,sans-serif;font-weight:500;font-size:14px;line-height:1.35;color:var(--sec)}
 .dps-menu button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 @media (hover:hover){.dps-row:hover .n{text-decoration:underline;text-underline-offset:3px}}
 @media (prefers-reduced-motion:reduce){.dps-switch .track i{transition:none}}
@@ -122,6 +123,31 @@ function backButton(page: HTMLElement, onBack: () => void): void {
   page.appendChild(b);
 }
 
+/** A labelled on/off switch row. */
+function toggle(text: string, initial: boolean, onChange: (on: boolean) => void): HTMLButtonElement {
+  let on = initial;
+  const sw = el('button', 'dps-switch');
+  sw.type = 'button';
+  sw.setAttribute('role', 'switch');
+  const state = el('span', 's');
+  const label = el('span', undefined);
+  const track = el('span', 'track');
+  track.appendChild(el('i'));
+  state.append(label, track);
+  sw.append(el('span', 't', text), state);
+  const paint = () => {
+    sw.setAttribute('aria-checked', String(on));
+    label.textContent = on ? MENU_TEXT.on : MENU_TEXT.off;
+  };
+  paint();
+  sw.addEventListener('click', () => {
+    on = !on;
+    paint();
+    onChange(on);
+  });
+  return sw;
+}
+
 const kindLabel = (r: RunMeta) => (r.kind === 'scare' ? MENU_TEXT.falseAlarm : MENU_TEXT.crash);
 
 export interface PickCrashProps {
@@ -166,6 +192,11 @@ export interface CollectionProps {
   unlocked?: boolean;
   borrowed?: boolean;
   onToggleBorrowed?(on: boolean): void;
+  /** The vibration switch (moved here from the result page so that fits one screen, R44). */
+  vibration?: boolean;
+  onToggleVibration?(on: boolean): void;
+  /** The pot and busts are hidden this round (R40); the lines come back with this. */
+  showPot?: boolean;
   onBack(): void;
 }
 
@@ -216,8 +247,10 @@ export function mountCollection(root: HTMLElement, p: CollectionProps): () => vo
   // The record in plain words, the pot, busts and the best streak.
   page.appendChild(el('h2', 'dps-h2', MENU_TEXT.recordHeading));
   page.appendChild(el('p', 'dps-fact', recordSentence(p.record)));
-  page.appendChild(el('p', 'dps-fact', potLine(p.pot)));
-  if (p.busts > 0) page.appendChild(el('p', 'dps-fact sec', bustLine(p.busts)));
+  if (p.showPot) {
+    page.appendChild(el('p', 'dps-fact', potLine(p.pot)));
+    if (p.busts > 0) page.appendChild(el('p', 'dps-fact sec', bustLine(p.busts)));
+  }
   const lad = ladder(p.bestStreak);
   const streak =
     p.bestStreak > 0
@@ -225,29 +258,10 @@ export function mountCollection(root: HTMLElement, p: CollectionProps): () => vo
       : MENU_TEXT.noStreak;
   page.appendChild(el('p', 'dps-fact', streak));
 
-  if (p.unlocked) {
-    let on = !!p.borrowed;
-    const sw = el('button', 'dps-switch');
-    sw.type = 'button';
-    sw.setAttribute('role', 'switch');
-    const state = el('span', 's');
-    const label = el('span', undefined);
-    const track = el('span', 'track');
-    track.appendChild(el('i'));
-    state.append(label, track);
-    sw.append(el('span', 't', PLAY_BORROWED), state);
-    const paint = () => {
-      sw.setAttribute('aria-checked', String(on));
-      label.textContent = on ? MENU_TEXT.on : MENU_TEXT.off;
-    };
-    paint();
-    sw.addEventListener('click', () => {
-      on = !on;
-      paint();
-      p.onToggleBorrowed?.(on);
-    });
-    page.appendChild(sw);
-  }
+  const switches = el('div', 'dps-switches');
+  if (p.unlocked) switches.appendChild(toggle(PLAY_BORROWED, !!p.borrowed, (on) => p.onToggleBorrowed?.(on)));
+  if (p.onToggleVibration) switches.appendChild(toggle(MENU_TEXT.vibration, p.vibration !== false, p.onToggleVibration));
+  if (switches.childElementCount) page.appendChild(switches);
 
   backButton(page, p.onBack);
   return () => {
