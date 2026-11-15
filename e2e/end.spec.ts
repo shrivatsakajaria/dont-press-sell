@@ -56,7 +56,7 @@ test('no countdown starts the next game by itself (R44)', async ({ page }) => {
   await expect(page.locator('.es-h1')).toBeVisible();
 });
 
-test('Rematch opens on a short start screen; after Start s2014 opens on its red day 1', async ({ page }) => {
+test('Rematch opens on a short start screen; after Start s2014 opens on its slow day 1', async ({ page }) => {
   await finishWithoutTapping(page);
   await expect(page.locator('.es-h1')).toBeVisible();
   await page.clock.runFor(6000); // reveal and count
@@ -67,8 +67,9 @@ test('Rematch opens on a short start screen; after Start s2014 opens on its red 
   await page.clock.runFor(5000);
   await expect(page.locator('.folio')).toContainText('Day 1');
   await pressStart(page);
-  // s2014's day 1 is a slow, falling day: the page turns red at once.
-  await expect(page.locator('.play.is-worst')).toHaveCount(1);
+  // s2014's day 1 is a slow day that fell 0.8%: big headline, but no red paper (R55: red only on falls of 2% or more).
+  await expect(page.locator('.play.is-big')).toHaveCount(1);
+  await expect(page.locator('.play.is-worst')).toHaveCount(0);
   await expect(page.locator('.folio')).toContainText('Day 1');
 });
 

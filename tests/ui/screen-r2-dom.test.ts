@@ -12,7 +12,7 @@ vi.mock('../../src/game/session', async (orig) => {
   };
 });
 
-const { startPlay, END_HOLD_MS } = await import('../../src/ui/screen');
+const { startPlay, END_HOLD_MS, STAMP_MS } = await import('../../src/ui/screen');
 
 const closes = [100, 101, 99, 100, 90, 92, 95, 100, 104, 108];
 const dates = closes.map((_, i) => `2007-11-${String(10 + i).padStart(2, '0')}`);
@@ -36,7 +36,7 @@ function mount(onFrame = vi.fn(), onEnd = vi.fn()) {
   return { root, play, q, onEnd, onFrame, btn: q<HTMLButtonElement>('button.act') };
 }
 
-it('a sale holds the day 0.5 s and stamps "Sold at $N" over the paper, gone by the end of the hold', () => {
+it('a sale holds the day 0.5 s and stamps "Sold at $N" over the paper, readable past the hold (R56)', () => {
   const { btn, q } = mount();
   vi.advanceTimersByTime(100); // day 2: 10,100
   btn.click();
@@ -46,6 +46,8 @@ it('a sale holds the day 0.5 s and stamps "Sold at $N" over the paper, gone by t
   expect(stamp.hidden).toBe(false);
   expect(stamp.classList.contains('win')).toBe(false);
   vi.advanceTimersByTime(500);
+  expect(stamp.hidden).toBe(false); // R56: the clock's hold is over; the stamp stays up to be read
+  vi.advanceTimersByTime(STAMP_MS - 500);
   expect(stamp.hidden).toBe(true);
 });
 

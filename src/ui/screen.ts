@@ -11,6 +11,7 @@ import { createSession, type Session, type SessionView, type SimulateFn } from '
 import { load, save } from '../store/store';
 import { announce, initAnnouncer } from './a11y';
 import { drawChart, type ChartModel } from './chart';
+import * as chartApi from './chart';
 import { createRoll } from './digits';
 import { paperFor, type Paper } from './paper';
 
@@ -35,11 +36,19 @@ const SEEN_FIRST_SALE = 'seenFirstSale';
 /** R30: the headline's size steps (of its CSS size), its line limit, and the chart's least height. */
 const HEADLINE_STEPS = [1, 0.82, 0.68, 0.6, 0.52];
 const MAX_HEADLINE_LINES = 3;
-const MIN_CHART = 120;
+/** R55: a slow day is a red day only when the market fell at least this much since the step before. */
+export const RED_FALL = 0.02;
 /** R40: the pot is hidden on the play screen; the code stays for when it comes back. */
 const SHOW_POT = false;
-/** R41: the day clock holds this long on each press, and the stamp is gone by the end of it. */
+/** R41: the day clock holds this long on each press. */
 export const PRESS_HOLD_MS = 500;
+/**
+ * R56: the press stamp's whole life: in over STAMP_IN_MS, fully readable until STAMP_MS - STAMP_OUT_MS
+ * (1.28 s), then a short fade. The days carry on under it once the clock's 0.5 s hold is over.
+ */
+export const STAMP_MS = 1600;
+const STAMP_IN_MS = 120;
+const STAMP_OUT_MS = 200;
 /** R49: the last day (the final balance, as the result will print it) stays on screen this long before the result. */
 export const END_HOLD_MS = 1200;
 /** R39: the folio's status slot stays empty on ordinary and slow days (no "Price: your nerve", no "Time slowed"). */
@@ -53,6 +62,15 @@ export function buyBackSaving(cash: number, todayClose: number, saleClose: numbe
   if (!(saleClose > 0) || !Number.isFinite(todayClose) || !Number.isFinite(cash)) return 0;
   const n = Math.round(cash * (1 - todayClose / saleClose));
   return n === 0 ? 0 : n;
+}
+
+/**
+ * R30/R57: the headline step to use, given each step's measure (largest first): the first that keeps the
+ * headline to three lines and fits the news block, else the smallest.
+ */
+export function chooseHeadlineStep(results: { lines: number; fits: boolean }[]): number {
+  const i = results.findIndex((r) => r.lines <= MAX_HEADLINE_LINES && r.fits);
+  return i >= 0 ? i : Math.max(0, results.length - 1);
 }
 
 export interface ScreenModel {
@@ -126,11 +144,11 @@ export function screenModel(s: PlayState): ScreenModel {
   const prevDay = prevStep ? prevStep.dayIndex : d;
   // Day 1 has no step before it: it fell if it closed below the close before the run (preCloses).
   const pre = run.preCloses;
-  const fell = prevStep !== undefined
-    ? closes[d] < closes[prevDay]
-    : !!pre && pre.length > 0 && closes[d] < pre[pre.length - 1];
+  const before = prevStep !== undefined ? closes[prevDay] : pre && pre.length > 0 ? pre[pre.length - 1] : NaN;
+  const fall = before > 0 ? 1 - closes[d] / before : 0;
   const inCash = !v.invested;
-  const worst = v.slow && fell;
+  // R55: the red flood (and its shake) only on slow falls of 2% or more; smaller slow days only slow down.
+  const worst = v.slow && fall >= RED_FALL - 1e-9;
   const forward = v.phase === 'forward';
 
   const status = s.paused
@@ -252,6 +270,8 @@ export interface Screen {
   setSound(on: boolean): void;
   /** R41: a short stamp over the paper for `ms` ("Sold at $9,750"); `win` styles a cheaper buy-back as a win. */
   stamp(text: string, win: boolean, ms: number): void;
+  /** K2: a press hold stretches the chart's running growth by `ms` (lane FB's chart extend, when present). */
+  extendChart(ms: number): void;
   /** The run is over: the button no longer takes presses (the last day stays on screen). */
   freeze(): void;
   /** Disconnects the resize watcher and clears the page colours on <html>. */
@@ -299,6 +319,42 @@ const STYLE = `
 .foot .sound{margin-left:auto}
 .folio,.foot{font-size:14px}
 .under{font-size:14px;line-height:20px;height:40px}
+.pause[aria-disabled="true"]{opacity:0.45;cursor:default;text-decoration:none}
+/* Design minor: the day stays put in the middle of the folio whether or not the status slot has words. */
+.folio{display:grid;grid-template-columns:1fr auto 1fr;justify-content:normal}
+.folio>span:nth-child(2){text-align:center}
+.folio>span:nth-child(3){text-align:right}
+/* R57: the headline and the line under it sit in a block of fixed height (three headline lines and two lines
+   under them), so a new headline never changes the chart's size. The headline steps down (--k) to fit it. */
+.news{flex:none;height:206px;overflow:hidden}
+.is-gate .news{display:none}
+.headline{--hs:40px}
+.is-big .headline{--hs:44px}
+.is-worst .headline{--hs:56px}
+.headline,.is-big .headline,.is-worst .headline{font-size:calc(var(--hs) * var(--k, 1))}
+.play{position:relative}
+.news-measure{position:absolute;left:0;right:0;top:0;visibility:hidden;pointer-events:none;contain:layout style}
+.news-measure>.news{height:auto;overflow:visible}
+/* The red day keeps the chart's inset and padding: same size, and the line never starts off the paper. */
+.is-worst .chart{margin-left:0;margin-right:0;padding:8px 0}
+/* R57: the balance and the figure beside it always share one line, so the block never changes height. */
+.figures{flex-wrap:nowrap}
+.balance{font-size:min(64px,16.4vw)}
+.delta{flex:0 1 auto;min-width:0}
+.regret.reserve{visibility:hidden}
+/* Design minor: the short Start screen (later games) sets its heading as a headline just above the balance. */
+.is-gate .intro.short{margin-top:auto}
+.is-gate .intro.short ~ .figures{margin-top:32px}
+.intro.short .lead{font-size:40px;line-height:1;letter-spacing:-0.02em}
+@media (max-height:760px){
+  .news{height:clamp(100px,calc(100dvh - 492px),168px)}
+  .headline{--hs:34px}
+  .is-big .headline{--hs:38px}
+  .is-worst .headline{--hs:42px}
+  .balance{font-size:min(56px,15vw)}
+  .intro.short .lead{font-size:34px}
+  .is-gate .intro.short ~ .figures{margin-top:24px}
+}
 `;
 function ensureStyle(): void {
   if (typeof document === 'undefined' || document.getElementById(STYLE_ID)) return;
@@ -332,6 +388,8 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   folio.append(fRun, fDay, fStatus);
   const headline = h('h1', 'headline');
   const standfirst = h('p', 'standfirst');
+  const news = h('div', 'news');
+  news.append(headline, standfirst);
   const intro = h('div', 'intro');
   const chartWrap = h('div', 'chart');
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -362,7 +420,7 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   const pause = h('button', 'quiet pause', PAUSE);
   pause.type = 'button';
   foot.append(pot, sound, pause);
-  page.append(masthead, folio, intro, headline, standfirst, chartWrap, figures, regret, spacer, act, under, foot);
+  page.append(masthead, folio, intro, news, chartWrap, figures, regret, spacer, act, under, foot);
   root.replaceChildren(page);
 
   const balanceRoll = createRoll(balance);
@@ -385,6 +443,14 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   let frozen = false;
   let stampTimer: ReturnType<typeof setTimeout> | undefined;
   let lastFitKey = '';
+  /** R57: the chosen headline size per (words, state, block size): measured once, then reused. */
+  const fitCache = new Map<string, number>();
+  let newsSize = '';
+  let regretSeen = false;
+  let stampEnd = 0;
+  let stampLeft = 0;
+  let stampPaused = false;
+  let wasPaused = false;
   let paintFrame = 0;
   let snapFrame = 0;
   let observer: ResizeObserver | null = null;
@@ -407,26 +473,49 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   }
 
   /**
-   * R30: the headline never runs past three lines and the chart keeps at least MIN_CHART px. The headline
-   * steps down from its CSS size (82%, 68%, then 60% and 52% for the longest lines) until both hold; the smallest step is the floor.
+   * R30 + R57: the headline never runs past three lines, and it and the line under it fit the fixed news block.
+   * The headline steps down from its CSS size until both hold; the smallest step is the floor. Each new
+   * (headline, line, state, block size) is measured once, all steps in one layout pass, then cached.
    */
   function fitHeadline() {
-    headline.style.fontSize = '';
-    if (page.classList.contains('is-gate') || chartWrap.getBoundingClientRect().height === 0) return;
-    let base = 0;
-    try {
-      base = parseFloat(getComputedStyle(headline).fontSize);
-    } catch {
-      return;
-    }
-    if (!(base > 0)) return;
-    for (const k of HEADLINE_STEPS) {
-      const px = Math.round(base * k);
-      headline.style.fontSize = k === 1 ? '' : `${px}px`;
-      const lh = parseFloat(getComputedStyle(headline).lineHeight) || px;
-      const lines = Math.round(headline.getBoundingClientRect().height / lh);
-      if (lines <= MAX_HEADLINE_LINES && chartWrap.getBoundingClientRect().height >= MIN_CHART) return;
-    }
+    if (page.classList.contains('is-gate')) return;
+    const words = `${headline.textContent}\u0000${standfirst.textContent}\u0000${page.classList.contains('is-big')}${page.classList.contains('is-worst')}`;
+    const known = newsSize ? fitCache.get(`${words}\u0000${newsSize}`) : undefined;
+    if (known !== undefined) return setStep(known);
+    const box = h('div', 'news-measure');
+    const probes = HEADLINE_STEPS.map((k) => {
+      const wrap = h('div', 'news');
+      const hl = h('div', 'headline', headline.textContent ?? '');
+      hl.style.setProperty('--k', String(k));
+      wrap.append(hl, h('p', 'standfirst', standfirst.textContent ?? ''));
+      box.append(wrap);
+      return { wrap, hl };
+    });
+    page.append(box);
+    // One read phase: every probe is laid out by the first read.
+    const width = news.clientWidth;
+    const height = news.clientHeight;
+    const results = probes.map(({ wrap, hl }) => {
+      let lh = 0;
+      try {
+        lh = parseFloat(getComputedStyle(hl).lineHeight);
+      } catch {
+        /* no layout */
+      }
+      const lines = lh > 0 ? Math.round(hl.getBoundingClientRect().height / lh) : 0;
+      return { lines, fits: wrap.scrollHeight <= height };
+    });
+    box.remove();
+    if (!(width > 0 && height > 0)) return setStep(0);
+    newsSize = `${width}x${height}`;
+    const i = chooseHeadlineStep(results);
+    fitCache.set(`${words}\u0000${newsSize}`, i);
+    setStep(i);
+  }
+  function setStep(i: number) {
+    const k = HEADLINE_STEPS[i] ?? 1;
+    if (k === 1) headline.style.removeProperty('--k');
+    else headline.style.setProperty('--k', String(k));
   }
 
   /**
@@ -455,22 +544,58 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
     drawChart(svg, m.chart, m.paper, w, hgt, { animateMs: reducedMotion() ? 0 : m.chart.growMs ?? 0 });
   }
 
-  // Redraw the chart when the column changes size (rotation, browser bars, the headline's size).
+  // Redraw the chart when the column changes size (rotation, browser bars); refit when the news block does.
   if (typeof ResizeObserver === 'function') {
     let lastSize = '';
     observer = new ResizeObserver((entries) => {
-      const r = entries[entries.length - 1]?.contentRect;
-      if (!r) return;
-      const box = boxFrom(r.width, r.height);
-      const key = `${box.w}x${box.h}`;
-      if (key !== lastSize && last) {
-        lastSize = key;
-        chartBox = box;
-        fitHeadline();
-        drawChartNow(last);
+      let refit = false;
+      let redraw = false;
+      for (const e of entries) {
+        const r = e.contentRect;
+        if (e.target === news) {
+          const size = `${Math.round(r.width)}x${Math.round(r.height)}`;
+          if (r.height > 0 && size !== newsSize) {
+            newsSize = '';
+            refit = true;
+          }
+          continue;
+        }
+        const box = boxFrom(r.width, r.height);
+        const key = `${box.w}x${box.h}`;
+        if (key !== lastSize) {
+          lastSize = key;
+          chartBox = box;
+          redraw = true;
+        }
       }
+      if (!last) return;
+      if (refit) fitHeadline();
+      if (redraw) drawChartNow(last);
     });
     observer.observe(chartWrap);
+    observer.observe(news);
+  }
+
+  /** R56: the stamp's timer and fade wait while the game is paused (M3). */
+  function pauseStamp(on: boolean) {
+    if (stampEl.hidden || on === stampPaused) return;
+    stampPaused = on;
+    const anims = stampEl.getAnimations?.() ?? [];
+    if (on) {
+      clearTimeout(stampTimer);
+      stampLeft = Math.max(0, stampEnd - Date.now());
+      for (const a of anims) a.pause();
+    } else {
+      for (const a of anims) a.play();
+      armStamp(stampLeft);
+    }
+  }
+  function armStamp(ms: number) {
+    clearTimeout(stampTimer);
+    stampEnd = Date.now() + ms;
+    stampTimer = setTimeout(() => {
+      stampEl.hidden = true;
+    }, ms);
   }
 
   return {
@@ -510,8 +635,11 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       balanceRoll.set(dollars(m.balance));
       delta.textContent = m.deltaLabel;
       delta.classList.toggle('loss', !m.inCash && Math.round(m.delta) < 0);
-      regret.textContent = m.regret ? m.regret.text : '';
-      regret.hidden = !m.regret;
+      // R57: once a game has shown the score to beat, its line keeps its room while in cash (no jump).
+      if (m.regret) regretSeen = true;
+      regret.textContent = m.regret ? m.regret.text : regretSeen ? '\u00a0' : '';
+      regret.hidden = !m.regret && !regretSeen;
+      regret.classList.toggle('reserve', !m.regret && regretSeen);
       regret.classList.toggle('rose', !!m.regret?.rose);
       const [pre, fig, post] = splitFigure(m.buttonLabel);
       actPre.textContent = pre;
@@ -532,6 +660,12 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       pot.textContent = m.pot;
       pause.textContent = m.paused ? RESUME : PAUSE;
       pause.setAttribute('aria-pressed', String(m.paused));
+      // Review M9: Pause does nothing on the Start screen or in the final hold, and says so.
+      pause.setAttribute('aria-disabled', String(frozen || page.classList.contains('is-gate')));
+      if (m.paused !== wasPaused) {
+        wasPaused = m.paused;
+        pauseStamp(m.paused);
+      }
       // R43: fitting measures the page (a forced layout), so only when what it depends on changed;
       // any other change of the chart's height reaches the resize watcher, which fits again.
       const fitKey = `${m.headline}|${m.standfirst}|${m.big}|${m.worst}|${page.classList.contains('is-gate')}`;
@@ -542,17 +676,26 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       drawChartNow(m);
       cancelRaf(paintFrame);
       paintFrame = raf(() => handlers.onPainted?.());
-      // A short jolt when a worst day arrives.
-      if (m.worst && !prev?.worst && !reducedMotion() && typeof page.animate === 'function') {
-        page.animate(
-          [{ transform: 'translateX(0)' }, { transform: 'translateX(-4px)' }, { transform: 'translateX(3px)' }, { transform: 'translateX(0)' }],
-          { duration: 240, easing: EASE },
-        );
+      // A short jolt when a red day arrives (R55): the news and the chart, never the button under the finger.
+      if (m.worst && !prev?.worst && !reducedMotion()) {
+        for (const e of [news, chartWrap]) {
+          if (typeof e.animate !== 'function') continue;
+          e.animate(
+            [{ transform: 'translateX(0)' }, { transform: 'translateX(-4px)' }, { transform: 'translateX(3px)' }, { transform: 'translateX(0)' }],
+            { duration: 240, easing: EASE },
+          );
+        }
       }
     },
     setGate(g) {
       page.classList.toggle('is-gate', !!g);
+      pause.setAttribute('aria-disabled', String(frozen || !!g));
       const ps = g ? g.lines.map((t, i) => h('p', i === 0 ? 'lead' : '', t)) : [];
+      // The headline h1 is hidden on the gate: its first line is the page's heading instead.
+      ps[0]?.setAttribute('role', 'heading');
+      ps[0]?.setAttribute('aria-level', '1');
+      // The short version (later games, R45) sits down by the balance instead of leaving a dead band.
+      intro.classList.toggle('short', !!g && g.lines.length < 3);
       if (g?.extra) ps.push(h('p', 'extra', g.extra));
       if (g?.note) ps.push(h('p', 'note', g.note));
       intro.replaceChildren(...ps);
@@ -567,27 +710,32 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       stampEl.replaceChildren(h('span', '', text));
       stampEl.classList.toggle('win', win);
       stampEl.hidden = false;
+      stampPaused = false;
       if (!reducedMotion() && typeof stampEl.animate === 'function') {
-        // In quickly, a small lift for a win, then fade out by the end of the hold.
+        // R56: in quickly (a small lift for a win), fully readable for 1.2 s or more, then a short fade.
+        // With reduced motion it stays as long and then goes at once.
         const lift = win ? 'translateY(-6px)' : 'none';
         stampEl.animate(
           [
             { opacity: 0, transform: 'translateY(6px)' },
-            { opacity: 1, transform: lift, offset: 0.24 },
-            { opacity: 1, transform: lift, offset: 0.7 },
+            { opacity: 1, transform: lift, offset: Math.min(0.3, STAMP_IN_MS / ms) },
+            { opacity: 1, transform: lift, offset: Math.max(0.7, 1 - STAMP_OUT_MS / ms) },
             { opacity: 0, transform: lift },
           ],
           { duration: ms, easing: EASE, fill: 'forwards' },
         );
       }
-      stampTimer = setTimeout(() => {
-        stampEl.hidden = true;
-      }, ms);
+      armStamp(ms);
+      if (wasPaused) pauseStamp(true);
+    },
+    extendChart(ms) {
+      (chartApi as unknown as { extend?(svg: SVGSVGElement, ms: number): void }).extend?.(svg, ms);
     },
     freeze() {
       frozen = true;
       page.classList.add('is-over');
       act.setAttribute('aria-disabled', 'true');
+      pause.setAttribute('aria-disabled', 'true');
     },
     destroy() {
       clearTimeout(stampTimer);
@@ -759,14 +907,16 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
     });
     screen.render(m);
     if (stamp) {
-      screen.stamp(stamp.text, stamp.win, PRESS_HOLD_MS);
+      screen.stamp(stamp.text, stamp.win, STAMP_MS);
       // C1: the day clock holds on each press (lane A's session; absent, the stamp still shows).
       (session as Session & { holdFor?(ms: number): void }).holdFor?.(PRESS_HOLD_MS);
+      // K2: the line keeps growing through the hold instead of stopping dead.
+      screen.extendChart(PRESS_HOLD_MS);
     }
     const newStep = v.stepIndex !== lastFrameStep;
     lastFrameStep = v.stepIndex;
     try {
-      opts.onFrame?.(v, m, { newStep, trade: traded, win: !!stamp?.win, holdMs: steps[v.stepIndex]?.holdMs ?? 0 });
+      opts.onFrame?.(v, m, { newStep, trade: traded, win: !!stamp?.win, holdMs: v.stepMs ?? steps[v.stepIndex]?.holdMs ?? 0 });
     } catch {
       /* sound and vibration are optional */
     }
