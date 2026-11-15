@@ -55,3 +55,66 @@ for (const height of [660, 844]) {
     });
   }
 }
+
+// The balance and the figure beside it ("down $1,450", "in cash") always fit inside the 24px gutters.
+for (const [w, h] of [[360, 780], [375, 812], [390, 660], [390, 844]]) {
+  const edges = (page: import('@playwright/test').Page) =>
+    page.evaluate(() => {
+      // Measure the settled layout: the red-day jolt shakes the page by a few px for 240 ms.
+      for (const a of document.getAnimations()) a.finish();
+      const r = (q: string) => document.querySelector(q)!.getBoundingClientRect();
+      return { day: document.querySelector('.folio')!.textContent!, balance: r('.balance').right, delta: r('.delta').right,
+        deltaLeft: r('.delta').left, act: r('button.act').top, worst: !!document.querySelector('.play.is-worst'), text: document.querySelector('.delta')!.textContent };
+    });
+
+  test(`balance and delta inside the gutters at ${w} x ${h}: a carried $15,400 on falling days`, async ({ page }) => {
+    await page.setViewportSize({ width: w, height: h });
+    await page.clock.install();
+    await page.goto('/');
+    // A double-or-nothing run carried from $15,400 (the stored game a reload resumes).
+    await page.evaluate(() =>
+      sessionStorage.setItem('dps:resume', JSON.stringify({ mode: 'mystery', runId: 'c2007', start: 15400, double: true, gate: true })),
+    );
+    await page.reload();
+    await pressStart(page);
+    await expect(page.locator('.balance')).toHaveText('$15,400');
+    const actTop = (await edges(page)).act;
+    let reds = 0;
+    let last = '';
+    for (let t = 0; t < 40_000 && reds < 2; t += 100) {
+      await page.clock.runFor(100);
+      const m = await edges(page);
+      if (m.day === last) continue;
+      last = m.day;
+      if (m.worst) reds++;
+      // The delta moving under the balance never moves the button (R30).
+      expect(Math.abs(m.act - actTop), `${m.day} button top`).toBeLessThanOrEqual(1);
+      expect(m.balance, `${m.day} balance`).toBeLessThanOrEqual(w - 24);
+      expect(m.delta, `${m.day} ${m.text}`).toBeLessThanOrEqual(w - 24);
+    }
+    expect(reds).toBeGreaterThan(0);
+    await page.screenshot({ path: `e2e/shots/S/edges-15400-${w}x${h}.png` });
+  });
+
+  test(`balance and delta inside the gutters at ${w} x ${h}: winning in cash`, async ({ page }) => {
+    await page.setViewportSize({ width: w, height: h });
+    await page.clock.install();
+    await page.goto('/?run=c2020');
+    await pressStart(page);
+    await page.clock.runFor(700);
+    await page.locator('button.act').click();
+    let ahead = false;
+    let last = '';
+    for (let t = 0; t < 15_000; t += 100) {
+      await page.clock.runFor(100);
+      const m = await edges(page);
+      if (m.day === last) continue;
+      last = m.day;
+      expect(m.balance, `${m.day} balance`).toBeLessThanOrEqual(w - 24);
+      expect(m.delta, `${m.day} ${m.text}`).toBeLessThanOrEqual(w - 24);
+      if (/ahead$/.test((await page.locator('button.act').textContent()) ?? '')) ahead = true;
+    }
+    expect(ahead).toBe(true);
+    await page.screenshot({ path: `e2e/shots/S/edges-cash-${w}x${h}.png` });
+  });
+}
