@@ -314,7 +314,7 @@ const STYLE = `
 .headline,.is-big .headline,.is-worst .headline{font-size:calc(var(--hs) * var(--k, 1))}
 .play{position:relative}
 .news-measure{position:absolute;left:0;right:0;top:0;visibility:hidden;pointer-events:none;contain:layout style}
-.news-measure>.news{height:auto;overflow:visible}
+.news-measure>.news{height:auto;overflow:visible;display:flow-root}
 /* The red day keeps the chart's inset and padding: same size, and the line never starts off the paper. */
 .is-worst .chart{margin-left:0;margin-right:0;padding:8px 0}
 /* R57: the balance and the figure beside it always share one line, so the block never changes height. */
@@ -471,10 +471,14 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       box.append(wrap);
       return { wrap, hl };
     });
-    page.append(box);
-    // One read phase: every probe is laid out by the first read.
+    // The probes take the news block's own width and place (the page's padding would make them wider and
+    // the text wrap less, so a headline that fits there could still cut off the line under it).
     const width = news.clientWidth;
     const height = news.clientHeight;
+    box.style.left = `${news.offsetLeft}px`;
+    box.style.right = 'auto';
+    box.style.width = `${width}px`;
+    page.append(box);
     const results = probes.map(({ wrap, hl }) => {
       let lh = 0;
       try {

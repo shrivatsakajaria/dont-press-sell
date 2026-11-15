@@ -38,6 +38,7 @@ for (const height of [660, 844]) {
             deltaHeight: document.querySelector('.delta')!.getBoundingClientRect().height,
             figures: document.querySelector('.figures')!.getBoundingClientRect().height,
             scrollHeight: document.documentElement.scrollHeight,
+            newsOverflow: (() => { const n = document.querySelector('.news')!; return n.scrollHeight - n.clientHeight; })(),
           };
         });
         if (!m) break;
@@ -53,6 +54,8 @@ for (const height of [660, 844]) {
         expect(Math.abs(m.figures - firstFigures), `${m.day}: balance block height constant`).toBeLessThanOrEqual(0.5);
         expect(m.deltaHeight, `${m.day}: "up $N" on one line`).toBeLessThanOrEqual(24);
         expect(m.scrollHeight, `${m.day}: no page scroll`).toBeLessThanOrEqual(height);
+        // The line under the headline is never cut off by the fixed news block.
+        expect(m.newsOverflow, `${m.day}: headline and line fit the news block`).toBeLessThanOrEqual(1);
         if (m.worst && red < 2) {
           red++;
           await page.locator('button.act').click();
