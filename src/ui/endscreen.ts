@@ -57,8 +57,8 @@ export interface EndModel {
   tradeNews?: { side: 'sell' | 'buy'; real: string }[];
   /** A previous go at this crash (rematch) or a challenger's run, drawn dashed. */
   other?: { kind: 'previous' | 'challenger'; balances: number[]; final: number };
-  /** Present only when the model offers double or nothing. `wins` counts this win. */
-  double?: { lead: number; final: number; wins: number };
+  /** Present only when the model offers double or nothing. `wins` counts this win; `net` is the streak's whole win (what banking adds). */
+  double?: { net: number; final: number; wins: number };
   pot: { pot: number; tonight: number };
   flags: { showCountdown: boolean; blind: boolean };
   /** Print the plain line about someone who did nothing under the table (R28: first result only). */
@@ -362,7 +362,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     const d = model.double;
     const block = h('section', 'es-double');
     block.appendChild(h('h2', '', DOUBLE_OR_NOTHING));
-    block.appendChild(h('p', 'es-stake', doubleStakeLine(d.lead, d.final)));
+    block.appendChild(h('p', 'es-stake', doubleStakeLine(d.net, d.final)));
     const lad = ladder(d.wins);
     block.appendChild(h('p', 'es-ladder-label', WINS_IN_A_ROW));
     const ul = h('ul', 'es-ladder');
@@ -380,7 +380,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     block.appendChild(ul);
     const pair = h('div', 'es-pair');
     pair.appendChild(button('es-dbl', DOUBLE_OR_NOTHING, actions.onDouble));
-    pair.appendChild(button('es-out', bankLabel(d.lead), actions.onBank));
+    pair.appendChild(button('es-out', bankLabel(d.net), actions.onBank));
     block.appendChild(pair);
     page.appendChild(block);
   }

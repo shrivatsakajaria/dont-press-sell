@@ -321,7 +321,7 @@ describe('the front page', () => {
     const t = root.textContent!;
     expect(root.querySelector('h2')!.textContent).toBe('Double or nothing');
     expect(t).toContain(
-      'Keep your $3,591 win, or take all $14,427 into another mystery game. Finish behind and the run is over.',
+      'Keep your $5,091 win, or take all $14,427 into another mystery game. Finish behind and the run is over.',
     );
     expect(t).toContain('Wins in a row');
     // Compact ladder: one line, titles printed only for the rung just reached and the next one;
@@ -348,7 +348,7 @@ describe('the front page', () => {
     ]);
     const byText = (s: string) => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === s)!;
     byText('Double or nothing').click();
-    byText('Bank $3,591').click();
+    byText('Bank $5,091').click();
     expect(onDouble).toHaveBeenCalledTimes(1);
     expect(onBank).toHaveBeenCalledTimes(1);
   });

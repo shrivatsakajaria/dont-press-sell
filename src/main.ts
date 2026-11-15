@@ -21,7 +21,7 @@ import { dailyPick, pickMystery } from './game/picker';
 import { getPot } from './game/pot';
 import { hashString, mulberry32 } from './game/rng';
 import { buildSchedule } from './game/schedule';
-import { daysInRowText, getDailyResult, getLastRun, getRecord, type LastRun, type Mode } from './store/record';
+import { daysInRowText, getDailyResult, getRecord, scoreToBeatRun, type LastRun, type Mode } from './store/record';
 import { renderCard, shareLine } from './share/card';
 import { dailyText } from './share/dailytext';
 import { decodeChallenge, type Challenge } from './share/link';
@@ -311,11 +311,14 @@ function double() {
   return newMystery(s.start, { double: true });
 }
 
-/** Rematch: the same crash from the same start, as practice. Never borrowed; a borrowed go is not a fair score to beat. */
+/**
+ * Rematch: the same crash from the same start, as practice. Never borrowed. The score to beat comes only
+ * from an unborrowed go, scaled to this start (I2).
+ */
 function rematch(game: Game) {
   return play({
     mode: 'rematch', runId: game.runId, label: REMATCH_LABEL, start: game.start, real: true,
-    previous: game.borrowed ? null : getLastRun(game.runId),
+    previous: scoreToBeatRun(game.runId, game.start),
   });
 }
 
@@ -324,7 +327,7 @@ function daily() {
   const date = todayUtc();
   const { number, runId } = dailyPick(date);
   if (getDailyResult(date)) {
-    return play({ mode: 'rematch', runId, label: REMATCH_LABEL, start: START, real: true, previous: getLastRun(runId) });
+    return play({ mode: 'rematch', runId, label: REMATCH_LABEL, start: START, real: true, previous: scoreToBeatRun(runId, START) });
   }
   const n = Math.max(1, number);
   return play({ mode: 'daily', runId, label: dailyLabel(n), start: START, real: false, date, dailyNumber: n });

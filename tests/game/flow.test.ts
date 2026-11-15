@@ -48,7 +48,7 @@ for (const [name, make] of [['with storage', memoryStorage], ['with storage thro
 
     test('a mystery win offers double or nothing; the pot shows the win but settles only when banked', () => {
       const s = settle({ ...base, mode: 'mystery', result: result(1640, 12390) });
-      expect(s.double).toEqual({ lead: 1640, final: 12390, wins: 1 });
+      expect(s.double).toEqual({ net: 1640, final: 12390, wins: 1 });
       expect(s.pot).toEqual({ pot: 11640, tonight: 1640 });
       expect(getPot().pot).toBe(10000);
       expect(bankPending()).toEqual({ pot: 11640, tonight: 1640, bust: false });
@@ -63,6 +63,8 @@ for (const [name, make] of [['with storage', memoryStorage], ['with storage thro
       expect(currentStreak().start).toBe(12390);
       const two = settle({ ...base, start: 12390, mode: 'mystery', result: result(1000, 14000) });
       expect(two.double?.wins).toBe(2);
+      // I1: "Bank $N" banks the whole streak's net, so the figure is the net, not this run's lead.
+      expect(two.double?.net).toBe(2640);
       doubleUp();
       const lost = settle({ ...base, start: 14000, mode: 'mystery', result: result(-3000, 12000) });
       expect(lost.double).toBeNull();

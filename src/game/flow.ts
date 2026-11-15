@@ -56,8 +56,11 @@ export interface Settled {
   /** For the result page; while a win waits for a choice it includes that win. */
   pot: { pot: number; tonight: number };
   bust: boolean;
-  /** Present when double or nothing is offered; `wins` counts this win. */
-  double: { lead: number; final: number; wins: number } | null;
+  /**
+   * Present when double or nothing is offered; `wins` counts this win. `net` is the whole streak's
+   * win so far (this run included): what "Bank" adds to the pot (I1).
+   */
+  double: { net: number; final: number; wins: number } | null;
   /** The eighth win in a row. */
   island: boolean;
   /** Days in a row of daily crashes, on a first daily; else null. */
@@ -69,7 +72,9 @@ export interface Settled {
  * double-or-nothing choice and settled once the streak ends (bank, a loss, or leaving).
  */
 export function settle(i: SettleInput): Settled {
-  const { blind } = recordRun(i.mode, i.runId, i.result, i.verdict, { lowIndex: i.lowIndex, date: i.date });
+  const { blind } = recordRun(i.mode, i.runId, i.result, i.verdict, {
+    lowIndex: i.lowIndex, date: i.date, start: i.start, borrowed: i.borrowed,
+  });
   const daysInRow = i.mode === 'daily' && blind && i.date ? dailyStreak(i.date) : null;
   if (blind && i.result.lead > 0 && !borrowedUnlocked()) unlockedCell.set(true);
   const out = (p: { pot: number; tonight: number; bust: boolean }, double: Settled['double'] = null): Settled => ({
@@ -88,7 +93,7 @@ export function settle(i: SettleInput): Settled {
       const now = getPot();
       return out(
         { pot: now.pot + ar.state.net, tonight: now.tonight + ar.state.net, bust: false },
-        { lead: i.result.lead, final: i.result.final, wins: ar.state.wins },
+        { net: ar.state.net, final: i.result.final, wins: ar.state.wins },
       );
     }
     streakCell.set(ar.state);

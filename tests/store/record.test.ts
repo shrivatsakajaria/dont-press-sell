@@ -9,6 +9,7 @@ import {
   recordLine,
   recordRun,
   recordStreak,
+  scoreToBeatRun,
 } from '../../src/store/record';
 import { resetCells } from '../../src/store/store';
 import type { RunResult } from '../../src/engine/types';
@@ -88,11 +89,16 @@ describe('recordRun', () => {
     resetCells();
     expect(getLastRun('c1929')).toBeNull();
   });
-  test('played ids are kept for every mode, without duplicates', () => {
+  test('played ids count blind runs only, without duplicates (R33: practice does not count)', () => {
     recordRun('picked', 'c2020', result(-5), 'bagholder');
     recordRun('rematch', 'c2020', result(5), 'bagholder');
+    expect(getRecord().played).toEqual([]);
     recordRun('mystery', 's2010', result(5), 'bagholder');
-    expect(getRecord().played.sort()).toEqual(['c2020', 's2010']);
+    recordRun('mystery', 's2010', result(5), 'bagholder');
+    recordRun('challenge', 'c1987', result(5), 'bagholder');
+    recordRun('daily', 'c2000', result(5), 'bagholder', { date: '2026-11-21' });
+    recordRun('daily', 'c2007', result(5), 'bagholder', { date: '2026-11-21' }); // a replay of the date
+    expect(getRecord().played.sort()).toEqual(['c1987', 'c2000', 's2010']);
   });
   test('games and wins count blind runs only; a win is lead above zero', () => {
     recordRun('mystery', 'c1929', result(100), 'diamond');
@@ -114,8 +120,29 @@ describe('recordRun', () => {
   test('last run per crash is kept for the rematch', () => {
     recordRun('mystery', 'c1929', result(100, 2), 'diamond');
     const last = getLastRun('c1929');
-    expect(last).toEqual({ balances: [10000, 9000, 10100], trades: [{ dayIndex: 2, side: 'sell' }], final: 10100 });
+    expect(last).toEqual({
+      balances: [10000, 9000, 10100], trades: [{ dayIndex: 2, side: 'sell' }], final: 10100, start: 10000, borrowed: false,
+    });
     expect(getLastRun('c1987')).toBeNull();
+  });
+  test('the score to beat comes only from an unborrowed go, scaled to the current start (I2)', () => {
+    recordRun('mystery', 'c1929', result(100, 2), 'diamond', { start: 10000, borrowed: true });
+    expect(scoreToBeatRun('c1929', 10000)).toBeNull();
+    // A double-or-nothing go from $20,000: scaled to a $10,000 replay.
+    const r = { ...result(100, 2), final: 21000, balances: [20000, 18000, 21000] };
+    recordRun('mystery', 'c1929', r, 'nerves', { start: 20000, borrowed: false });
+    const s = scoreToBeatRun('c1929', 10000)!;
+    expect(s.final).toBe(10500);
+    expect(s.balances).toEqual([10000, 9000, 10500]);
+    expect(s.trades).toEqual([{ dayIndex: 2, side: 'sell' }]);
+    // Same start: unchanged.
+    expect(scoreToBeatRun('c1929', 20000)!.final).toBe(21000);
+  });
+  test('a stored run from before start was kept is not used as a score to beat', () => {
+    const s = g.localStorage as ReturnType<typeof memoryStorage>;
+    s.setItem('dps:lastRuns', JSON.stringify({ c1929: { balances: [1, 2], trades: [], final: 2 } }));
+    resetCells();
+    expect(scoreToBeatRun('c1929', 10000)).toBeNull();
   });
   test('survives a reload (state comes back from storage)', () => {
     recordRun('mystery', 'c1929', result(100), 'diamond');
