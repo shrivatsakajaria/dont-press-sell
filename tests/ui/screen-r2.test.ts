@@ -54,7 +54,7 @@ function state(v: Partial<SessionView> & { stepIndex: number }, trades: Trade[] 
   const bal = (10000 / closes[0]) * closes[d];
   const view: SessionView = {
     dayIndex: d, balance: bal, invested: true, marketBalance: bal, peakBalance: bal, leadNow: 0,
-    phase: steps[v.stepIndex].phase, slow: steps[v.stepIndex].slow, ...v,
+    phase: steps[v.stepIndex].phase, slow: steps[v.stepIndex].slow, stepMs: 1000, ...v,
   };
   const history = new Map<number, { balance: number; invested: boolean }>();
   for (let i = 0; i <= v.stepIndex; i++) history.set(steps[i].dayIndex, { balance: (10000 / closes[0]) * closes[steps[i].dayIndex], invested: true });

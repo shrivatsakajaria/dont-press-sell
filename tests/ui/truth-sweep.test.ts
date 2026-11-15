@@ -71,7 +71,7 @@ function play(run: RunData & { high?: number }, headlines: Headline[], steps: St
       peak = Math.max(peak, balance);
       const view: SessionView = {
         stepIndex: i, dayIndex: d, balance, invested, marketBalance: (START / closes[0]) * closes[d], peakBalance: peak,
-        leadNow: leadAt(closes, trades, d, START), phase: steps[i].phase, slow: steps[i].slow,
+        leadNow: leadAt(closes, trades, d, START), phase: steps[i].phase, slow: steps[i].slow, stepMs: steps[i].holdMs,
       };
       history.set(d, { balance, invested });
       const model = screenModel({

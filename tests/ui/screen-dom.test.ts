@@ -59,12 +59,12 @@ it('borrowed money: its opening line, the counter against the unborrowed market,
   btn.click();
   // In cash with 8,500, sold at this close: the same price (R38).
   expect(btn.textContent).toBe('Buy back at the same price');
-  vi.advanceTimersByTime(100); // day 3: buy back at 90, borrowing twice the balance
+  vi.advanceTimersByTime(100 + 500); // day 3 (after the 0.5 s sale hold, R41): buy back at 90, borrowing twice the balance
   // 8,500 x (1 - 90 / 95) = 447 cheaper.
   expect(btn.textContent).toBe('Buy back $447 cheaper');
   btn.click();
   expect(onEnd).not.toHaveBeenCalled();
-  vi.advanceTimersByTime(100); // day 4: 3 x 8,500 x 60 / 90 - 17,000 = 0, wiped out
+  vi.advanceTimersByTime(100 + 500); // day 4 (after the 0.5 s buy hold): 3 x 8,500 x 60 / 90 - 17,000 = 0, wiped out
   // The run is over at once (the clock stops); the result follows after the final hold (R49).
   expect(btn.getAttribute('aria-disabled')).toBe('true');
   vi.advanceTimersByTime(END_HOLD_MS);
