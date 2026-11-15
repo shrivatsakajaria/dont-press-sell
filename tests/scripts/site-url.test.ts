@@ -7,8 +7,8 @@ test('SITE_URL wins, then Cloudflare Pages CF_PAGES_URL, else empty; no trailing
   expect(siteUrl({})).toBe('');
 });
 
-test('a Cloudflare Workers build (WORKERS_CI) uses the live address unless SITE_URL is set', () => {
-  expect(siteUrl({ WORKERS_CI: '1' })).toBe('https://dont-press-sell.shrivatsakajaria.workers.dev');
+test('a Cloudflare Workers build (WORKERS_CI) uses dontpresssell.com unless SITE_URL is set', () => {
+  expect(siteUrl({ WORKERS_CI: '1' })).toBe('https://dontpresssell.com');
   expect(siteUrl({ WORKERS_CI: '1', SITE_URL: 'https://dontpresssell.com' })).toBe('https://dontpresssell.com');
 });
 
