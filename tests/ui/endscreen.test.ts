@@ -208,14 +208,16 @@ describe('the front page', () => {
     expect(score.hidden).toBe(false);
   });
 
-  test('the result chart draws the market as a dashed line while the player was out', () => {
+  test('R42: the result chart draws the market price, with a dotted "sold at" level while the player was out', () => {
     mount(c2007Sample());
     const svg = root.querySelector('svg[role="img"]')!;
-    expect(svg.querySelector('[data-line="market"]')).not.toBeNull();
-    expect(svg.getAttribute('aria-label')).toContain('the market while you were out');
+    expect(svg.querySelector('[data-line="price"]')).not.toBeNull();
+    expect(svg.querySelector('[data-line="level"]')).not.toBeNull();
+    expect(svg.querySelector('[data-line="you"], [data-line="market"]')).toBeNull();
+    expect(svg.getAttribute('aria-label')).toContain('dots on the price line mark each sale and buy');
     mount(losingSample());
-    // losingSample sold near the low and bought back higher: the dashed line shows the bounce it missed.
-    expect(root.querySelector('svg [data-line="market"]')).not.toBeNull();
+    // losingSample sold near the low and bought back higher: the level shows the buy-back was dearer.
+    expect(root.querySelector('svg [data-line="level"]')).not.toBeNull();
   });
 
   test('before the reveal the table figures and the "Keep your $N win" line keep their space but are hidden', () => {
@@ -441,12 +443,13 @@ describe('the front page', () => {
     expect(root.querySelector('h2')).toBeNull();
   });
 
-  test('challenger: dashed line, row and who won', () => {
+  test('challenger: a row and who won (no chart line, R42)', () => {
     mount(losingSample());
     const t = root.textContent!;
     expect(t).toContain('Your challenger$14,513');
     expect(t).toContain('Your challenger beat you by $5,814');
-    expect(root.querySelector('svg [data-line="other"]')).not.toBeNull();
+    // R42: money only as numbers, so the challenger is a row, not a line on the chart.
+    expect(root.querySelector('svg [data-line="other"]')).toBeNull();
   });
 
   test('rematch: score to beat row', () => {

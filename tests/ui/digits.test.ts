@@ -24,15 +24,15 @@ it('keeps unchanged slots and marks the changed ones', () => {
   expect(r.lastChanged()).toEqual([5]);
 });
 
-it('a changing digit cross-fades in place, briefly, and never slides out of its slot (R28)', () => {
+it('a changing digit swaps at full strength: never greyed, never moved out of its slot (round 2 panel)', () => {
   const el = document.createElement('span');
   const r = createRoll(el);
   r.set('$9,812');
-  const calls: { frames: Keyframe[]; opts: KeyframeAnimationOptions }[] = [];
+  const calls: { frames: Keyframe[] }[] = [];
   const proto = HTMLElement.prototype as unknown as { animate?: unknown };
   const had = proto.animate;
-  proto.animate = vi.fn(function (frames: Keyframe[], opts: KeyframeAnimationOptions) {
-    calls.push({ frames, opts });
+  proto.animate = vi.fn(function (frames: Keyframe[]) {
+    calls.push({ frames });
     return {} as Animation;
   });
   try {
@@ -40,13 +40,30 @@ it('a changing digit cross-fades in place, briefly, and never slides out of its 
   } finally {
     proto.animate = had;
   }
-  expect(calls.length).toBeGreaterThan(0);
   for (const c of calls) {
-    expect(Number(c.opts.duration)).toBeLessThanOrEqual(60);
     for (const f of c.frames) {
       expect(f.transform).toBeUndefined();
-      // Always readable: never fades below half strength.
-      if (f.opacity !== undefined) expect(Number(f.opacity)).toBeGreaterThanOrEqual(0.5);
+      if (f.opacity !== undefined) expect(Number(f.opacity)).toBe(1);
     }
   }
+  expect(el.textContent).toBe('$9,903');
+});
+
+it('R43: updates in place, without rebuilding the figure, when the length holds', () => {
+  const el = document.createElement('span');
+  const r = createRoll(el);
+  r.set('$9,812');
+  const slots = [...el.children];
+  const spy = vi.spyOn(el, 'replaceChildren');
+  r.set('$9,903');
+  expect(spy).not.toHaveBeenCalled();
+  expect([...el.children]).toEqual(slots);
+  // A longer and a shorter figure keep the right-hand slots.
+  r.set('$10,903');
+  expect(el.textContent).toBe('$10,903');
+  expect(el.children[el.children.length - 1]).toBe(slots[slots.length - 1]);
+  r.set('$903');
+  expect(el.textContent).toBe('$903');
+  expect(el.children.length).toBe(4);
+  expect(el.children[3]).toBe(slots[slots.length - 1]);
 });

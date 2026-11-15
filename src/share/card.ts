@@ -23,7 +23,7 @@ export interface ResultCardModel {
   perfect: number;
   /** you - holder. */
   lead: number;
-  /** The line to chart (the run's prices); no dates are ever drawn. */
+  /** The line to chart: the run's prices (R42: never money); no dates are ever drawn. */
   series: number[];
   trades: Trade[];
   /** The page's own address, read by the caller at the time; never hard-coded here. */
@@ -99,7 +99,7 @@ export function cardLines(m: ResultCardModel): CardLines {
     ],
     lead: leadLine(m.lead),
     leadBehind: Math.round(m.lead) < 0,
-    perfect: perfectLine(m.perfect, m.you),
+    perfect: perfectLine(m.perfect, m.you), // R49: lane D words it ("You finished with")
     streak: !practice && m.streak !== undefined && m.streak >= 2 ? survivedLine(m.streak) : null,
     beatMe: BEAT_ME,
     url: m.url,
@@ -177,21 +177,71 @@ function hair(ctx: Ctx, y: number, w: number, color: string): void {
 
 interface Box { x0: number; y0: number; x1: number; y1: number }
 
-function boxHits(b: Box, pts: [number, number][]): number {
-  let n = 0;
-  for (const [x, y] of pts) if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) n++;
-  return n;
-}
-
 function boxesOverlap(a: Box, b: Box): boolean {
   return a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
 }
 
-function drawChart(ctx: Ctx, m: ResultCardModel, x: number, y: number, w: number, h: number, ink: string, bg: string): void {
-  const s = m.series.filter((n) => Number.isFinite(n));
-  if (s.length < 2) return;
-  let lo = Infinity;
-  let hi = -Infinity;
+/** True when the segment passes through the box (Liang-Barsky clipping). */
+function segHits(x1: number, y1: number, x2: number, y2: number, b: Box): boolean {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  let t0 = 0;
+  let t1 = 1;
+  for (const [p, q] of [[-dx, x1 - b.x0], [dx, b.x1 - x1], [-dy, y1 - b.y0], [dy, b.y1 - y1]]) {
+    if (p === 0) {
+      if (q < 0) return false;
+    } else {
+      const r = q / p;
+      if (p < 0) {
+        if (r > t1) return false;
+        if (r > t0) t0 = r;
+      } else {
+        if (r < t0) return false;
+        if (r < t1) t1 = r;
+      }
+    }
+  }
+  return true;
+}
+
+function crossesLine(b: Box, pl: [number, number][], pad: number): boolean {
+  const e = { x0: b.x0 - pad, y0: b.y0 - pad, x1: b.x1 + pad, y1: b.y1 + pad };
+  for (let i = 1; i < pl.length; i++) if (segHits(pl[i - 1][0], pl[i - 1][1], pl[i][0], pl[i][1], e)) return true;
+  return false;
+}
+
+/** Least vertical range, as a share of day 1's close, either side of it (as on the play chart). */
+const MIN_RANGE = 0.02;
+/** Trade dot radius on the card. */
+const DOT_R = 15;
+/** Label height (32px bold sans) and the paper kept around it. */
+const LABEL_H = 28;
+const LABEL_PAD = 4;
+
+export interface CardChart {
+  /** The price line, thinned, with every trade day kept so the dots sit on it. */
+  line: [number, number][];
+  startY: number;
+  /** One dotted level per spell in cash: from the sale to the buy-back (or the end), at the sale close. */
+  levels: [number, number][][];
+  marks: { side: Trade['side']; cx: number; cy: number }[];
+  /** "Sold" and "Bought": text left edge and baseline, and the box they keep clear. */
+  labels: { text: string; tx: number; baseline: number; box: Box }[];
+}
+
+/**
+ * The card chart's layout (R42): the market price only, one unbroken line, trade dots on it, a dotted
+ * level at each sale close while in cash. "Sold" and "Bought" go only where they are clear of every line,
+ * the dots, each other and the chart's edges; a word with no such spot is left out.
+ */
+export function cardChart(
+  m: ResultCardModel, x: number, y: number, w: number, h: number, measure: (s: string) => number,
+): CardChart {
+  const s = m.series.map((v) => (Number.isFinite(v) ? v : NaN));
+  const n = s.length;
+  const base = s[0];
+  let lo = base * (1 - MIN_RANGE);
+  let hi = base * (1 + MIN_RANGE);
   for (const v of s) {
     if (v < lo) lo = v;
     if (v > hi) hi = v;
@@ -199,47 +249,103 @@ function drawChart(ctx: Ctx, m: ResultCardModel, x: number, y: number, w: number
   const span = hi - lo || 1;
   const padT = Math.min(36, h * 0.2);
   const padB = Math.min(40, h * 0.22);
-  const px = (i: number) => x + 20 + (i / (s.length - 1)) * (w - 40);
+  const px = (i: number) => x + 20 + (i / Math.max(1, n - 1)) * (w - 40);
   const py = (v: number) => y + padT + (1 - (v - lo) / span) * (h - padT - padB);
+
+  const inRun = (d: number) => Number.isInteger(d) && d >= 0 && d < n;
+  const step = Math.max(1, Math.floor(n / 140));
+  const days = new Set<number>([n - 1]);
+  for (let i = 0; i < n; i += step) days.add(i);
+  for (const t of m.trades) if (inRun(t.dayIndex)) days.add(t.dayIndex);
+  const line = [...days].sort((a, b) => a - b).filter((i) => Number.isFinite(s[i])).map((i) => [px(i), py(s[i])] as [number, number]);
+
+  const marks = m.trades.filter((t) => inRun(t.dayIndex)).map((t) => ({ side: t.side, cx: px(t.dayIndex), cy: py(s[t.dayIndex]) }));
+
+  const levels: [number, number][][] = [];
+  let sold: number | null = null;
+  for (const t of [...m.trades].filter((t) => inRun(t.dayIndex)).sort((a, b) => a.dayIndex - b.dayIndex)) {
+    if (t.side === 'sell' && sold === null) sold = t.dayIndex;
+    else if (t.side === 'buy' && sold !== null) {
+      levels.push([[px(sold), py(s[sold])], [px(t.dayIndex), py(s[sold])]]);
+      sold = null;
+    }
+  }
+  if (sold !== null) levels.push([[px(sold), py(s[sold])], [px(n - 1), py(s[sold])]]);
+
+  const startY = py(base);
+  const labels: CardChart['labels'] = [];
+  // The first sale and the first buy-back after it, only when there are few trades.
+  if (m.trades.length <= 2) {
+    // Words keep clear of the price line; the faint dotted lines may run behind one (drawn on a paper-coloured edge).
+    const lines = [line];
+    const dots: Box[] = marks.map((k) => ({ x0: k.cx - DOT_R - 4, y0: k.cy - DOT_R - 4, x1: k.cx + DOT_R + 4, y1: k.cy + DOT_R + 4 }));
+    const firstSell = marks.find((k) => k.side === 'sell');
+    const sellDay = m.trades.find((t) => t.side === 'sell')?.dayIndex ?? Infinity;
+    const firstBuy = marks.find((k, i) => k.side === 'buy' && m.trades.filter((t) => inRun(t.dayIndex))[i].dayIndex >= sellDay);
+    for (const [k, word] of [[firstSell, SOLD], [firstBuy, BOUGHT]] as const) {
+      if (!k) continue;
+      const tw = measure(word);
+      const spots: { tx: number; top: number }[] = [];
+      for (const dy of [0, 22, 44]) {
+        for (const below of [true, false]) {
+          const top = below ? k.cy + DOT_R + 6 + dy : k.cy - DOT_R - 6 - LABEL_H - dy;
+          spots.push({ tx: k.cx - tw / 2, top }, { tx: k.cx - DOT_R - 8 - tw, top }, { tx: k.cx + DOT_R + 8, top });
+        }
+      }
+      for (const dy of [0, -16, 16]) {
+        const top = k.cy - LABEL_H / 2 + dy;
+        spots.push({ tx: k.cx - DOT_R - 10 - tw, top }, { tx: k.cx + DOT_R + 10, top });
+      }
+      // Near a side, the same spots pulled in to sit inside the chart.
+      const lo = x + LABEL_PAD;
+      const hi = x + w - LABEL_PAD - tw;
+      for (const sp of spots.slice()) if (sp.tx < lo || sp.tx > hi) spots.push({ tx: Math.min(hi, Math.max(lo, sp.tx)), top: sp.top });
+      const boxOf = (sp: { tx: number; top: number }): Box => ({
+        x0: sp.tx - LABEL_PAD, y0: sp.top - LABEL_PAD, x1: sp.tx + tw + LABEL_PAD, y1: sp.top + LABEL_H + LABEL_PAD,
+      });
+      const spot = spots.find((sp) => {
+        const b = boxOf(sp);
+        return b.x0 >= x && b.x1 <= x + w && b.y0 >= y && b.y1 <= y + h &&
+          !labels.some((l) => boxesOverlap(l.box, b)) && !dots.some((d) => boxesOverlap(d, b)) &&
+          !lines.some((pl) => crossesLine(b, pl, 3));
+      });
+      if (!spot) continue;
+      labels.push({ text: word, tx: spot.tx, baseline: spot.top + LABEL_H - 5, box: boxOf(spot) });
+    }
+  }
+  return { line, startY, levels, marks, labels };
+}
+
+function drawChart(ctx: Ctx, m: ResultCardModel, x: number, y: number, w: number, h: number, ink: string, bg: string, faint: string): void {
+  if (m.series.filter((n) => Number.isFinite(n)).length < 2) return;
+  setFont(ctx, 700, 32, SANS);
+  const c = cardChart(m, x, y, w, h, (t) => ctx.measureText(t).width);
+  const stroke = (pl: [number, number][]) => {
+    ctx.beginPath();
+    pl.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+    ctx.stroke();
+  };
+  ctx.lineCap = 'round';
   // dotted start line
   ctx.strokeStyle = ink;
   ctx.lineWidth = 3;
   ctx.setLineDash([3, 14]);
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(x, py(s[0]));
-  ctx.lineTo(x + w, py(s[0]));
-  ctx.stroke();
+  stroke([[x, c.startY], [x + w, c.startY]]);
+  // the sale close while in cash: faint, dotted
+  ctx.strokeStyle = faint;
+  ctx.lineWidth = 4;
+  ctx.setLineDash([4, 12]);
+  for (const lv of c.levels) stroke(lv);
   ctx.setLineDash([]);
+  // the market price: one unbroken line
+  ctx.strokeStyle = ink;
   ctx.lineWidth = 6;
   ctx.lineJoin = 'round';
-  ctx.beginPath();
-  const step = Math.max(1, Math.floor(s.length / 140));
-  const pts: [number, number][] = [];
-  for (let i = 0; i < s.length; i += step) {
-    pts.push([px(i), py(s[i])]);
-    if (i) ctx.lineTo(px(i), py(s[i]));
-    else ctx.moveTo(px(i), py(s[i]));
-  }
-  ctx.lineTo(px(s.length - 1), py(s[s.length - 1]));
-  ctx.stroke();
-  // densify the sample so label placement sees the whole line
-  const dense: [number, number][] = [];
-  for (let k = 1; k < pts.length; k++) {
-    for (let t = 0; t < 1; t += 0.25) {
-      dense.push([pts[k - 1][0] + (pts[k][0] - pts[k - 1][0]) * t, pts[k - 1][1] + (pts[k][1] - pts[k - 1][1]) * t]);
-    }
-  }
+  stroke(c.line);
   // trade marks: filled red dot = sold, hollow dot = bought
-  const marks = m.trades.map((t) => {
-    const i = Math.min(s.length - 1, Math.max(0, t.dayIndex));
-    return { side: t.side, cx: px(i), cy: py(s[i]) };
-  });
-  const R = 15;
-  const dotBoxes: Box[] = marks.map((k) => ({ x0: k.cx - R - 4, y0: k.cy - R - 4, x1: k.cx + R + 4, y1: k.cy + R + 4 }));
-  for (const k of marks) {
+  for (const k of c.marks) {
     ctx.beginPath();
-    ctx.arc(k.cx, k.cy, R, 0, Math.PI * 2);
+    ctx.arc(k.cx, k.cy, DOT_R, 0, Math.PI * 2);
     if (k.side === 'sell') {
       ctx.fillStyle = '#a3201a';
       ctx.fill();
@@ -251,41 +357,16 @@ function drawChart(ctx: Ctx, m: ResultCardModel, x: number, y: number, w: number
       ctx.stroke();
     }
   }
-  // Labels: the first sale and the first buy-back, only when there are few trades.
-  if (m.trades.length > 2) return;
-  const placed: Box[] = [];
-  setFont(ctx, 700, 32, SANS);
-  for (const side of ['sell', 'buy'] as const) {
-    const idx = marks.findIndex((k) => k.side === side);
-    if (idx < 0) continue;
-    const k = marks[idx];
-    const word = side === 'sell' ? SOLD : BOUGHT;
-    const tw = ctx.measureText(word).width;
-    const th = 28;
-    let best: { box: Box; score: number } | null = null;
-    for (const below of [true, false]) {
-      for (const align of [0, -1, 1]) {
-        const cx0 = align === 0 ? k.cx - tw / 2 : align < 0 ? k.cx - R - 8 - tw : k.cx + R + 8;
-        const x0 = Math.min(x + w - tw, Math.max(x, cx0));
-        const y0 = below ? k.cy + R + 6 : k.cy - R - 6 - th;
-        const box: Box = { x0: x0 - 4, y0: y0 - 4, x1: x0 + tw + 4, y1: y0 + th + 4 };
-        let score = boxHits(box, dense) * 10 + (below ? 0 : 1) + Math.abs(align) * 0.5;
-        if (box.y0 < y + 2 || box.y1 > y + h - 2) score += 500;
-        for (const o of [...placed, ...dotBoxes]) if (boxesOverlap(box, o)) score += 1000;
-        if (!best || score < best.score) best = { box, score };
-      }
-    }
-    if (!best) continue;
-    placed.push(best.box);
-    ctx.fillStyle = ink;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    // a thin paper-coloured edge keeps the word legible where the line passes behind it
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = 9;
-    ctx.strokeStyle = bg;
-    ctx.strokeText(word, best.box.x0 + 4, best.box.y1 - 4 - 5);
-    ctx.fillText(word, best.box.x0 + 4, best.box.y1 - 4 - 5);
+  ctx.fillStyle = ink;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  // a paper-coloured edge keeps a word clear where a dotted line runs behind it
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 9;
+  ctx.strokeStyle = bg;
+  for (const l of c.labels) {
+    ctx.strokeText(l.text, l.tx, l.baseline);
+    ctx.fillText(l.text, l.tx, l.baseline);
   }
 }
 
@@ -377,7 +458,7 @@ export function drawCard(canvas: HTMLCanvasElement, m: ResultCardModel): void {
 
   // Chart between two hairlines
   hair(ctx, y, 3, ink);
-  drawChart(ctx, m, MX, y + 3 + 12, CW, chartH, ink, paper.bg);
+  drawChart(ctx, m, MX, y + 3 + 12, CW, chartH, ink, paper.bg, sec);
   y += 3 + 12 + chartH + 12;
   hair(ctx, y, 3, ink);
   y += 3 + 8;

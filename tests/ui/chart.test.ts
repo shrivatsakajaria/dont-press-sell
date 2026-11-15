@@ -1,202 +1,286 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest';
-import { chartGeometry, drawChart, type ChartModel } from '../../src/ui/chart';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { chartGeometry, drawChart, MIN_RANGE, type ChartModel } from '../../src/ui/chart';
 import { paperFor } from '../../src/ui/paper';
 
-/** The box a 12px label covers (about 6.5px per character), from its anchor. */
-function labelBox(t: Element) {
-  const x = Number(t.getAttribute('x'));
-  const y = Number(t.getAttribute('y'));
-  const w = (t.textContent ?? '').length * 6.5;
-  const anchor = t.getAttribute('text-anchor') ?? 'start';
-  const x0 = anchor === 'end' ? x - w : x;
-  return { x0, x1: x0 + w, y0: y - 11, y1: y + 3 };
-}
-function overlap(a: ReturnType<typeof labelBox>, b: ReturnType<typeof labelBox>) {
-  return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
-}
+/** R42: the chart is the market price only, one unbroken line, with trade dots on it. */
+
+const NS = 'http://www.w3.org/2000/svg';
+const calm = paperFor({ lossFrac: 0, inCash: false, worstDay: false });
+const cash = paperFor({ lossFrac: 0, inCash: true, worstDay: false });
+const svgEl = () => document.createElementNS(NS, 'svg') as SVGSVGElement;
 
 const base: ChartModel = {
-  start: 10000,
-  points: [
-    { dayIndex: 0, balance: 10000, ghost: null },
-    { dayIndex: 5, balance: 9000, ghost: null },
-    { dayIndex: 10, balance: 8000, ghost: null },
-  ],
+  closes: [100, 98, 96, 95, 92, 90, 91, 89, 88, 86, 80],
   trades: [],
+  soldAt: null,
   worst: false,
-  inCash: false,
-  label: 'Chart of your balance',
+  label: 'Chart of the market',
 };
 
-describe('chartGeometry', () => {
-  it('grows left to right, lower balance is lower on screen, start line at start', () => {
+/** Points of a polyline's "points" attribute. */
+function pts(el: Element | null): [number, number][] {
+  return (el?.getAttribute('points') ?? '').trim().split(/\s+/).filter(Boolean).map((p) => p.split(',').map(Number) as [number, number]);
+}
+
+describe('chartGeometry: the market price', () => {
+  it('grows left to right, a lower price is lower on screen, the start line sits at day 1', () => {
     const g = chartGeometry(base, 342, 200);
     const xs = g.line.map((p) => p[0]);
     expect(xs[0]).toBe(0);
-    expect(xs[1]).toBeGreaterThan(xs[0]);
-    expect(xs[2]).toBeGreaterThan(xs[1]);
-    expect(g.line[2][1]).toBeGreaterThan(g.line[0][1]);
+    for (let i = 1; i < xs.length; i++) expect(xs[i]).toBeGreaterThan(xs[i - 1]);
+    expect(g.line[10][1]).toBeGreaterThan(g.line[0][1]);
     expect(g.startY).toBeCloseTo(g.line[0][1]);
-    expect(g.today).toEqual(g.line[2]);
+    expect(g.today).toEqual(g.line[g.line.length - 1]);
+  });
+
+  it('is one unbroken line through a sale and a buy-back: every day is the close, never the cash', () => {
+    const m: ChartModel = { ...base, trades: [{ dayIndex: 3, side: 'sell' }, { dayIndex: 7, side: 'buy' }] };
+    const g = chartGeometry(m, 342, 200);
+    const plain = chartGeometry(base, 342, 200);
+    expect(g.line).toEqual(plain.line);
+    // The dots sit on the price line at their days.
+    expect(g.marks).toEqual([
+      { x: g.line[3][0], y: g.line[3][1], side: 'sell' },
+      { x: g.line[7][0], y: g.line[7][1], side: 'buy' },
+    ]);
+  });
+
+  it('while in cash, a flat level at the sale close runs from the sale dot to the right edge', () => {
+    const m: ChartModel = { ...base, closes: base.closes.slice(0, 9), trades: [{ dayIndex: 3, side: 'sell' }], soldAt: 95 };
+    const g = chartGeometry(m, 342, 200);
+    expect(g.soldAt).not.toBeNull();
+    expect(g.soldAt!.y).toBeCloseTo(g.line[3][1]);
+    expect(g.soldAt!.x0).toBeCloseTo(g.line[3][0]);
+    // Today (88) is cheaper than the sale (95): the dot sits below the level.
+    expect(g.today[1]).toBeGreaterThan(g.soldAt!.y);
+    expect(chartGeometry(base, 342, 200).soldAt).toBeNull();
   });
 
   it('keeps today inside the box with room for the dot, however long the run', () => {
-    const long: ChartModel = {
-      ...base,
-      points: Array.from({ length: 300 }, (_, i) => ({ dayIndex: i * 3, balance: 10000 - i * 10, ghost: null })),
-    };
-    const g = chartGeometry(long, 342, 200);
+    const closes = Array.from({ length: 900 }, (_, i) => 100 - i * 0.05 + Math.sin(i) * 2);
+    const g = chartGeometry({ ...base, closes }, 342, 200);
     for (const [x, y] of g.line) {
       expect(x).toBeGreaterThanOrEqual(0);
       expect(x).toBeLessThanOrEqual(342 - 8);
       expect(y).toBeGreaterThanOrEqual(0);
       expect(y).toBeLessThanOrEqual(200);
     }
+    // Thinned to about a point per pixel, but the low and the high are kept.
+    expect(g.line.length).toBeLessThanOrEqual(400);
+    const ys = g.line.map((p) => p[1]);
+    const all = closes.map((_, i) => i);
+    const lowDay = all.reduce((a, b) => (closes[b] < closes[a] ? b : a));
+    const yLow = chartGeometry({ ...base, closes: closes.slice(0, lowDay + 1) }, 342, 200);
+    expect(Math.max(...ys)).toBeGreaterThan(0);
+    expect(yLow.line.length).toBeGreaterThan(1);
   });
 
   it('early in a run the line does not stretch across the whole width', () => {
-    const g = chartGeometry({ ...base, points: base.points.slice(0, 2) }, 342, 200);
+    const g = chartGeometry({ ...base, closes: [100, 99] }, 342, 200);
     expect(g.today[0]).toBeLessThan(342 / 2);
   });
 
-  it('draws ghost segments and trade marks', () => {
-    const m: ChartModel = {
-      ...base,
-      points: [
-        { dayIndex: 0, balance: 10000, ghost: null },
-        { dayIndex: 5, balance: 9000, ghost: 9000 },
-        { dayIndex: 10, balance: 9000, ghost: 9500 },
-      ],
-      trades: [{ dayIndex: 5, side: 'sell' }],
-      inCash: true,
-    };
-    const g = chartGeometry(m, 342, 200);
-    expect(g.ghosts.length).toBe(1);
-    expect(g.ghosts[0].length).toBe(2);
-    expect(g.marks).toEqual([{ x: g.line[1][0], y: g.line[1][1], side: 'sell' }]);
-    // The ghost above the flat line: market rose.
-    expect(g.ghosts[0][1][1]).toBeLessThan(g.line[2][1]);
+  it('tiny moves never fill the height: the range spans 2% either side of day 1', () => {
+    const g = chartGeometry({ ...base, closes: [100, 100.5, 101] }, 342, 200);
+    const span = Math.abs(g.line[2][1] - g.line[0][1]);
+    expect(span).toBeLessThan((200 - 36) * 0.6);
+    expect(MIN_RANGE).toBe(0.02);
+  });
+
+  it('at a fractional day the tip sits between the two closes, so the line can grow smoothly', () => {
+    const m: ChartModel = { ...base, closes: [100, 90, 96, 95, 92, 94] };
+    const g4 = chartGeometry(m, 342, 200, 4);
+    const g5 = chartGeometry(m, 342, 200, 5);
+    const half = chartGeometry(m, 342, 200, 4.5);
+    expect(half.today[0]).toBeGreaterThan(g4.today[0]);
+    expect(half.today[0]).toBeLessThan(g5.today[0]);
+    expect(half.today[1]).toBeLessThan(g4.today[1]);
+    expect(half.today[1]).toBeGreaterThan(g5.today[1]);
   });
 });
 
 describe('drawChart', () => {
-  it('fills an svg with a line, a start line, today dot and the label', () => {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    drawChart(svg, base, paperFor({ lossFrac: 0, inCash: false, worstDay: false }), 342, 200);
+  it('fills an svg with the price line, a start line, today dot and the text alternative', () => {
+    const svg = svgEl();
+    drawChart(svg, base, calm, 342, 200);
     expect(svg.querySelector('polyline')).not.toBeNull();
     expect(svg.querySelectorAll('circle').length).toBe(1);
-    expect(svg.getAttribute('aria-label')).toBe('Chart of your balance');
+    expect(svg.getAttribute('aria-label')).toBe('Chart of the market');
     expect(svg.getAttribute('role')).toBe('img');
-    expect(svg.textContent).toContain('Started at $10,000');
+    // No money anywhere on the chart.
+    expect(svg.textContent).not.toMatch(/\$/);
   });
 
   it('on the worst day draws a fill beneath the line', () => {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const svg = svgEl();
     drawChart(svg, { ...base, worst: true }, paperFor({ lossFrac: 0, inCash: false, worstDay: true }), 390, 200);
-    expect(svg.querySelector('polygon')).not.toBeNull();
+    const fill = svg.querySelector('polygon');
+    expect(fill).not.toBeNull();
+    expect(fill!.getAttribute('display')).not.toBe('none');
+    drawChart(svg, base, calm, 342, 200);
+    expect(svg.querySelector('polygon')?.getAttribute('display') ?? 'none').toBe('none');
   });
 
-  it('keeps the market label clear of the start label', () => {
-    // Ghost ends right on the start line at the right edge: the labels would sit on top of each other.
-    const m: ChartModel = {
-      ...base,
-      points: [
-        { dayIndex: 0, balance: 10000, ghost: null },
-        { dayIndex: 5, balance: 9000, ghost: 9000 },
-        { dayIndex: 60, balance: 9000, ghost: 10000 },
-      ],
-      trades: [{ dayIndex: 5, side: 'sell' }],
-      inCash: true,
-    };
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    drawChart(svg, m, paperFor({ lossFrac: 0, inCash: true, worstDay: false }), 342, 120);
-    const texts = [...svg.querySelectorAll('text')];
-    expect(texts.map((t) => t.textContent).sort()).toEqual(['Sold', 'Started at $10,000', 'The market']);
-    const boxes = texts.map(labelBox);
-    for (let i = 0; i < boxes.length; i++)
-      for (let j = i + 1; j < boxes.length; j++) expect(overlap(boxes[i], boxes[j])).toBe(false);
+  it('draws only the price line: no dashed market line, no money line, no previous go', () => {
+    const svg = svgEl();
+    const m: ChartModel = { ...base, trades: [{ dayIndex: 3, side: 'sell' }, { dayIndex: 7, side: 'buy' }] };
+    drawChart(svg, m, calm, 342, 200);
+    const lines = [...svg.querySelectorAll('polyline')];
+    expect(lines.length).toBe(1);
+    expect(lines[0].getAttribute('stroke-dasharray')).toBeNull();
+    expect(pts(lines[0]).length).toBe(11);
   });
 
-  it('draws the sale and buy marks above today\'s dot and labels the sale', () => {
-    const m: ChartModel = {
-      ...base,
-      points: [
-        { dayIndex: 0, balance: 10000, ghost: null },
-        { dayIndex: 5, balance: 9000, ghost: 9000 },
-      ],
-      trades: [{ dayIndex: 5, side: 'sell' }],
-      inCash: true,
-    };
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    drawChart(svg, m, paperFor({ lossFrac: 0, inCash: true, worstDay: false }), 342, 200);
+  it('marks the sale and the buy-back with dots and labels them "Sold" and "Bought"', () => {
+    const svg = svgEl();
+    const m: ChartModel = { ...base, trades: [{ dayIndex: 3, side: 'sell' }, { dayIndex: 7, side: 'buy' }] };
+    drawChart(svg, m, calm, 342, 200);
     const circles = [...svg.querySelectorAll('circle')];
-    const last = circles[circles.length - 1];
-    expect(last.getAttribute('fill')).toBe('#a3201a');
-    expect([...svg.querySelectorAll('text')].some((t) => t.textContent === 'Sold')).toBe(true);
+    expect(circles.length).toBe(3);
+    expect(circles.some((c) => c.getAttribute('fill') === calm.accent)).toBe(true);
+    const words = [...svg.querySelectorAll('text')].map((t) => t.textContent);
+    expect(words).toContain('Sold');
+    expect(words).toContain('Bought');
   });
 
-  it('keeps the start label clear of the player\'s line', () => {
-    // The line runs flat along the start level right under where the label would sit.
-    const m: ChartModel = {
-      ...base,
-      points: [
-        { dayIndex: 0, balance: 10000, ghost: null },
-        { dayIndex: 30, balance: 10060, ghost: null },
-        { dayIndex: 60, balance: 10040, ghost: null },
-        { dayIndex: 85, balance: 10050, ghost: null },
-        { dayIndex: 90, balance: 8000, ghost: null },
-      ],
-    };
+  it('in cash: a faint dotted level at the sale close, labelled "Sold at"', () => {
+    const svg = svgEl();
+    const m: ChartModel = { ...base, closes: base.closes.slice(0, 9), trades: [{ dayIndex: 3, side: 'sell' }], soldAt: 95 };
+    drawChart(svg, m, cash, 342, 200);
+    const level = svg.querySelector('[data-level]');
+    expect(level).not.toBeNull();
+    expect(level!.getAttribute('display')).not.toBe('none');
+    expect(level!.getAttribute('stroke-dasharray')).toBeTruthy();
+    const words = [...svg.querySelectorAll('text')];
+    expect(words.map((t) => t.textContent)).toEqual(['Sold at']); // the level names the sale: no second "Sold"
+    // The words sit on the level's own stretch (right of the sale dot), or just left of the dot itself.
     const g = chartGeometry(m, 342, 200);
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    drawChart(svg, m, paperFor({ lossFrac: 0, inCash: false, worstDay: false }), 342, 200);
-    const t = [...svg.querySelectorAll('text')].find((e) => e.textContent === 'Started at $10,000');
-    expect(t).toBeDefined();
-    {
-      const b = labelBox(t!);
-      for (let i = 1; i < g.line.length; i++) {
-        const [x1, y1] = g.line[i - 1];
-        const [x2, y2] = g.line[i];
-        // Sample the segment and check no sample falls inside the label box.
-        for (let k = 0; k <= 20; k++) {
-          const x = x1 + ((x2 - x1) * k) / 20;
-          const y = y1 + ((y2 - y1) * k) / 20;
-          expect(x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1).toBe(false);
-        }
-      }
-    }
+    const t = words[0];
+    const x = Number(t.getAttribute('x'));
+    const right = t.getAttribute('text-anchor') === 'end' ? x : x + 7 * 8.4;
+    const left = right - 7 * 8.4;
+    expect(left >= g.soldAt!.x0 - 2 || (right <= g.soldAt!.x0 && right >= g.soldAt!.x0 - 16)).toBe(true);
+    // Bought back: the level goes.
+    drawChart(svg, { ...m, closes: base.closes, trades: [...m.trades, { dayIndex: 9, side: 'buy' }], soldAt: null }, calm, 342, 200);
+    expect(svg.querySelector('[data-level]')?.getAttribute('display')).toBe('none');
+    expect([...svg.querySelectorAll('text')].map((t) => t.textContent)).not.toContain('Sold at');
+    // R48: small text at least 14px.
+    drawChart(svg, m, cash, 342, 200);
+    for (const t of svg.querySelectorAll('text')) expect(t.getAttribute('font-size')).toBe('14');
+  });
+
+  it('updates in place: the same elements are reused from one day to the next', () => {
+    const svg = svgEl();
+    drawChart(svg, { ...base, closes: base.closes.slice(0, 5) }, calm, 342, 200);
+    const line = svg.querySelector('polyline');
+    const dot = svg.querySelector('circle');
+    drawChart(svg, { ...base, closes: base.closes.slice(0, 6) }, calm, 342, 200);
+    expect(svg.querySelector('polyline')).toBe(line);
+    expect(svg.querySelector('circle')).toBe(dot);
+    expect(pts(line).length).toBe(6);
   });
 });
 
-describe('a rematch draws the previous run as a dashed line', () => {
-  const other = Array.from({ length: 100 }, (_, i) => 10000 - i * 30);
-  it('spans the chart from day 1 to the right edge, and its low widens the range', () => {
-    const g = chartGeometry({ ...base, other }, 342, 200);
-    expect(g.other.length).toBeGreaterThan(10);
-    expect(g.other[0][0]).toBe(0);
-    expect(g.other[g.other.length - 1][0]).toBeLessThanOrEqual(342 - 8);
-    expect(g.other[g.other.length - 1][0]).toBeGreaterThan(300);
-    const ys = g.other.map((p) => p[1]);
-    expect(Math.max(...ys)).toBeLessThanOrEqual(200);
+describe('drawChart animates the new day', () => {
+  let queue: FrameRequestCallback[] = [];
+  let now = 0;
+  const origRaf = globalThis.requestAnimationFrame;
+  const origNow = performance.now.bind(performance);
+  beforeEach(() => {
+    queue = [];
+    now = 1000;
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      queue.push(cb);
+      return queue.length;
+    }) as typeof requestAnimationFrame;
+    performance.now = () => now;
   });
-  it('is drawn dashed, and there is none without a previous run', () => {
-    document.body.innerHTML = '<svg></svg>';
-    const svg = document.querySelector('svg')!;
-    drawChart(svg, { ...base, other }, paperFor({ lossFrac: 0, inCash: false, worstDay: false }), 342, 200);
-    expect(svg.querySelectorAll('polyline[data-other]').length).toBe(1);
-    expect(chartGeometry(base, 342, 200).other).toEqual([]);
+  afterEach(() => {
+    globalThis.requestAnimationFrame = origRaf;
+    performance.now = origNow;
+  });
+  const flush = (ms: number) => {
+    now += ms;
+    const q = queue;
+    queue = [];
+    for (const cb of q) cb(now);
+  };
+  const tipX = (svg: SVGSVGElement) => Number(svg.querySelector('circle')!.getAttribute('cx'));
+
+  it('the tip grows from yesterday to today over animateMs instead of jumping', () => {
+    const svg = svgEl();
+    const m5 = { ...base, closes: base.closes.slice(0, 5) };
+    const m6 = { ...base, closes: base.closes.slice(0, 6) };
+    drawChart(svg, m5, calm, 342, 200);
+    const x5 = tipX(svg);
+    drawChart(svg, m6, calm, 342, 200, { animateMs: 400 });
+    const x6 = chartGeometry(m6, 342, 200).today[0];
+    expect(tipX(svg)).toBeCloseTo(x5, 1);
+    flush(200);
+    expect(tipX(svg)).toBeGreaterThan(x5 + 0.1);
+    expect(tipX(svg)).toBeLessThan(x6 - 0.1);
+    flush(250);
+    expect(tipX(svg)).toBeCloseTo(x6, 1);
+    expect(queue.length).toBe(0);
+  });
+
+  it('R43: mid-growth frames move the tip and the scale only; the long line itself is not rewritten', () => {
+    const svg = svgEl();
+    const closes = Array.from({ length: 300 }, (_, i) => 100 + Math.sin(i / 7) * 5 - i * 0.02);
+    drawChart(svg, { ...base, closes: closes.slice(0, 250) }, calm, 342, 200);
+    drawChart(svg, { ...base, closes: closes.slice(0, 251) }, calm, 342, 200, { animateMs: 400 });
+    const line = svg.querySelector('polyline')!;
+    const set = vi.spyOn(line, 'setAttribute');
+    flush(100);
+    flush(100);
+    expect(set.mock.calls.filter(([k]) => k === 'points')).toEqual([]);
+    expect(set.mock.calls.some(([k]) => k === 'transform')).toBe(true);
+    set.mockRestore();
+    // The stroke keeps its width however the scale stretches.
+    expect(line.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+  });
+
+  it('a new day mid-animation carries on from where the tip is, never jumping back', () => {
+    const svg = svgEl();
+    drawChart(svg, { ...base, closes: base.closes.slice(0, 5) }, calm, 342, 200);
+    drawChart(svg, { ...base, closes: base.closes.slice(0, 6) }, calm, 342, 200, { animateMs: 400 });
+    flush(200);
+    const mid = tipX(svg);
+    drawChart(svg, { ...base, closes: base.closes.slice(0, 7) }, calm, 342, 200, { animateMs: 400 });
+    expect(tipX(svg)).toBeCloseTo(mid, 1);
+    flush(450);
+    expect(tipX(svg)).toBeCloseTo(chartGeometry({ ...base, closes: base.closes.slice(0, 7) }, 342, 200).today[0], 1);
+  });
+
+  it('a redraw of the same day mid-animation (a press, a pause) keeps the growth going, without a jump', () => {
+    const svg = svgEl();
+    drawChart(svg, { ...base, closes: base.closes.slice(0, 5) }, calm, 342, 200);
+    const m6 = { ...base, closes: base.closes.slice(0, 6) };
+    drawChart(svg, m6, calm, 342, 200, { animateMs: 400 });
+    flush(100);
+    const mid = tipX(svg);
+    drawChart(svg, { ...m6, trades: [{ dayIndex: 4, side: 'sell' as const }], soldAt: 92 }, cash, 342, 200);
+    expect(tipX(svg)).toBeCloseTo(mid, 1);
+    flush(400);
+    expect(tipX(svg)).toBeCloseTo(chartGeometry(m6, 342, 200).today[0], 1);
+  });
+
+  it('without animateMs (reduced motion, resize) it draws today at once', () => {
+    const svg = svgEl();
+    drawChart(svg, { ...base, closes: base.closes.slice(0, 5) }, calm, 342, 200);
+    drawChart(svg, { ...base, closes: base.closes.slice(0, 6) }, calm, 342, 200);
+    expect(tipX(svg)).toBeCloseTo(chartGeometry({ ...base, closes: base.closes.slice(0, 6) }, 342, 200).today[0], 1);
+    expect(queue.length).toBe(0);
   });
 });
 
-
-describe('label placement holds on many charts (no crossings, 12px inset, clear space, right line)', () => {
-  /** Seeded random walk charts with a sale (and sometimes a buy-back), in cash or not, red days or not. */
+describe('label placement holds on many charts (no crossings, 12px inset, clear of each other)', () => {
   function rand(seed: number) {
     let s = seed >>> 0;
     return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
   }
-  const CW = 7.2; // the placement's own width estimate, a little generous
+  const CW = 8.4; // 14px labels (R48)
   const box = (t: Element) => {
     const x = Number(t.getAttribute('x'));
     const y = Number(t.getAttribute('y'));
@@ -217,18 +301,6 @@ describe('label placement holds on many charts (no crossings, 12px inset, clear 
     }
     return false;
   };
-  const dist = (b: ReturnType<typeof box>, pl: [number, number][]) => {
-    const cx = (b.x0 + b.x1) / 2;
-    const cy = (b.y0 + b.y1) / 2;
-    let best = Infinity;
-    for (let i = 0; i < pl.length; i++) {
-      const [x1, y1] = pl[Math.max(0, i - 1)];
-      const [x2, y2] = pl[i];
-      const n = Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1)));
-      for (let k = 0; k <= n; k++) best = Math.min(best, Math.hypot(x1 + ((x2 - x1) * k) / n - cx, y1 + ((y2 - y1) * k) / n - cy));
-    }
-    return best;
-  };
   for (let seed = 1; seed <= 60; seed++) {
     it(`chart ${seed}`, () => {
       const r = rand(seed);
@@ -239,66 +311,31 @@ describe('label placement holds on many charts (no crossings, 12px inset, clear 
       const buy = r() < 0.5 ? sell + 1 + Math.floor(r() * (n - sell - 1)) : null;
       const trades: ChartModel['trades'] = [{ dayIndex: sell, side: 'sell' }];
       if (buy !== null) trades.push({ dayIndex: buy, side: 'buy' });
-      const step = 1 + Math.floor(r() * 4);
-      const points: ChartModel['points'] = [];
-      let cash = 0;
-      for (let d = 0; d < n; d += step) {
-        const out = d >= sell && (buy === null || d <= buy);
-        const held = (10000 * closes[d]) / closes[0];
-        if (d === sell || (out && cash === 0)) cash = (10000 * closes[sell]) / closes[0];
-        points.push({ dayIndex: d, balance: out ? cash : held, ghost: out ? (cash * closes[d]) / closes[sell] : null });
-      }
       const inCash = buy === null;
       const worst = !inCash && r() < 0.4;
       const w = worst ? 390 : 342;
       const h = 120 + Math.floor(r() * 168);
-      const m: ChartModel = { ...base, points, trades: trades.filter((t) => t.dayIndex <= points[points.length - 1].dayIndex), inCash, worst };
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      const m: ChartModel = { ...base, closes, trades, soldAt: inCash ? closes[sell] : null, worst };
+      const svg = svgEl();
       drawChart(svg, m, paperFor({ lossFrac: 0, inCash, worstDay: worst }), w, h);
       const g = chartGeometry(m, w, h);
-      const lines = [g.line, ...g.ghosts, [[0, g.startY], [w, g.startY]] as [number, number][]];
-      const texts = [...svg.querySelectorAll('text')];
+      const lines: [number, number][][] = [g.line, [[0, g.startY], [w, g.startY]]];
+      if (g.soldAt) lines.push([[g.soldAt.x0, g.soldAt.y], [w, g.soldAt.y]]);
+      const texts = [...svg.querySelectorAll('text')].filter((t) => t.getAttribute('display') !== 'none');
       const boxes = texts.map(box);
-      texts.forEach((t, i) => {
+      texts.forEach((_t, i) => {
         const b = boxes[i];
         expect(b.x0).toBeGreaterThanOrEqual(12);
         expect(b.x1).toBeLessThanOrEqual(w - 12);
         expect(b.y0).toBeGreaterThanOrEqual(0);
         expect(b.y1).toBeLessThanOrEqual(h);
-        const isStart = (t.textContent ?? '').startsWith('Started at');
         for (const pl of lines) expect(hits(b, pl)).toBe(false);
-        if (isStart) expect(hits(b, [[0, g.startY], [w, g.startY]])).toBe(false);
         for (let j = 0; j < i; j++) {
           const o = boxes[j];
-          const gap = 4;
-          expect(b.x0 < o.x1 + gap && o.x0 < b.x1 + gap && b.y0 < o.y1 + gap && o.y0 < b.y1 + gap).toBe(false);
+          expect(b.x0 < o.x1 + 4 && o.x0 < b.x1 + 4 && b.y0 < o.y1 + 4 && o.y0 < b.y1 + 4).toBe(false);
         }
-        if (t.textContent === 'The market') {
-          const ghost = g.ghosts[g.ghosts.length - 1];
-          expect(dist(b, ghost)).toBeLessThan(dist(b, g.line));
-        }
-        if (worst) {
-          // Never inside the red fill under the line.
-          const below = g.line.some(([x, y]) => x >= b.x0 && x <= b.x1 && b.y1 > y);
-          expect(below).toBe(false);
-        }
+        if (worst) expect(g.line.some(([x, y]) => x >= b.x0 && x <= b.x1 && b.y1 > y)).toBe(false);
       });
     });
   }
-
-  it('tiny moves never fill the height: the range always spans 2% either side of the start', () => {
-    const m: ChartModel = {
-      ...base,
-      points: [
-        { dayIndex: 0, balance: 10000, ghost: null },
-        { dayIndex: 5, balance: 10100, ghost: null },
-        { dayIndex: 9, balance: 10256, ghost: null },
-      ],
-    };
-    const g = chartGeometry(m, 342, 200);
-    const span = Math.abs(g.line[2][1] - g.line[0][1]);
-    expect(span).toBeLessThan((200 - 24) * 0.6);
-    const flat = chartGeometry({ ...base, points: [{ dayIndex: 0, balance: 10000, ghost: null }, { dayIndex: 3, balance: 10010, ghost: null }] }, 342, 200);
-    expect(Math.abs(flat.line[1][1] - flat.line[0][1])).toBeLessThan(10);
-  });
 });

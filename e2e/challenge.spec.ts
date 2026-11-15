@@ -32,7 +32,9 @@ test('a challenge link plays that run blind with the score to beat, and the resu
   await expect(page.getByText('Tap to see what that was')).toBeVisible();
   await expect(page.locator('.es-row').filter({ hasText: 'Your challenger' })).toContainText('$11,804');
   await expect(page.locator('.es-vs')).toHaveText(/^(Your challenger beat you by|You beat your challenger by) \$[\d,]+$/);
-  await expect(page.locator('[data-line="other"]')).toHaveCount(1);
+  // R42: the challenger is a row and a line of words, never a money line on the chart; the chart is the price.
+  await expect(page.locator('[data-line="other"]')).toHaveCount(0);
+  await expect(page.locator('[data-line="price"]')).toHaveCount(1);
   // A challenge never starts the countdown.
   await page.clock.runFor(15_000);
   await expect(page.getByText(/Next mystery crash/)).toHaveCount(0);

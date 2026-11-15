@@ -304,12 +304,10 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   const bought = result.trades.filter((t) => t.side === 'buy').length;
   const otherName = model.other ? (model.other.kind === 'challenger' ? YOUR_CHALLENGER : SCORE_TO_BEAT) : '';
   const chartLabel =
-    `Chart of your balance through the whole run, from ${dollars(start)} to ${dollars(result.final)}. ` +
+    `Chart of the market price through the whole run; you finished with ${dollars(result.final)} from ${dollars(start)}. ` +
     (sold === 0
       ? 'You never sold.'
-      : `You sold ${sold === 1 ? 'once' : `${sold} times`} and bought back ${bought === 1 ? 'once' : `${bought} times`}. ` +
-        'A dashed line shows the market while you were out.') +
-    (model.other ? ` A dashed line shows ${model.other.kind === 'challenger' ? 'your challenger' : 'your last go'}, finishing at ${dollars(model.other.final)}.` : '');
+      : `You sold ${sold === 1 ? 'once' : `${sold} times`} and bought back ${bought === 1 ? 'once' : `${bought} times`}; dots on the price line mark each sale and buy.`);
   page.appendChild(
     endChart({
       balances: result.balances,
@@ -322,6 +320,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       paper: paper.bg,
       height: shortViewport() ? 52 : 76,
       market: marketInCash(result.balances, result.trades, model.closes),
+      closes: model.closes,
     }),
   );
 

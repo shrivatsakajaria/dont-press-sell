@@ -1,36 +1,48 @@
-// The balance chart (spec 9): one 2.5px ink line growing left to right, a dotted
-// start line, a filled dot for today. No grid, no axis, no price scale, no dates.
-// While in cash a dashed line shows the market carrying on without the player.
+// The play chart (spec 9, ruling R42): the market price only, one unbroken 2.5px ink line growing
+// left to right, a dotted start line at day 1's close and a filled dot for today. Sales and buy-backs
+// are dots on the price line, labelled "Sold" and "Bought". While in cash a faint dotted level marks
+// the latest sale close ("Sold at"), so a price under it reads as cheaper at a glance. No money
+// anywhere: money is only the big number. No grid, no axis, no price scale, no dates.
+//
+// R43 (smoothness): the chart is built once per <svg> and updated in place. A new day's segment grows
+// over the step (animateMs), the scale easing along with it, so the line moves rather than jumps.
 import type { Trade } from '../engine/types';
-import { MARKET_DASH, type Paper } from './paper';
-
-export interface ChartPoint {
-  dayIndex: number;
-  balance: number;
-  /** What the cash would be worth had the player held since the sale (in-cash days), else null. */
-  ghost: number | null;
-}
+import type { Paper } from './paper';
+import { BOUGHT, SOLD, SOLD_AT } from '../content/copy';
 
 export interface ChartModel {
-  start: number;
-  points: ChartPoint[];
+  /** The market's closes from day 1 to today: closes[i] is day i's close (today is the last). */
+  closes: number[];
+  /** Sales and buy-backs so far, by day index. */
   trades: Trade[];
+  /** While in cash: the close on the day of the latest sale; null when invested. */
+  soldAt: number | null;
+  /** A slow-motion falling day: the area under the line is filled. */
   worst: boolean;
-  inCash: boolean;
   /** Text alternative for the chart; it updates every step. */
   label: string;
-  /** Rematch: the previous go's balance for every day of the run, drawn dashed across the chart (spec 6.7). */
-  other?: number[];
+  /** How long today's step is on screen: the play screen grows the new day's segment over it. */
+  growMs?: number;
 }
 
 export interface ChartGeometry {
   line: [number, number][];
-  ghosts: [number, number][][];
   startY: number;
   today: [number, number];
   marks: { x: number; y: number; side: Trade['side'] }[];
-  /** The previous go, from day 1 to the chart's right edge; empty without one. */
-  other: [number, number][];
+  /** The "Sold at" level while in cash: from the sale dot (x0) to the right edge, at height y. */
+  soldAt: { x0: number; y: number } | null;
+  /** The whole days drawn (thinned on long runs), the tip excluded. */
+  days: number[];
+  /** From data (day, close) to the chart: x = sx * day, y = sy * close + ty. */
+  map: { sx: number; sy: number; ty: number };
+  /** The growing tip in data units: from the last whole day [day, close] to [day, close] at `at`; null on a whole day. */
+  tip: [number, number, number, number] | null;
+}
+
+export interface DrawOpts {
+  /** Grow the new day's segment over this long (the step's length); 0 or absent draws at once. */
+  animateMs?: number;
 }
 
 /** The fewest days the x-axis ever spans, so day 2 does not fill the width. */
@@ -41,124 +53,268 @@ const TODAY_AT = 0.9;
 const PAD_TOP = 12;
 const PAD_BOTTOM = 24;
 const PAD_RIGHT = 8;
-/** Least vertical range, as a share of the start, either side of the start line. */
+/** Least vertical range, as a share of day 1's close, either side of it. */
 export const MIN_RANGE = 0.02;
+/** The longest a new day takes to draw: a slow day's line arrives well inside its hold. */
+const MAX_ANIM_MS = 900;
+/** Shorter steps than this run back to back, so their segments move at an even pace (no ease). */
+const LINEAR_BELOW_MS = 400;
 
 /** Worst-day fill beneath the cream line (mock-up 2). */
 const WORST_FILL = '#96102a';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const LABEL_FONT = "'Libre Franklin', Arial, sans-serif";
 
-export { STARTED_AT, THE_MARKET, SOLD } from '../content/copy';
-import { STARTED_AT, THE_MARKET, SOLD } from '../content/copy';
+/** Day index of the latest sale, or null. */
+function lastSaleDay(trades: Trade[]): number | null {
+  for (let i = trades.length - 1; i >= 0; i--) if (trades[i].side === 'sell') return trades[i].dayIndex;
+  return null;
+}
 
-export function chartGeometry(m: ChartModel, w: number, h: number): ChartGeometry {
-  const pts = m.points.length ? m.points : [{ dayIndex: 0, balance: m.start, ghost: null }];
-  const lastDay = pts[pts.length - 1].dayIndex;
-  const span = Math.max(MIN_SPAN_DAYS, lastDay / TODAY_AT);
+/**
+ * Where everything sits with the line drawn up to day `at` (default today). A fractional `at` puts
+ * the tip part-way along the next segment and eases the scale with it, so every frame of the growth
+ * is a continuous step from the one before.
+ */
+export function chartGeometry(m: ChartModel, w: number, h: number, at?: number): ChartGeometry {
+  const closes = m.closes.length ? m.closes : [1];
+  const last = closes.length - 1;
+  const t = Math.max(0, Math.min(last, at ?? last));
+  const full = Math.floor(t);
+  const frac = t - full;
+  const tipV = frac > 0 ? closes[full] + (closes[full + 1] - closes[full]) * frac : closes[full];
+
+  const span = Math.max(MIN_SPAN_DAYS, t / TODAY_AT);
   const usableW = w - PAD_RIGHT;
   const xOf = (d: number) => Math.min(usableW, (d / span) * usableW);
 
-  let lo = m.start;
-  let hi = m.start;
-  for (const p of pts) {
-    lo = Math.min(lo, p.balance, p.ghost ?? Infinity);
-    hi = Math.max(hi, p.balance, p.ghost ?? -Infinity);
+  const base = closes[0];
+  let lo = base * (1 - MIN_RANGE);
+  let hi = base * (1 + MIN_RANGE);
+  let loI = 0;
+  let hiI = 0;
+  for (let i = 0; i <= full; i++) {
+    const v = closes[i];
+    if (v < closes[loI]) loI = i;
+    if (v > closes[hiI]) hiI = i;
   }
-  // The previous go, as far as the chart's right edge reaches (thinned to about one point per 2px).
-  const otherDays: number[] = [];
-  if (m.other?.length) {
-    const lastVisible = Math.min(m.other.length - 1, Math.floor(span));
-    const every = Math.max(1, Math.ceil(lastVisible / (usableW / 2)));
-    for (let d = 0; d <= lastVisible; d += every) otherDays.push(d);
-    if (otherDays[otherDays.length - 1] !== lastVisible) otherDays.push(lastVisible);
-    for (const d of otherDays) {
-      lo = Math.min(lo, m.other[d]);
-      hi = Math.max(hi, m.other[d]);
-    }
+  lo = Math.min(lo, closes[loI], tipV);
+  hi = Math.max(hi, closes[hiI], tipV);
+  if (m.soldAt !== null) {
+    lo = Math.min(lo, m.soldAt);
+    hi = Math.max(hi, m.soldAt);
   }
-  // The range always spans 2% of the start either side of it, so small wobbles never look like cliffs.
-  lo = Math.min(lo, m.start * (1 - MIN_RANGE));
-  hi = Math.max(hi, m.start * (1 + MIN_RANGE));
-  const yOf = (v: number) => PAD_TOP + ((hi - v) / (hi - lo)) * (h - PAD_TOP - PAD_BOTTOM);
+  const innerH = h - PAD_TOP - PAD_BOTTOM;
+  const yOf = (v: number) => PAD_TOP + ((hi - v) / (hi - lo)) * innerH;
 
-  const line = pts.map((p) => [xOf(p.dayIndex), yOf(p.balance)] as [number, number]);
-  const ghosts: [number, number][][] = [];
-  let seg: [number, number][] = [];
-  for (const p of pts) {
-    if (p.ghost === null) {
-      if (seg.length > 1) ghosts.push(seg);
-      seg = [];
-    } else seg.push([xOf(p.dayIndex), yOf(p.ghost)]);
+  // About a point per pixel on long runs; the high, the low and the trade days are always kept.
+  const n = full + 1;
+  const maxPts = Math.max(50, Math.floor(usableW));
+  let days: number[];
+  if (n <= maxPts) days = Array.from({ length: n }, (_, i) => i);
+  else {
+    const stride = Math.ceil(n / maxPts);
+    const keep = new Set<number>([loI, hiI, full]);
+    for (const tr of m.trades) if (tr.dayIndex <= full) keep.add(tr.dayIndex);
+    days = [];
+    for (let i = 0; i < n; i++) if (i % stride === 0 || keep.has(i)) days.push(i);
   }
-  if (seg.length > 1) ghosts.push(seg);
+  const line = days.map((d) => [xOf(d), yOf(closes[d])] as [number, number]);
+  if (frac > 0) line.push([xOf(t), yOf(tipV)]);
 
-  const marks = m.trades.map((t) => {
-    let i = pts.findIndex((p) => p.dayIndex >= t.dayIndex);
-    if (i < 0) i = pts.length - 1;
-    return { x: line[i][0], y: line[i][1], side: t.side };
-  });
+  const marks = m.trades
+    .filter((tr) => tr.dayIndex <= t + 1e-9 && tr.dayIndex <= last)
+    .map((tr) => ({ x: xOf(tr.dayIndex), y: yOf(closes[tr.dayIndex]), side: tr.side }));
 
-  const other = otherDays.map((d) => [xOf(d), yOf(m.other![d])] as [number, number]);
-  return { line, ghosts, startY: yOf(m.start), today: line[line.length - 1], marks, other };
+  let soldAt: ChartGeometry['soldAt'] = null;
+  if (m.soldAt !== null) {
+    const sd = lastSaleDay(m.trades);
+    soldAt = { x0: xOf(Math.min(t, sd ?? t)), y: yOf(m.soldAt) };
+  }
+  return {
+    line, startY: yOf(base), today: line[line.length - 1], marks, soldAt, days,
+    map: { sx: usableW / span, sy: -innerH / (hi - lo), ty: PAD_TOP + (hi * innerH) / (hi - lo) },
+    tip: frac > 0 ? [full, closes[full], t, tipV] : null,
+  };
 }
 
 const fmt = (p: [number, number][]) => p.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
 
-function el(name: string, attrs: Record<string, string | number>, text?: string): SVGElement {
+function el(name: string, attrs: Record<string, string | number>): SVGElement {
   const e = document.createElementNS(SVG_NS, name);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
-  if (text !== undefined) e.textContent = text;
   return e;
 }
 
-export function drawChart(svg: SVGSVGElement | SVGElement, m: ChartModel, paper: Paper, w: number, h: number): void {
-  const g = chartGeometry(m, w, h);
+/** Sets attributes, touching the DOM only where a value changed. */
+function set(e: Element, attrs: Record<string, string | number>) {
+  for (const [k, v] of Object.entries(attrs)) {
+    const s = String(v);
+    if (e.getAttribute(k) !== s) e.setAttribute(k, s);
+  }
+}
+
+// --- The chart on one <svg>, kept between days -------------------------------
+
+interface Els {
+  fill: SVGElement;
+  start: SVGElement;
+  level: SVGElement;
+  line: SVGElement;
+  /** The part of today's segment drawn so far (mid-growth), in data units like the line. */
+  tip: SVGElement;
+  today: SVGElement;
+  marks: SVGElement;
+  labels: SVGElement;
+}
+
+interface State {
+  els: Els;
+  m: ChartModel;
+  paper: Paper;
+  w: number;
+  h: number;
+  /** The day the line is drawn to on screen now (fractional mid-growth). */
+  at: number;
+  from: number;
+  target: number;
+  t0: number;
+  dur: number;
+  /** Bumped on every draw, so a stale animation frame stops. */
+  token: number;
+  /** Each label's last spot, tried first so words do not hop between frames. */
+  spots: Map<string, number>;
+  /** What the line's points were last written from, so they are rewritten only when a day is added. */
+  lineKey: string;
+}
+
+const states = new WeakMap<Element, State>();
+
+function reducedMotion(): boolean {
+  try {
+    return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
+
+const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+function build(svg: SVGSVGElement | SVGElement): Els {
+  const els: Els = {
+    fill: el('polygon', { fill: WORST_FILL, display: 'none' }),
+    start: el('line', { 'stroke-width': 1, 'stroke-dasharray': '1 4' }),
+    level: el('line', { 'data-level': '', 'stroke-width': 1.5, 'stroke-dasharray': '2 4', 'stroke-linecap': 'round', display: 'none' }),
+    line: el('polyline', { fill: 'none', 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' }),
+    tip: el('line', { 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' }),
+    today: el('circle', {}),
+    marks: el('g', {}),
+    labels: el('g', {}),
+  };
+  svg.replaceChildren(els.fill, els.start, els.level, els.line, els.tip, els.today, els.marks, els.labels);
+  return els;
+}
+
+export function drawChart(
+  svg: SVGSVGElement | SVGElement, m: ChartModel, paper: Paper, w: number, h: number, opts: DrawOpts = {},
+): void {
+  set(svg, { viewBox: `0 0 ${w} ${h}`, role: 'img', 'aria-label': m.label });
+  let s = states.get(svg);
+  if (!s || s.els.line.parentNode !== svg) {
+    s = {
+      els: build(svg), m, paper, w, h, at: 0, from: 0, target: 0, t0: 0, dur: 0, token: 0, spots: new Map(), lineKey: '',
+    };
+    states.set(svg, s);
+  }
+  const target = Math.max(0, m.closes.length - 1);
+  const shown = s.at;
+  if (shown < s.target && target === s.target) {
+    // The same day redrawn mid-growth (a press, a pause, a resize): the running growth carries on.
+    s.m = m;
+    s.paper = paper;
+    s.w = w;
+    s.h = h;
+    paint(s);
+    return;
+  }
+  const animate = (opts.animateMs ?? 0) > 0 && !reducedMotion() && s.m.closes.length > 0 && target > shown &&
+    typeof requestAnimationFrame === 'function';
+  s.m = m;
+  s.paper = paper;
+  s.w = w;
+  s.h = h;
+  const token = ++s.token;
+  if (!animate) {
+    s.at = target;
+    s.target = target;
+    paint(s);
+    return;
+  }
+  s.from = shown;
+  s.target = target;
+  s.t0 = nowMs();
+  s.dur = Math.min(opts.animateMs!, MAX_ANIM_MS);
+  paint(s);
+  const st = s;
+  const tick = () => {
+    if (st.token !== token) return;
+    const p = Math.min(1, (nowMs() - st.t0) / st.dur);
+    const e = st.dur < LINEAR_BELOW_MS ? p : 1 - (1 - p) ** 3;
+    st.at = p >= 1 ? st.target : st.from + (st.target - st.from) * e;
+    paint(st);
+    if (p < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+/** Draws the chart with the line up to s.at, updating the kept elements in place. */
+function paint(s: State) {
+  const { m, paper, w, h, els } = s;
+  const g = chartGeometry(m, w, h, s.at);
   const ink = paper.ink;
-  const kids: SVGElement[] = [];
-  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-  svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', m.label);
 
   if (m.worst) {
-    const fill = [...g.line, [g.today[0], h], [0, h]] as [number, number][];
-    kids.push(el('polygon', { fill: WORST_FILL, points: fmt(fill) }));
+    set(els.fill, { display: 'inline', points: fmt([...g.line, [g.today[0], h], [g.line[0][0], h]]) });
+  } else set(els.fill, { display: 'none' });
+  set(els.start, { x1: 0, y1: g.startY.toFixed(1), x2: w, y2: g.startY.toFixed(1), stroke: ink });
+  if (g.soldAt) {
+    set(els.level, {
+      display: 'inline', x1: g.soldAt.x0.toFixed(1), x2: w, y1: g.soldAt.y.toFixed(1), y2: g.soldAt.y.toFixed(1),
+      stroke: paper.secondary,
+    });
+  } else set(els.level, { display: 'none' });
+  // R43: the line is written in data units (day, close) once per new day; each frame of growth only
+  // moves the tip and the transform that maps data to the chart.
+  const days = g.days;
+  const key = `${m.closes.length}|${days.length}|${days[days.length - 1]}|${days[1] ?? 0}|${m.closes[0]}`;
+  if (key !== s.lineKey) {
+    s.lineKey = key;
+    els.line.setAttribute('points', days.map((d) => `${d},${m.closes[d]}`).join(' '));
   }
-  kids.push(el('line', { x1: 0, y1: g.startY, x2: w, y2: g.startY, stroke: ink, 'stroke-width': 1, 'stroke-dasharray': '1 4' }));
+  const { sx, sy, ty } = g.map;
+  const transform = `matrix(${sx} 0 0 ${sy} 0 ${ty})`;
+  const width = m.worst ? 3 : 2.5;
+  set(els.line, { transform, stroke: ink, 'stroke-width': width });
+  if (g.tip) {
+    set(els.tip, { display: 'inline', transform, stroke: ink, 'stroke-width': width, x1: g.tip[0], y1: g.tip[1], x2: g.tip[2], y2: g.tip[3] });
+  } else set(els.tip, { display: 'none' });
+  set(els.today, { cx: g.today[0].toFixed(1), cy: g.today[1].toFixed(1), r: m.worst ? 8 : 6, fill: ink });
 
-  if (g.other.length > 1) {
-    kids.push(
-      el('polyline', {
-        'data-other': '', fill: 'none', stroke: m.worst ? paper.ink : MARKET_DASH, 'stroke-width': 2,
-        'stroke-dasharray': '4 4', 'stroke-linecap': 'round', points: fmt(g.other),
-      }),
-    );
-  }
-  for (const seg of g.ghosts) {
-    kids.push(
-      el('polyline', {
-        fill: 'none', stroke: m.worst ? paper.ink : MARKET_DASH, 'stroke-width': 2.5,
-        'stroke-dasharray': '3 5', 'stroke-linecap': 'round', points: fmt(seg),
-      }),
-    );
-  }
-  kids.push(
-    el('polyline', {
-      fill: 'none', stroke: ink, 'stroke-width': m.worst ? 3 : 2.5,
-      'stroke-linejoin': 'round', 'stroke-linecap': 'round', points: fmt(g.line),
-    }),
-  );
-  kids.push(el('circle', { cx: g.today[0], cy: g.today[1], r: m.worst ? 8 : 6, fill: ink }));
-  // Sale and buy marks sit above today's dot, so a trade made today stays visible.
-  for (const mk of g.marks) {
-    kids.push(
-      mk.side === 'sell'
-        ? el('circle', { cx: mk.x, cy: mk.y, r: 6, fill: paper.accent })
-        : el('circle', { cx: mk.x, cy: mk.y, r: 5, fill: paper.bg, stroke: ink, 'stroke-width': 2 }),
-    );
-  }
-  kids.push(...placeLabels(m, g, paper, w, h));
-  svg.replaceChildren(...kids);
+  // Sale and buy dots sit above today's dot, so a trade made today stays visible.
+  const kids = els.marks.children;
+  while (kids.length > g.marks.length) kids[kids.length - 1].remove();
+  g.marks.forEach((mk, i) => {
+    let c = kids[i] as SVGElement | undefined;
+    if (!c) {
+      c = el('circle', {});
+      els.marks.append(c);
+    }
+    const at = { cx: mk.x.toFixed(1), cy: mk.y.toFixed(1) };
+    if (mk.side === 'sell') set(c, { ...at, r: 6, fill: paper.accent, stroke: 'none', 'stroke-width': 0 });
+    else set(c, { ...at, r: 5, fill: paper.bg, stroke: ink, 'stroke-width': 2 });
+  });
+
+  placeLabels(s, g);
 }
 
 // --- Labels -------------------------------------------------------------------
@@ -166,8 +322,8 @@ export function drawChart(svg: SVGSVGElement | SVGElement, m: ChartModel, paper:
 interface Box { x0: number; x1: number; y0: number; y1: number }
 interface Spot { x: number; y: number; anchor: 'start' | 'end' }
 
-/** Generous width of a 12px Libre Franklin label, per character. */
-const CHAR_W = 7.2;
+/** Generous width of a 14px Libre Franklin label, per character (R48: small text at least 14px). */
+const CHAR_W = 8.4;
 /** Labels keep this far from the chart's sides (on red days the chart bleeds to the screen edge). */
 const INSET = 12;
 /** Space kept between two labels. */
@@ -176,86 +332,108 @@ const GAP = 4;
 function boxOf(s: Spot, text: string): Box {
   const wd = text.length * CHAR_W;
   const x0 = s.anchor === 'end' ? s.x - wd : s.x;
-  return { x0, x1: x0 + wd, y0: s.y - 11, y1: s.y + 3 };
+  return { x0, x1: x0 + wd, y0: s.y - 13, y1: s.y + 3 };
 }
 const overlaps = (a: Box, b: Box, gap = 0) =>
   a.x0 < b.x1 + gap && b.x0 < a.x1 + gap && a.y0 < b.y1 + gap && b.y0 < a.y1 + gap;
 
-/** Points along a polyline about every pixel. */
-function samples(pl: [number, number][]): [number, number][] {
-  const out: [number, number][] = [];
-  for (let i = 0; i < pl.length; i++) {
-    const [x1, y1] = pl[Math.max(0, i - 1)];
-    const [x2, y2] = pl[i];
-    const n = Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1)));
-    for (let k = 0; k <= n; k++) out.push([x1 + ((x2 - x1) * k) / n, y1 + ((y2 - y1) * k) / n]);
+/** True when the segment (x1,y1)-(x2,y2) passes through the box (Liang-Barsky clipping). */
+function segHits(x1: number, y1: number, x2: number, y2: number, b: Box): boolean {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  let t0 = 0;
+  let t1 = 1;
+  const edges: [number, number][] = [[-dx, x1 - b.x0], [dx, b.x1 - x1], [-dy, y1 - b.y0], [dy, b.y1 - y1]];
+  for (const [p, q] of edges) {
+    if (p === 0) {
+      if (q < 0) return false;
+    } else {
+      const r = q / p;
+      if (p < 0) {
+        if (r > t1) return false;
+        if (r > t0) t0 = r;
+      } else {
+        if (r < t0) return false;
+        if (r < t1) t1 = r;
+      }
+    }
   }
-  return out;
+  return true;
 }
 
-/** True when any line passes through the box (with room for the stroke). */
-function crossesLine(b: Box, lines: [number, number][][]): boolean {
+/** First index whose x is at least x (the line's x only grows). */
+function firstAtLeast(pl: [number, number][], x: number): number {
+  let a = 0;
+  let b = pl.length;
+  while (a < b) {
+    const mid = (a + b) >> 1;
+    if (pl[mid][0] < x) a = mid + 1;
+    else b = mid;
+  }
+  return a;
+}
+
+/** True when the line passes through the box, with room for the stroke. Only the segments under the box are tested. */
+function crossesLine(b0: Box, pl: [number, number][]): boolean {
   const pad = 3;
-  return lines.some((pl) => samples(pl).some(([x, y]) => x >= b.x0 - pad && x <= b.x1 + pad && y >= b.y0 - pad && y <= b.y1 + pad));
+  const b = { x0: b0.x0 - pad, x1: b0.x1 + pad, y0: b0.y0 - pad, y1: b0.y1 + pad };
+  if (pl.length === 1) return pl[0][0] >= b.x0 && pl[0][0] <= b.x1 && pl[0][1] >= b.y0 && pl[0][1] <= b.y1;
+  const from = Math.max(1, firstAtLeast(pl, b.x0));
+  for (let i = from; i < pl.length; i++) {
+    if (segHits(pl[i - 1][0], pl[i - 1][1], pl[i][0], pl[i][1], b)) return true;
+    if (pl[i - 1][0] > b.x1) break;
+  }
+  return false;
 }
 
-/** Distance from the box's centre to the nearest point of a line. */
-function distTo(b: Box, pl: [number, number][]): number {
-  const cx = (b.x0 + b.x1) / 2;
-  const cy = (b.y0 + b.y1) / 2;
-  let best = Infinity;
-  for (const [x, y] of samples(pl)) best = Math.min(best, Math.hypot(x - cx, y - cy));
-  return best;
+/** The line's height at x (null outside it). */
+function lineY(pl: [number, number][], x: number): number | null {
+  if (!pl.length || x < pl[0][0] || x > pl[pl.length - 1][0]) return null;
+  const i = Math.max(1, firstAtLeast(pl, x));
+  if (i >= pl.length) return pl[pl.length - 1][1];
+  const [x1, y1] = pl[i - 1];
+  const [x2, y2] = pl[i];
+  return x2 === x1 ? Math.min(y1, y2) : y1 + ((y2 - y1) * (x - x1)) / (x2 - x1);
 }
 
 /**
- * The chart's words, each at the first of its candidate spots that is inside the chart (12px from its
- * sides), clear of the other labels, the dots, every line (the start line included) and, on a red day,
- * the fill under the line. A word with no such spot is left out. "The market" must also sit nearer the
- * dashed market line than the player's line. Order: "Sold", "The market", then the start label.
+ * The chart's words, each at the first of its candidate spots (its last spot first) that is inside the
+ * chart (12px from its sides), clear of the other words, the dots, every line and, on a red day, the
+ * fill under the line. A word with no such spot is left out. Order: "Sold at", "Sold", "Bought".
  */
-function placeLabels(m: ChartModel, g: ChartGeometry, paper: Paper, w: number, h: number): SVGElement[] {
-  const startLine: [number, number][] = [[0, g.startY], [w, g.startY]];
-  const lines = [g.line, ...g.ghosts, g.other, startLine].filter((pl) => pl.length > 1);
+function placeLabels(s: State, g: ChartGeometry): void {
+  const { m, paper, w, h, els } = s;
+  const lines: [number, number][][] = [g.line, [[0, g.startY], [w, g.startY]]];
+  if (g.soldAt) lines.push([[g.soldAt.x0, g.soldAt.y], [w, g.soldAt.y]]);
   const taken: Box[] = [];
   const dot = (x: number, y: number, r: number): Box => ({ x0: x - r - 2, x1: x + r + 2, y0: y - r - 2, y1: y + r + 2 });
   const dots = [dot(g.today[0], g.today[1], 8), ...g.marks.map((mk) => dot(mk.x, mk.y, 6))];
-  const out: SVGElement[] = [];
   const inside = (b: Box) => b.x0 >= INSET && b.x1 <= w - INSET && b.y0 >= 0 && b.y1 <= h;
-  // Red day: the area under the player's line is filled.
-  const lineY = (x: number): number | null => {
-    const pl = g.line;
-    if (!pl.length || x < pl[0][0] || x > pl[pl.length - 1][0]) return null;
-    for (let i = 1; i < pl.length; i++) {
-      const [x1, y1] = pl[i - 1];
-      const [x2, y2] = pl[i];
-      if (x <= x2) return x2 === x1 ? Math.min(y1, y2) : y1 + ((y2 - y1) * (x - x1)) / (x2 - x1);
-    }
-    return pl[0][1];
-  };
   const inFill = (b: Box) => {
     if (!m.worst) return false;
-    for (let x = b.x0; x <= b.x1; x += 2) {
-      const y = lineY(x);
+    for (let x = b.x0; x <= b.x1 + 1; x += 2) {
+      const y = lineY(g.line, Math.min(x, b.x1));
       if (y !== null && b.y1 > y) return true;
     }
     return false;
   };
+  const placed: { text: string; spot: Spot; fill: string; weight: number }[] = [];
 
-  function place(text: string, spots: Spot[], fill: string, weight: number, also?: (b: Box) => boolean) {
-    const spot = spots.find((s) => {
-      const b = boxOf(s, text);
+  function place(key: string, text: string, spots: Spot[], fill: string, weight: number) {
+    const ok = (sp: Spot) => {
+      const b = boxOf(sp, text);
       return inside(b) && !taken.some((t) => overlaps(t, b, GAP)) && !dots.some((d) => overlaps(d, b)) &&
-        !crossesLine(b, lines) && !inFill(b) && (!also || also(b));
-    });
-    if (!spot) return;
-    taken.push(boxOf(spot, text));
-    out.push(
-      el('text', {
-        x: spot.x, y: spot.y, 'text-anchor': spot.anchor, fill,
-        'font-family': LABEL_FONT, 'font-weight': weight, 'font-size': 12,
-      }, text),
-    );
+        !lines.some((pl) => crossesLine(b, pl)) && !inFill(b);
+    };
+    const prev = s.spots.get(key);
+    let i = prev !== undefined && prev < spots.length && ok(spots[prev]) ? prev : spots.findIndex(ok);
+    if (i < 0) {
+      s.spots.delete(key);
+      return;
+    }
+    s.spots.set(key, i);
+    taken.push(boxOf(spots[i], text));
+    placed.push({ text, spot: spots[i], fill, weight });
   }
 
   const around = (x: number, y: number): Spot[] => {
@@ -266,32 +444,36 @@ function placeLabels(m: ChartModel, g: ChartGeometry, paper: Paper, w: number, h
     return spots;
   };
 
-  const sale = [...g.marks].reverse().find((mk) => mk.side === 'sell');
-  if (sale) place(SOLD, around(sale.x, sale.y), paper.ink, 700);
-
-  if (m.inCash && g.ghosts.length) {
-    const ghost = g.ghosts[g.ghosts.length - 1];
-    const [gx, gy] = ghost[ghost.length - 1];
-    const up = gy <= g.today[1];
-    // Close to the end of the dashed line first, then further back along it, on the side away from the player's line.
-    const dys = up ? [-10, -18, 18, -28, 28] : [18, 26, -10, 34, -20];
+  let levelNamed = false;
+  if (g.soldAt) {
+    // Small, on the level's own stretch: its right-hand end, above it then below it, sliding left as far
+    // as the sale dot; failing that, just left of the dot ("Sold at" then the dot and the level).
+    const { x0, y: ly } = g.soldAt;
+    const wd = SOLD_AT.length * CHAR_W;
     const spots: Spot[] = [];
-    for (let back = 0; back < ghost.length; back = back ? back * 2 : 1) {
-      const [px, py] = ghost[ghost.length - 1 - back];
-      for (const dy of dys) spots.push({ x: px - 6, y: py + dy, anchor: 'end' }, { x: px + 6, y: py + dy, anchor: 'start' });
+    for (let right = w - INSET; right - wd >= x0 + 8; right -= 12) {
+      spots.push({ x: right, y: ly - 7, anchor: 'end' }, { x: right, y: ly + 17, anchor: 'end' });
     }
-    spots.push(...around(gx, gy));
-    place(THE_MARKET, spots, paper.secondary, 500, (b) => distTo(b, ghost) < distTo(b, g.line));
+    for (const dy of [4, -6, 14]) spots.push({ x: x0 - 10, y: ly + dy, anchor: 'end' });
+    place('soldAt', SOLD_AT, spots, paper.secondary, 500);
+    levelNamed = s.spots.has('soldAt');
   }
+  const sale = [...g.marks].reverse().find((mk) => mk.side === 'sell');
+  // In cash the level names the sale; "Sold" only when it could not be placed, or once bought back.
+  if (sale && !levelNamed) place('sold', SOLD, around(sale.x, sale.y), paper.ink, 700);
+  const buy = [...g.marks].reverse().find((mk) => mk.side === 'buy');
+  if (buy) place('bought', BOUGHT, around(buy.x, buy.y), paper.ink, 700);
 
-  const sy = g.startY;
-  // Last, and only where it has clear space: along the dotted line from the right, above then below it, then from the left.
-  const startSpots: Spot[] = [];
-  for (let shift = 0; shift <= w - 2 * INSET; shift += 30) {
-    startSpots.push({ x: w - INSET - shift, y: sy - 6, anchor: 'end' }, { x: w - INSET - shift, y: sy + 16, anchor: 'end' });
-  }
-  place(STARTED_AT(m.start), startSpots, paper.secondary, 500);
-
-
-  return out;
+  // Reuse the text elements, in order; drop the ones not placed this frame.
+  const texts = els.labels.children;
+  while (texts.length > placed.length) texts[texts.length - 1].remove();
+  placed.forEach((p, i) => {
+    let t = texts[i] as SVGElement | undefined;
+    if (!t) {
+      t = el('text', { 'font-family': LABEL_FONT, 'font-size': 14 });
+      els.labels.append(t);
+    }
+    if (t.textContent !== p.text) t.textContent = p.text;
+    set(t, { x: p.spot.x.toFixed(1), y: p.spot.y.toFixed(1), 'text-anchor': p.spot.anchor, fill: p.fill, 'font-weight': p.weight });
+  });
 }
