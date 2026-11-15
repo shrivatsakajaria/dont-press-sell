@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { LAUNCH_DATE, dailyPick, pickMystery } from '../../src/game/picker';
+import { DAILY_ENABLED, FIRST_GAME_RUNS, LAUNCH_DATE, dailyPick, pickMystery } from '../../src/game/picker';
 import { RUNS, RUN_IDS } from '../../src/content/runs';
 
 function seeded(seed: number): () => number {
@@ -41,6 +41,40 @@ describe('pickMystery', () => {
     expect(id).not.toBe('c1929');
     const id2 = pickMystery(() => 0.99999, ['s2025', 's2025']);
     expect(id2).not.toBe('s2025');
+  });
+});
+
+describe('the first game a player ever plays (R46)', () => {
+  test('is a real crash: 1987, 2008, 2020 or 2022', () => {
+    expect([...FIRST_GAME_RUNS].sort()).toEqual(['c1987', 'c2007', 'c2020', 'c2022']);
+  });
+  test('is chosen at random from those four, each about a quarter of the time', () => {
+    const rng = seeded(777);
+    const counts = new Map<string, number>();
+    for (let i = 0; i < 8000; i++) {
+      const id = pickMystery(rng, [], { firstEver: true });
+      expect(FIRST_GAME_RUNS).toContain(id);
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    expect(counts.size).toBe(4);
+    for (const n of counts.values()) expect(n / 8000).toBeGreaterThan(0.22);
+  });
+  test('every rng value maps inside the four', () => {
+    expect(FIRST_GAME_RUNS).toContain(pickMystery(() => 0, [], { firstEver: true }));
+    expect(FIRST_GAME_RUNS).toContain(pickMystery(() => 0.999999, [], { firstEver: true }));
+  });
+  test('later games use the whole pool again', () => {
+    const rng = seeded(4);
+    const seen = new Set<string>();
+    for (let i = 0; i < 2000; i++) seen.add(pickMystery(rng, [], { firstEver: false }));
+    expect(seen.size).toBe(RUN_IDS.length);
+  });
+});
+
+describe('the daily crash (R47)', () => {
+  test('is switched off for phase 1; the code stays', () => {
+    expect(DAILY_ENABLED).toBe(false);
+    expect(typeof dailyPick).toBe('function');
   });
 });
 

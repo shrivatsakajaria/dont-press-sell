@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { announce } from '../../src/ui/a11y';
 import { keep } from '../../src/ui/endchart';
-import { holderNoteDue, mountEndScreen, type EndModel } from '../../src/ui/endscreen';
+import { REVEAL_BEAT_MS, holderNoteDue, mountEndScreen, type EndModel } from '../../src/ui/endscreen';
 import { c2007Sample, losingSample, winningSample } from '../fixtures/sample-result';
 
 vi.mock('../../src/ui/a11y', () => ({ announce: vi.fn(), initAnnouncer: vi.fn() }));
@@ -71,7 +71,7 @@ describe('the reveal', () => {
 
   test('a run that is not blind shows the name at once', () => {
     const m = c2007Sample();
-    m.flags = { showCountdown: false, blind: false };
+    m.flags = { blind: false };
     mount(m);
     expect(revealButton()).toBeUndefined();
     expect(root.textContent).toContain('That was 2008');
@@ -86,6 +86,9 @@ describe('the reveal', () => {
     expect(score.hidden).toBe(true);
     expect(lead()).not.toContain('$0');
     revealButton()!.click();
+    // A beat: the name prints first, the score a moment later.
+    expect(score.hidden).toBe(true);
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
     expect(score.hidden).toBe(false);
     vi.advanceTimersByTime(700);
     const mid = lead();
@@ -98,14 +101,14 @@ describe('the reveal', () => {
     const m = c2007Sample();
     m.result = { ...m.result, trades: [], lead: 0, final: m.result.holderFinal };
     mount(m);
-    vi.advanceTimersByTime(4000 + 1600);
+    vi.advanceTimersByTime(4000 + REVEAL_BEAT_MS + 1600);
     expect(root.querySelector('[data-lead]')!.textContent).toBe('Level with someone who did nothing');
     expect(root.textContent).not.toContain('$0 ahead');
   });
 
   test('a loss counts down and reads "behind"', () => {
     mount(losingSample());
-    vi.advanceTimersByTime(4000 + 1600);
+    vi.advanceTimersByTime(4000 + REVEAL_BEAT_MS + 1600);
     expect(root.querySelector('[data-lead]')!.textContent).toBe('$2,095 behind someone who did nothing');
   });
 
@@ -120,84 +123,19 @@ describe('the reveal', () => {
   });
 });
 
-describe('the countdown', () => {
-  test('starts after the reveal, counts down and calls onNewMystery at 0', () => {
-    const m = c2007Sample();
-    const onNewMystery = vi.fn();
-    m.actions.onNewMystery = onNewMystery;
-    mount(m);
-    expect(root.textContent).not.toContain('Next mystery crash in');
-    revealButton()!.click();
-    // Only once the count-up has finished.
-    vi.advanceTimersByTime(1400);
-    expect(root.textContent).not.toContain('Next mystery crash in');
-    vi.advanceTimersByTime(100);
-    expect(root.textContent).toContain('Next mystery crash in 10. Tap to stop.');
-    // In flow, straight after the score lines.
-    const line = Array.from(root.querySelectorAll('button')).find((b) => b.textContent!.startsWith('Next mystery'))!;
-    expect(line.previousElementSibling!.textContent).toBe('Perfect timing made $24,188. You made $14,513.');
-    vi.advanceTimersByTime(1000);
-    expect(root.textContent).toContain('Next mystery crash in 9. Tap to stop.');
-    vi.advanceTimersByTime(9000);
-    expect(onNewMystery).toHaveBeenCalledTimes(1);
-    vi.advanceTimersByTime(5000);
-    expect(onNewMystery).toHaveBeenCalledTimes(1);
-    expect(announced().filter((a) => a.includes('Next mystery crash in'))).toEqual(['Next mystery crash in 10. Tap to stop.']);
-  });
-
-  test('with reduced motion it starts at once and is announced with the reveal, once', () => {
-    const mm = vi.spyOn(window, 'matchMedia').mockImplementation(
-      (q: string) => ({ matches: q.includes('reduce'), media: q }) as unknown as MediaQueryList,
-    );
-    mount(c2007Sample());
-    expect(revealButton()).toBeTruthy(); // R25: the cover stays
-    revealButton()!.click();
-    expect(root.textContent).toContain('Next mystery crash in 10. Tap to stop.');
-    vi.advanceTimersByTime(3000);
-    const a = announced();
-    expect(a).toHaveLength(1);
-    expect(a[0]).toContain('That was 2008.');
-    expect(a[0]).toContain('Next mystery crash in 10. Tap to stop.');
-    mm.mockRestore();
-  });
-
-  test('any touch on the page stops it', () => {
-    const m = c2007Sample();
-    const onNewMystery = vi.fn();
-    m.actions.onNewMystery = onNewMystery;
-    mount(m);
-    revealButton()!.click();
-    vi.advanceTimersByTime(1500 + 2000);
-    expect(root.textContent).toContain('Next mystery crash in 8');
-    root.querySelector('h1')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
-    expect(root.textContent).not.toContain('Next mystery crash in');
-    vi.advanceTimersByTime(20000);
-    expect(onNewMystery).not.toHaveBeenCalled();
-  });
-
-  test('stopping it keeps its space, so the buttons under it do not jump under the finger', () => {
-    mount(c2007Sample());
-    revealButton()!.click();
-    vi.advanceTimersByTime(1500 + 2000);
-    const line = root.querySelector('.es-count') as HTMLElement;
-    const next = line.nextElementSibling;
-    root.querySelector('h1')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
-    expect(root.querySelector('.es-count')).toBeNull();
-    const gap = root.querySelector('.es-count-gap') as HTMLElement;
-    expect(gap).not.toBeNull();
-    expect(gap.nextElementSibling).toBe(next);
-    expect(gap.getAttribute('aria-hidden')).toBe('true');
-    expect(gap.textContent).toBe('');
-  });
-
-  test('never runs without showCountdown', () => {
-    const m = losingSample();
-    const onNewMystery = vi.fn();
-    m.actions.onNewMystery = onNewMystery;
-    mount(m);
-    vi.advanceTimersByTime(30000);
-    expect(root.textContent).not.toContain('Next mystery crash in');
-    expect(onNewMystery).not.toHaveBeenCalled();
+describe('no countdown (R44)', () => {
+  test('nothing starts the next game by itself, after a win or a loss', () => {
+    for (const make of [c2007Sample, losingSample]) {
+      const m = make();
+      const onNewMystery = vi.fn();
+      m.actions.onNewMystery = onNewMystery;
+      handle?.destroy();
+      mount(m);
+      revealButton()?.click();
+      vi.advanceTimersByTime(60000);
+      expect(root.textContent).not.toContain('Next mystery crash');
+      expect(onNewMystery).not.toHaveBeenCalled();
+    }
   });
 
   test('destroy stops every timer and empties the root', () => {
@@ -240,19 +178,21 @@ describe('the front page', () => {
     expect(text).not.toMatch(/s&p/);
   });
 
-  test('table, perfect line, near misses, trade news, pot line and footer', () => {
+  test('table, perfect line, near misses, trade news and footer; the pot stays hidden (R40)', () => {
     const m = c2007Sample();
     mount(m);
     revealButton()!.click();
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
     const t = root.textContent!;
     expect(t).toContain('You$14,513');
     expect(t).toContain('Someone who did nothing$10,794');
     expect(t).toContain('Perfect timing$24,188');
-    expect(t).toContain('Perfect timing made $24,188. You made $14,513.');
+    expect(t).toContain('Perfect timing made $24,188. You finished with $14,513.');
     for (const line of m.nearMisses) expect(t).toContain(line);
     expect(t).toContain('Sold: House rejects the $700 billion bank rescue plan');
     expect(t).toContain("Bought: Treasury details a plan to buy banks' bad assets");
-    expect(t).toContain('Your pot: $13,719. Up $3,719 tonight.');
+    expect(t).not.toContain('Your pot');
+    expect(root.querySelector('.es-pot')).toBeNull();
     expect(t).toContain('US stock market · A Still Signal build');
     expect(t).toContain('Late edition');
     expect(t).toContain('Mystery crash');
@@ -262,9 +202,9 @@ describe('the front page', () => {
     mount(c2007Sample());
     const score = root.querySelector('.es-score') as HTMLElement;
     expect(score.hidden).toBe(true);
-    expect(score.querySelector('.es-perfect')!.textContent).toBe('Perfect timing made $24,188. You made $14,513.');
+    expect(score.querySelector('.es-perfect')!.textContent).toBe('Perfect timing made $24,188. You finished with $14,513.');
     expect(root.querySelector('.es-newsbox')!.getAttribute('style') ?? '').not.toContain('--news-h');
-    vi.advanceTimersByTime(4000);
+    vi.advanceTimersByTime(4000 + REVEAL_BEAT_MS);
     expect(score.hidden).toBe(false);
   });
 
@@ -288,11 +228,12 @@ describe('the front page', () => {
     expect(root.querySelector('.es-stake')).toBeNull(); // the double block comes at the reveal
     expect(money[0].textContent).toMatch(/^\$[\d,]+$/); // the text is there, so nothing moves at the reveal
     revealButton()!.click();
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
     for (const e of money) expect(e.style.visibility).toBe('');
     expect(root.querySelector('.es-stake')).not.toBeNull();
   });
 
-  test('before the reveal the double block (with "Bank $N"), the pot line and money near misses keep their space, hidden', () => {
+  test('before the reveal the double block (with "Bank $N") is out and money near misses keep their space, hidden', () => {
     const m = winningSample();
     m.nearMisses = [...m.nearMisses, 'One trade from perfect: perfect timing made $15,160'];
     m.actions = { ...m.actions, onDouble: () => {}, onBank: () => {}, onRematch: () => {} };
@@ -303,15 +244,16 @@ describe('the front page', () => {
     // No double block, and no space for one, before the reveal: a gap only wins have would be a tell.
     expect(root.querySelector('.es-double')).toBeNull();
     expect(root.textContent).not.toMatch(/Bank \$|Keep your/);
-    const pot = root.querySelector('.es-pot') as HTMLElement;
+    expect(root.querySelector('.es-pot')).toBeNull();
     const money = Array.from(root.querySelectorAll('.es-misses li')).filter((li) => li.textContent!.includes('$')) as HTMLElement[];
     expect(money.length).toBeGreaterThan(0);
-    const held = [pot, ...money];
+    const held = [...money];
     for (const e of held) expect(e.style.visibility).toBe('hidden');
     // Plain near misses (no figure) show at once.
     const plain = Array.from(root.querySelectorAll('.es-misses li')).filter((li) => !li.textContent!.includes('$')) as HTMLElement[];
     for (const e of plain) expect(e.style.visibility).toBe('');
     revealButton()!.click();
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
     for (const e of held) expect(e.style.visibility).toBe('');
     // Inserted at the reveal, in its place: after the score, before the other buttons.
     const block = root.querySelector('.es-double') as HTMLElement;
@@ -333,7 +275,7 @@ describe('the front page', () => {
       watch.observe(el, { childList: true, characterData: true, subtree: true });
       revealButton()!.click();
       seen.add(el.textContent ?? '');
-      for (let t = 0; t < 1700; t += 10) {
+      for (let t = 0; t < 1700 + REVEAL_BEAT_MS; t += 10) {
         vi.advanceTimersByTime(10);
         seen.add(el.textContent ?? '');
       }
@@ -348,6 +290,7 @@ describe('the front page', () => {
     m.actions = { ...m.actions, onRematch };
     mount(m);
     revealButton()!.click();
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
     const rematch = Array.from(root.querySelectorAll('button')).find((b) => b.textContent === 'Rematch this crash')!;
     vi.advanceTimersByTime(340);
     rematch.click();
@@ -362,6 +305,7 @@ describe('the front page', () => {
     expect(root.textContent).not.toContain('House rejects');
     expect(root.textContent).not.toContain('Treasury details');
     revealButton()!.click();
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
     expect(root.textContent).toContain('Sold: House rejects the $700 billion bank rescue plan');
   });
 
@@ -370,6 +314,7 @@ describe('the front page', () => {
     m.actions = { ...m.actions, onRematch: () => {}, onChallenge: () => {}, onDouble: () => {}, onBank: () => {} };
     mount(m);
     revealButton()?.click(); // a blind page puts the double block in at the reveal
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
     const byText = (s: string) => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === s)!;
     expect(byText('Double or nothing').className).toBe('es-dbl');
     expect(byText('Rematch this crash').className).toBe('es-out');
@@ -387,7 +332,9 @@ describe('the front page', () => {
   test('the c2007 sample is a winning mystery run with a double block', () => {
     mount(c2007Sample());
     revealButton()?.click(); // a blind page puts the double block in at the reveal
-    expect(root.querySelector('h2')!.textContent).toBe('Double or nothing');
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
+    expect(root.querySelector('.es-double h2')!.textContent).toBe('Wins in a row: 1');
+    expect(root.querySelector('.es-double .es-dbl')!.textContent).toBe('Double or nothing');
   });
 
   test('chart marks sold and bought and has a text label', () => {
@@ -414,47 +361,79 @@ describe('the front page', () => {
     expect(onNewMystery).toHaveBeenCalledTimes(1);
   });
 
-  test('double or nothing block with stake line and ladder', () => {
+  test('after a win: "Wins in a row: N" large with its title, the stake line and double or nothing (R44)', () => {
     const m = winningSample();
     const onDouble = vi.fn();
     const onBank = vi.fn();
     m.actions = { ...m.actions, onDouble, onBank };
     mount(m);
     revealButton()?.click(); // a blind page puts the double block in at the reveal
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
     const t = root.textContent!;
-    expect(root.querySelector('h2')!.textContent).toBe('Double or nothing');
+    const block = root.querySelector('.es-double')!;
+    expect(block.querySelector('h2')!.textContent).toBe('Wins in a row: 2');
+    expect(block.querySelector('.es-title')!.textContent).toBe('Hot hand');
+    expect(block.querySelector('.es-title')!.parentElement!.className).toBe('es-wins');
     expect(t).toContain(
       'Keep your $5,091 win, or take all $14,427 into another mystery game. Finish behind and the run is over.',
     );
-    expect(t).toContain('Wins in a row');
-    // Compact ladder: one line, titles printed only for the rung just reached and the next one;
-    // every rung keeps its full name for screen readers.
-    const shown = Array.from(root.querySelectorAll('.es-rung b')).map((b) => b.textContent);
-    expect(shown).toEqual(['Hot hand', 'Shark']);
-    expect(t).not.toContain("Beginner's luck");
-    expect(t).not.toContain('Untouchable');
-    const labels = Array.from(root.querySelectorAll('[data-rung]')).map((r) => r.getAttribute('aria-label'));
-    expect(labels).toEqual([
-      "1 win: Beginner's luck, reached",
-      '2 wins: Hot hand, reached',
-      '3 wins: Shark, next',
-      '5 wins: Whale',
-      '8 wins: Untouchable',
-    ]);
-    const rungs = root.querySelectorAll('[data-rung]');
-    expect(Array.from(rungs).map((r) => r.getAttribute('data-rung'))).toEqual([
-      'reached',
-      'reached',
-      'next',
-      'ahead',
-      'ahead',
-    ]);
+    // The ladder is gone: one large line says it.
+    expect(root.querySelectorAll('[data-rung]')).toHaveLength(0);
+    expect(t).not.toContain('Best winning streak');
     const byText = (s: string) => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === s)!;
     vi.advanceTimersByTime(400); // past the tap guard after the reveal
     byText('Double or nothing').click();
     byText('Bank $5,091').click();
     expect(onDouble).toHaveBeenCalledTimes(1);
     expect(onBank).toHaveBeenCalledTimes(1);
+  });
+
+  test('with double or nothing on offer, "Play a new mystery crash" gives way to it (it stays until the reveal)', () => {
+    const m = winningSample();
+    m.actions = { ...m.actions, onDouble: () => {}, onBank: () => {} };
+    mount(m);
+    const link = () => Array.from(root.querySelectorAll('button')).find((b) => b.textContent === 'Play a new mystery crash');
+    expect(link()).toBeTruthy(); // no tell before the reveal
+    revealButton()!.click();
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
+    expect(link()).toBeUndefined();
+    handle!.destroy();
+    mount({ ...losingSample() });
+    revealButton()!.click();
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
+    expect(link()).toBeTruthy();
+  });
+
+  test('a banked win still says "Wins in a row", with no double buttons', () => {
+    const m = winningSample();
+    m.double = undefined;
+    m.wins = 2;
+    m.flags = { blind: false };
+    mount(m);
+    expect(root.querySelector('.es-double h2')!.textContent).toBe('Wins in a row: 2');
+    expect(root.querySelector('.es-dbl')).toBeNull();
+    expect(root.textContent).not.toContain('Keep your');
+  });
+
+  test('after a loss: no double or nothing; "Best winning streak: N", hidden when 0 (R44)', () => {
+    const m = losingSample();
+    m.bestStreak = 3;
+    mount(m);
+    revealButton()!.click();
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
+    expect(root.querySelector('.es-double')).toBeNull();
+    expect(root.textContent).not.toContain('Double or nothing');
+    expect(root.querySelector('.es-best')!.textContent).toBe('Best winning streak: 3');
+    handle!.destroy();
+    mount({ ...losingSample(), bestStreak: 0 });
+    revealButton()!.click();
+    vi.advanceTimersByTime(REVEAL_BEAT_MS);
+    expect(root.textContent).not.toContain('Best winning streak');
+  });
+
+  test('the pot code stays: a model that asks for it still prints it', () => {
+    mount({ ...c2007Sample(), showPot: true, flags: { blind: false } });
+    expect(root.textContent).toContain('Your pot: $13,719. Up $3,719 tonight.');
   });
 
   test('no double block when the model has none', () => {
@@ -504,17 +483,9 @@ describe('the front page', () => {
     expect(Array.from(root.querySelectorAll('.es-vs')).map((e) => e.textContent)).toContain('4 days in a row');
   });
 
-  test('the borrowed money switch shows its state and calls back', () => {
-    const m = c2007Sample();
-    let on = false;
-    m.borrowed = { on: false };
-    m.actions = { ...m.actions, onToggleBorrowed: vi.fn(() => (on = !on)) };
-    mount(m);
-    const b = Array.from(root.querySelectorAll('button')).find((x) => x.textContent === 'Play with borrowed money')!;
-    expect(b.getAttribute('aria-pressed')).toBe('false');
-    b.click();
-    expect(b.textContent).toBe('Borrowed money on');
-    expect(b.getAttribute('aria-pressed')).toBe('true');
+  test('vibration and borrowed money are not on the result page (they live in the collection)', () => {
+    mount(c2007Sample());
+    expect(root.textContent).not.toMatch(/Vibration|borrowed money/i);
   });
 
   test('daily: "Copy result" calls back and says when it is copied', async () => {
@@ -566,24 +537,133 @@ describe('plain words (R28)', () => {
   });
 });
 
-describe('result page order (R28)', () => {
-  test('score first, then the buttons, then the table, its note and the near misses; the countdown under the score', () => {
-    const m = { ...c2007Sample(), holderNote: true, flags: { showCountdown: true, blind: false } };
+describe('result page order (R28, R44)', () => {
+  test('score first, then the buttons, then the table, its note and the near misses', () => {
+    const m = { ...c2007Sample(), holderNote: true, flags: { blind: false } };
+    m.actions = { ...m.actions, onRematch: () => {}, onChallenge: () => {} };
     mount(m);
     vi.advanceTimersByTime(2000);
-    // The score block's own lines count in place (it is one box so it can wait for the reveal).
+    // The reveal and score boxes' own lines count in place.
     const order = Array.from(root.querySelector('main.es')!.children)
-      .flatMap((e) => (e.classList.contains('es-score') ? Array.from(e.children) : [e]))
+      .flatMap((e) => (e.classList.contains('es-score') || e.classList.contains('es-moment') ? Array.from(e.children) : [e]))
       .map((e) => e.className.split(' ')[0]);
     const at = (c: string) => order.indexOf(c);
-    expect(at('es-lead')).toBeGreaterThan(at('es-h1'));
-    expect(at('es-count')).toBe(at('es-perfect') + 1);
-    // The main actions: the double block when offered, else the button pair.
-    const actions = at('es-double') >= 0 ? at('es-double') : at('es-pair');
-    expect(actions).toBeGreaterThan(at('es-count'));
-    expect(at('es-table')).toBeGreaterThan(at('es-link'));
+    expect(at('es-name')).toBeGreaterThan(at('es-h1'));
+    expect(at('es-newsbox')).toBe(at('es-name') + 1);
+    expect(at('es-lead')).toBe(at('es-newsbox') + 1);
+    expect(at('es-perfect')).toBe(at('es-lead') + 1);
+    // The main actions: the double block when offered, then the button pair.
+    expect(at('es-double')).toBeGreaterThan(at('es-perfect'));
+    expect(at('es-pair')).toBeGreaterThan(at('es-double'));
+    expect(at('es-link')).toBe(-1); // double or nothing is on offer
+    expect(at('es-table')).toBeGreaterThan(at('es-pair'));
     expect(at('es-note')).toBe(at('es-table') + 1);
     expect(at('es-misses')).toBeGreaterThan(at('es-note'));
-    expect(at('es-pot')).toBeGreaterThan(at('es-misses'));
+    expect(at('es-pot')).toBe(-1);
+  });
+});
+
+describe('the big reveal (R44)', () => {
+  test('"Tap to see what that was" is a large control where the score will be, not in the folio', () => {
+    mount(c2007Sample());
+    const cover = revealButton()!;
+    expect(cover.className).toContain('es-cover');
+    expect(cover.closest('.es-moment')).not.toBeNull();
+    expect(root.querySelector('.es-folio button')).toBeNull();
+    cover.click();
+    expect(root.querySelector('.es-name')!.textContent).toBe('That was 2008');
+    expect(root.querySelector('.es-folio')!.textContent).not.toContain('2008');
+  });
+
+  test('the name prints first, in big type; the score follows a beat later', () => {
+    mount(c2007Sample());
+    revealButton()!.click();
+    const name = root.querySelector('.es-name') as HTMLElement;
+    expect(name.className).toContain('es-wipe');
+    const score = root.querySelector('.es-score') as HTMLElement;
+    expect(score.hidden).toBe(true);
+    vi.advanceTimersByTime(REVEAL_BEAT_MS - 1);
+    expect(score.hidden).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(score.hidden).toBe(false);
+  });
+
+  test('the reveal is announced once, with the name and the score', () => {
+    mount(c2007Sample());
+    revealButton()!.click();
+    vi.advanceTimersByTime(REVEAL_BEAT_MS + 2000);
+    expect(announced()).toEqual(['That was 2008. $3,719 ahead of someone who did nothing.']);
+  });
+
+  test('a false alarm prints its name large and how long it took to come back under it', () => {
+    const m = c2007Sample();
+    m.run = { ...m.run, revealLine: 'That was the autumn 2014 wobble. It was back in two weeks.' };
+    mount(m);
+    revealButton()!.click();
+    expect(root.querySelector('.es-name')!.textContent).toBe('That was the autumn 2014 wobble');
+    expect(root.querySelector('.es-name-sub')!.textContent).toBe('It was back in two weeks.');
+  });
+
+  test('with reduced motion there is no wipe and no wait', () => {
+    const mm = vi.spyOn(window, 'matchMedia').mockImplementation(
+      (q: string) => ({ matches: q.includes('reduce'), media: q }) as unknown as MediaQueryList,
+    );
+    mount(c2007Sample());
+    revealButton()!.click();
+    expect(root.querySelector('.es-name')!.className).not.toContain('es-wipe');
+    expect((root.querySelector('.es-score') as HTMLElement).hidden).toBe(false);
+    mm.mockRestore();
+  });
+});
+
+describe('one screen (R44)', () => {
+  test('when the page is taller than the window, the extras go, lowest rank first; a smaller one stays if it fits', () => {
+    const m = { ...c2007Sample(), holderNote: true, flags: { blind: false } };
+    // A 660 px window: the table costs 60 px, the holder note 60, the near misses 30, over a 560 px page.
+    const shown = (q: string) => (root.querySelector(`${q}:not([data-trim])`) ? 1 : 0);
+    const html = document.documentElement;
+    Object.defineProperty(html, 'scrollHeight', {
+      configurable: true,
+      get: () => 560 + 60 * shown('.es-table') + 60 * shown('.es-note') + 30 * shown('.es-misses'),
+    });
+    const innerHeight = window.innerHeight;
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 660 });
+    try {
+      mount(m);
+      // The table outranks the note, so the note goes; the near misses still fit after it.
+      const trimmed = Array.from(root.querySelectorAll('[data-trim]')).map((e) => e.className.split(' ')[0]);
+      expect(trimmed).toEqual(['es-note']);
+      expect(root.querySelectorAll('button[data-trim], [data-trim] button')).toHaveLength(0);
+    } finally {
+      delete (html as unknown as Record<string, unknown>).scrollHeight;
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: innerHeight });
+    }
+  });
+
+  test('before the reveal the page leaves out what the score will need, so nothing vanishes at the reveal', () => {
+    const shown = (q: string) => (root.querySelector(`${q}:not([data-trim])`) ? 1 : 0);
+    const laidOut = () => (root.querySelector('.es-score:not([hidden])') ? 1 : 0);
+    const html = document.documentElement;
+    Object.defineProperty(html, 'scrollHeight', { configurable: true, get: () => 500 + 100 * shown('.es-table') + 100 * laidOut() });
+    const innerHeight = window.innerHeight;
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 660 });
+    try {
+      mount(losingSample());
+      const score = root.querySelector('.es-score') as HTMLElement;
+      expect(score.hidden).toBe(true);
+      expect(score.style.visibility).toBe('');
+      expect(root.querySelector('.es-table')!.hasAttribute('data-trim')).toBe(true);
+      revealButton()!.click();
+      vi.advanceTimersByTime(REVEAL_BEAT_MS);
+      expect(root.querySelector('.es-table')!.hasAttribute('data-trim')).toBe(true);
+    } finally {
+      delete (html as unknown as Record<string, unknown>).scrollHeight;
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: innerHeight });
+    }
+  });
+
+  test('nothing is left out when the page fits', () => {
+    mount({ ...c2007Sample(), holderNote: true, flags: { blind: false } });
+    expect(root.querySelectorAll('[data-trim]')).toHaveLength(0);
   });
 });

@@ -83,7 +83,15 @@ export const CHALLENGE = 'Challenge a friend';
 export const NEW_MYSTERY = 'Play a new mystery crash';
 export const CARD_GUESS = 'Can you guess which crash this was?';
 export const perfectLine = (perfect: number, you: number) =>
-  `Perfect timing made ${dollars(perfect)}. You made ${dollars(you)}.`;
+  `Perfect timing made ${dollars(perfect)}. You finished with ${dollars(you)}.`;
+
+// Round 2, lane D (R44, R45, R49): the result screen's streak lines and the short start screen.
+/** After a win, large: "Wins in a row: 2". */
+export const winsInRowLine = (n: number) => `${WINS_IN_A_ROW}: ${n}`;
+/** After a loss, when there has been a streak: "Best winning streak: 3". */
+export const bestWinningStreakLine = (n: number) => `Best winning streak: ${n}`;
+/** The short start screen of a double-or-nothing game. */
+export const doubleStartLine = (start: number) => `Double or nothing. You start with ${dollars(start)}.`;
 
 export const FOOTER_PLAY = 'US stock market · Not financial advice';
 export const FOOTER_RESULT = 'US stock market · A Still Signal build';
@@ -175,7 +183,7 @@ export const challengerLine = (you: number, them: number) => {
 export const MENU_TEXT = {
   pickTitle: 'Pick a crash',
   pickFolio: 'Practice',
-  pickStand: 'Practice runs. You know how each one ends, so they do not count towards your pot or your collection.',
+  pickStand: 'Practice runs. You know how each one ends, so they do not count towards your record or your collection.',
   collectionTitle: 'Your collection',
   back: 'Back',
   crash: 'Crash',
@@ -191,6 +199,7 @@ export const MENU_TEXT = {
   forVisit: 'For this visit',
   on: 'On',
   off: 'Off',
+  vibration: 'Vibration',
 };
 export const bustLine = (n: number) => (n === 1 ? 'Gone bust once' : `Gone bust ${n} times`);
 export const runsCountLine = (n: number) => `${n} runs`;

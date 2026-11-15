@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { RunResult } from '../../src/engine/types';
-import { bankPending, borrowedUnlocked, challengeFits, currentStreak, doubleUp, settle, verifiedChallenge } from '../../src/game/flow';
+import {
+  bankPending, borrowedUnlocked, challengeFits, currentStreak, doubleUp, firstEverGame, settle, startScreen, verifiedChallenge,
+} from '../../src/game/flow';
+import { BORROWED_OPENING, START_LINES } from '../../src/content/copy';
 import { getPot, resetPot } from '../../src/game/pot';
 import { getRecord } from '../../src/store/record';
 import { resetCells } from '../../src/store/store';
@@ -36,6 +39,27 @@ for (const [name, make] of [['with storage', memoryStorage], ['with storage thro
     afterEach(() => {
       delete g.localStorage;
       resetCells();
+    });
+
+    test('the first game ever: until any game is recorded, practice included (R46)', () => {
+      expect(firstEverGame()).toBe(true);
+      settle({ ...base, mode: 'picked', result: result(100) });
+      expect(firstEverGame()).toBe(false);
+    });
+
+    test('a blind game recorded ends the first-game rule too', () => {
+      expect(firstEverGame()).toBe(true);
+      settle({ ...base, mode: 'challenge', result: result(-100) });
+      expect(firstEverGame()).toBe(false);
+    });
+
+    test('the result carries the best winning streak: 0 before any streak, then the longest one ended', () => {
+      expect(settle({ ...base, mode: 'mystery', result: result(-100) }).bestStreak).toBe(0);
+      settle({ ...base, mode: 'mystery', result: result(1640, 12390) });
+      doubleUp();
+      settle({ ...base, start: 12390, mode: 'mystery', result: result(1000, 14000) });
+      doubleUp();
+      expect(settle({ ...base, start: 14000, mode: 'mystery', result: result(-3000, 12000) }).bestStreak).toBe(2);
     });
 
     test('a mystery loss takes the lead off the pot at once and offers nothing', () => {
@@ -160,5 +184,28 @@ describe('verifiedChallenge (I5)', () => {
   });
   test('a code whose trades do not fit the run is rejected', () => {
     expect(verifiedChallenge(c(9000, [1, 5]), closes)).toBeNull();
+  });
+});
+
+describe('startScreen (R45)', () => {
+  const base = { label: 'Mystery crash', borrowed: false, scoreToBeat: null, doubleStart: null };
+  test("the first game shows SK's full start text, unchanged", () => {
+    expect(startScreen({ ...base, full: true })).toEqual({ lines: [...START_LINES], extra: null, note: null });
+  });
+  test('the full text keeps the borrowed line and the score to beat', () => {
+    const g = startScreen({ ...base, full: true, borrowed: true, scoreToBeat: 11804 });
+    expect(g.lines).toEqual([...START_LINES]);
+    expect(g.extra).toBe(BORROWED_OPENING);
+    expect(g.note).toBe('Score to beat: $11,804');
+  });
+  test("later games show a short version: the game's label and Start", () => {
+    expect(startScreen({ ...base, full: false })).toEqual({ lines: ['Mystery crash'], extra: null, note: null });
+    expect(startScreen({ ...base, full: false, label: 'Rematch', scoreToBeat: 9120 })).toEqual({
+      lines: ['Rematch'], extra: null, note: 'Score to beat: $9,120',
+    });
+  });
+  test('a double-or-nothing game says what is at stake; borrowed money keeps its warning', () => {
+    expect(startScreen({ ...base, full: false, doubleStart: 11644 }).note).toBe('Double or nothing. You start with $11,644.');
+    expect(startScreen({ ...base, full: false, borrowed: true }).extra).toBe(BORROWED_OPENING);
   });
 });

@@ -1,8 +1,6 @@
 // Boot and flow (spec 6): straight into a mystery run, then the result front page, from which
 // every other mode starts. Rules live in the modules; this file only joins them.
-import {
-  BORROWED_LABEL, BORROWED_OPENING, BUST_HEADLINE, ISLAND_HEADLINE, REMATCH_LABEL, dailyLabel, scoreToBeatLine, START_LINES,
-} from './content/copy';
+import { BORROWED_LABEL, BORROWED_OPENING, BUST_HEADLINE, ISLAND_HEADLINE, REMATCH_LABEL, dailyLabel } from './content/copy';
 import { loadHeadlines } from './content/headlines';
 import { RUNS, RUN_IDS, loadRun, runMeta } from './content/runs';
 import { simulateBorrowed } from './engine/borrowed';
@@ -14,10 +12,10 @@ import { playCues } from './fx/cues';
 import { buzz, setHapticsEnabled } from './fx/haptics';
 import { createSfx } from './fx/sound';
 import {
-  bankPending, borrowedOn, borrowedUnlocked, currentStreak, doubleUp, setBorrowed, settle, verifiedChallenge,
+  bankPending, borrowedOn, borrowedUnlocked, currentStreak, doubleUp, firstEverGame, setBorrowed, settle, startScreen, verifiedChallenge,
 } from './game/flow';
 import { createNarrator, tradeNews, type NarratorRun } from './game/narrator';
-import { dailyPick, pickMystery } from './game/picker';
+import { DAILY_ENABLED, dailyPick, pickMystery } from './game/picker';
 import { getPot } from './game/pot';
 import { saveResume, takeResume, type ResumeState } from './game/resume';
 import { hashString, mulberry32 } from './game/rng';
@@ -59,6 +57,8 @@ interface Game {
 }
 
 const START = 10000;
+/** The pot is hidden this round (R40): no pot line, no bust page. The pot itself still keeps count. */
+const POT_SHOWN = false;
 /** Mystery runs remembered so the picker never serves one three times running. */
 const RECENT_KEEP = 6;
 
@@ -73,6 +73,8 @@ let lastGame: Game | null = null;
 let lastEnd: EndModel | null = null;
 /** Each play() takes a ticket; a slower load that has been overtaken does nothing. */
 let ticket = 0;
+/** The first start screen of a page load shows the full start text; later ones the short version (R45). */
+let fullStartShown = false;
 
 setHapticsEnabled(vibrationCell.get() !== false);
 
@@ -123,10 +125,10 @@ async function load(runId: string): Promise<{ run: RunFile; headlines: Headline[
 const potNow = () => getPot().pot + currentStreak().net;
 
 /**
- * opts.gate: the start screen (R28). Only the first game of a fresh page load gets it; rematch, double
- * or nothing, the countdown's next game and a challenge link opened again in the visit start at once.
+ * Every game opens on the start screen and its clock waits for Start (R45). The first one of a page
+ * load shows the full start text (R29); later ones the short version. opts.full forces either.
  */
-async function play(game: Game, opts: { double?: boolean; gate?: boolean; retry?: boolean } = {}) {
+async function play(game: Game, opts: { double?: boolean; full?: boolean; retry?: boolean } = {}) {
   const mine = ++ticket;
   // Starting anything but the double banks a win that was waiting for a choice (spec 6.8).
   if (!opts.double) bankPending();
@@ -141,7 +143,7 @@ async function play(game: Game, opts: { double?: boolean; gate?: boolean; retry?
       // Same game after the reload: mode, run, start, and the challenge code (read once on boot).
       saveResume({
         mode: game.mode, runId: game.runId, start: game.start, date: game.date, dailyNumber: game.dailyNumber,
-        borrowed: game.borrowed, code: game.code, double: opts.double, gate: opts.gate,
+        borrowed: game.borrowed, code: game.code, double: opts.double, gate: opts.full ?? !fullStartShown,
       });
       return location.reload();
     }
@@ -163,18 +165,20 @@ async function play(game: Game, opts: { double?: boolean; gate?: boolean; retry?
   const borrowed = !!game.borrowed;
   const firstForward = steps.findIndex((st) => st.phase === 'forward');
   const forwardSteps = firstForward < 0 ? 0 : steps.length - firstForward;
+  const full = opts.full ?? !fullStartShown;
+  fullStartShown = true;
   session = startPlay(root, run, steps, {
     runLabel: game.label,
     borrowed,
     simulateFn: borrowed ? simulateBorrowed : undefined,
     opening: borrowed ? BORROWED_OPENING : undefined,
-    gate: opts.gate
-      ? {
-        lines: START_LINES,
-        extra: borrowed ? BORROWED_OPENING : null,
-        note: game.challenge ? scoreToBeatLine(game.challenge.final) : null,
-      }
-      : undefined,
+    gate: startScreen({
+      full,
+      label: game.mode === 'picked' ? runMeta(game.runId)!.pickName : game.label,
+      borrowed,
+      scoreToBeat: prev ? prev.final : game.challenge ? game.challenge.final : null,
+      doubleStart: opts.double ? game.start : null,
+    }),
     start: game.start,
     pot: potNow(),
     narrate: (d, prevDay, balance, trades) => narrator.step(d, prevDay, balance, trades),
@@ -209,7 +213,7 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
   if (!game.borrowed && r.final >= 1) {
     actions.onChallenge = () => void challengeFriend(game, run, r, verdict, s.double?.wins);
   }
-  if (game.mode === 'daily' && s.blind && game.dailyNumber !== undefined) {
+  if (DAILY_ENABLED && game.mode === 'daily' && s.blind && game.dailyNumber !== undefined) {
     const n = game.dailyNumber;
     actions.onCopyResult = () => copyText(dailyText(n, verdict.title, r.lead, r.balances, siteBase(), s.daysInRow ?? 1));
   }
@@ -229,16 +233,17 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
         ? { kind: 'challenger', balances: simulate(run.closes, game.challenge.trades, game.start).balances, final: game.challenge.final }
         : undefined,
     double: s.double ?? undefined,
+    wins: s.double?.wins,
+    bestStreak: s.bestStreak,
     pot: s.pot,
-    flags: { showCountdown: game.mode === 'mystery', blind: !game.real },
-    headlineOverride: s.bust ? BUST_HEADLINE : s.island ? ISLAND_HEADLINE : undefined,
+    showPot: POT_SHOWN,
+    flags: { blind: !game.real },
+    headlineOverride: s.bust && POT_SHOWN ? BUST_HEADLINE : s.island ? ISLAND_HEADLINE : undefined,
     blackBorder: s.island,
     extraLines: days ? [days] : undefined,
     holderNote: holderNoteDue(),
     sound: { on: soundOn() },
     sfx,
-    vibration: { on: vibrationCell.get() !== false },
-    borrowed: borrowedUnlocked() ? { on: borrowedOn() } : undefined,
     actions,
   });
 }
@@ -271,24 +276,16 @@ function resultActions(game: Game, offered: boolean): EndModel['actions'] {
     onRematch: () => void rematch(game),
     onDouble: offered ? () => void double() : undefined,
     onBank: offered ? bankNow : undefined,
-    onDaily: () => void daily(),
+    onDaily: DAILY_ENABLED ? () => void daily() : undefined,
     onPick: pickCrash,
     onCollection: collection,
     onToggleSound: toggleSound,
-    onToggleVibration: () => {
-      const on = vibrationCell.get() === false;
-      vibrationCell.set(on);
-      setHapticsEnabled(on);
-      return on;
-    },
-    onToggleBorrowed: toggleBorrowed,
   };
 }
 
-function toggleBorrowed(): boolean {
-  const on = !borrowedOn();
-  setBorrowed(on);
-  return on;
+function setVibration(on: boolean) {
+  vibrationCell.set(on);
+  setHapticsEnabled(on);
 }
 
 function showResult(model: EndModel) {
@@ -298,10 +295,10 @@ function showResult(model: EndModel) {
   teardown = () => end.destroy();
 }
 
-/** Back from a menu: the same front page, already revealed, without the countdown. */
+/** Back from a menu: the same front page, already revealed. */
 function back() {
   if (!lastEnd) return void newMystery();
-  showResult({ ...lastEnd, flags: { showCountdown: false, blind: false } });
+  showResult({ ...lastEnd, flags: { blind: false } });
 }
 
 function bankNow() {
@@ -311,15 +308,18 @@ function bankNow() {
   showResult({
     ...lastEnd,
     double: undefined,
+    // Still a win: "Wins in a row" stays, the double-or-nothing buttons go.
+    wins: lastEnd.double?.wins ?? lastEnd.wins,
     pot: { pot: p.pot, tonight: p.tonight },
     flags: { ...lastEnd.flags, blind: false },
     actions: resultActions(lastGame, false),
   });
 }
 
-function newMystery(start = START, opts: { double?: boolean; gate?: boolean } = {}) {
+function newMystery(start = START, opts: { double?: boolean; full?: boolean } = {}) {
   const recent = Array.isArray(recentCell.get()) ? recentCell.get() : [];
-  const runId = pickMystery(Math.random, recent);
+  // The first game a player ever plays is a real crash (R46).
+  const runId = pickMystery(Math.random, recent, { firstEver: !opts.double && firstEverGame() });
   recentCell.set([runId, ...recent].slice(0, RECENT_KEEP));
   return play(mysteryGame(runId, start, !opts.double && borrowedOn()), opts);
 }
@@ -380,6 +380,9 @@ function collection() {
     unlocked: borrowedUnlocked(),
     borrowed: borrowedOn(),
     onToggleBorrowed: (on) => setBorrowed(on),
+    vibration: vibrationCell.get() !== false,
+    onToggleVibration: setVibration,
+    showPot: POT_SHOWN,
     onBack: back,
   });
 }
@@ -392,7 +395,6 @@ function collection() {
  */
 async function challenge(code: string, retry = false) {
   history.replaceState(null, '', location.pathname + location.search);
-  const gate = !challengeSeen(code);
   const c = decodeChallenge(code);
   if (c) {
     const mine = ++ticket;
@@ -413,32 +415,20 @@ async function challenge(code: string, retry = false) {
     if (mine !== ticket) return;
     const checked = verifiedChallenge(c, run.closes);
     if (checked) {
-      return play({ mode: 'challenge', runId: c.runId, label: MYSTERY_LABEL, start: START, real: false, challenge: checked, code }, { gate });
+      return play({ mode: 'challenge', runId: c.runId, label: MYSTERY_LABEL, start: START, real: false, challenge: checked, code });
     }
   }
-  return newMystery(START, { gate });
-}
-
-/** Whether this challenge link was already opened in this visit (and remember it now). Unknown counts as new. */
-function challengeSeen(code: string): boolean {
-  try {
-    const key = 'dps:challenges';
-    const seen: string[] = JSON.parse(sessionStorage.getItem(key) ?? '[]');
-    if (seen.includes(code)) return true;
-    sessionStorage.setItem(key, JSON.stringify([...seen, code].slice(-20)));
-  } catch {
-    /* no session storage: show the start screen */
-  }
-  return false;
+  return newMystery(START);
 }
 
 /** A game stored before a reload (a run that would not load): the same game again. */
 function resume(r: ResumeState) {
-  const opts = { double: r.double, gate: r.gate };
+  const opts = { double: r.double, full: r.gate };
   switch (r.mode) {
     case 'challenge':
       return challenge(r.code!);
     case 'daily':
+      if (!DAILY_ENABLED) return newMystery(START, { full: r.gate });
       return play({ mode: 'daily', runId: r.runId, label: dailyLabel(r.dailyNumber ?? 1), start: START, real: false, date: r.date, dailyNumber: r.dailyNumber }, opts);
     case 'picked':
       return play({ mode: 'picked', runId: r.runId, label: shortName(r.runId), start: START, real: true }, opts);
@@ -456,8 +446,8 @@ function boot() {
   if (hash) return challenge(hash[1]);
   // ?run=<id> opens that run as a mystery (testing and screenshots).
   const asked = new URLSearchParams(location.search).get('run') ?? '';
-  if (RUN_IDS.includes(asked)) return play(mysteryGame(asked, START, borrowedOn()), { gate: true });
-  return newMystery(START, { gate: true });
+  if (RUN_IDS.includes(asked)) return play(mysteryGame(asked, START, borrowedOn()));
+  return newMystery(START);
 }
 
 void boot();

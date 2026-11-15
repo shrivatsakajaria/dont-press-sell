@@ -1,9 +1,11 @@
 // Settling a finished run (spec 6.8, 6.11, 6.12): the record, the pot and the double-or-nothing
 // streak in one place, so the page code only draws. Storage may be missing: every value lives
 // in memory for the visit and is written through when it can be.
+import { BORROWED_OPENING, doubleStartLine, scoreToBeatLine, START_LINES } from '../content/copy';
+import { RUN_IDS } from '../content/runs';
 import { simulate } from '../engine/simulate';
 import type { BorrowedResult, RunResult, Trade, VerdictId } from '../engine/types';
-import { dailyStreak, recordRun, recordStreak, type Mode } from '../store/record';
+import { dailyStreak, getLastRun, getRecord, recordRun, recordStreak, type Mode } from '../store/record';
 import { cell } from '../store/store';
 import { applyToPot, getPot } from './pot';
 import { afterRun, bank, doubleDown, initialStreak, RUNGS, type StreakState } from './streak';
@@ -66,6 +68,8 @@ export interface Settled {
   island: boolean;
   /** Days in a row of daily crashes, on a first daily; else null. */
   daysInRow: number | null;
+  /** The longest winning streak ever ended (0 when none): "Best winning streak: N" after a loss. */
+  bestStreak: number;
 }
 
 /**
@@ -80,6 +84,7 @@ export function settle(i: SettleInput): Settled {
   if (blind && i.result.lead > 0 && !borrowedUnlocked()) unlockedCell.set(true);
   const out = (p: { pot: number; tonight: number; bust: boolean }, double: Settled['double'] = null): Settled => ({
     blind, pot: { pot: p.pot, tonight: p.tonight }, bust: p.bust, double, island: !!double && double.wins === ISLAND_WINS, daysInRow,
+    bestStreak: getRecord().bestStreak,
   });
 
   if (i.borrowed) {
@@ -136,4 +141,39 @@ export function challengeFits(c: { trades: { dayIndex: number }[] }, runLength: 
 export function verifiedChallenge<C extends { final: number; trades: Trade[] }>(c: C, closes: number[]): C | null {
   if (!challengeFits(c, closes.length)) return null;
   return { ...c, final: Math.round(simulate(closes, c.trades, 10000).final) };
+}
+
+/**
+ * Whether the player has never finished a game (R46): the stored record decides, practice runs included.
+ * With storage missing the record lives for the visit, so only the visit's first game counts as first.
+ */
+export function firstEverGame(): boolean {
+  const r = getRecord();
+  return r.games === 0 && r.played.length === 0 && !RUN_IDS.some((id) => getLastRun(id) !== null);
+}
+
+export interface StartScreen {
+  lines: string[];
+  extra: string | null;
+  note: string | null;
+}
+
+/**
+ * The start screen every game opens on (R45). The first game of a visit shows the owner's full start
+ * text (R29, never changed); later games show a short version: the game's label, and Start.
+ * Borrowed money always keeps its warning; the note gives the score to beat or a double's stake.
+ */
+export function startScreen(o: {
+  full: boolean;
+  label: string;
+  borrowed: boolean;
+  scoreToBeat: number | null;
+  doubleStart: number | null;
+}): StartScreen {
+  const note = o.doubleStart !== null ? doubleStartLine(o.doubleStart) : o.scoreToBeat !== null ? scoreToBeatLine(o.scoreToBeat) : null;
+  return {
+    lines: o.full ? [...START_LINES] : [o.label],
+    extra: o.borrowed ? BORROWED_OPENING : null,
+    note,
+  };
 }

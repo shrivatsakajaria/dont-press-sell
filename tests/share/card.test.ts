@@ -44,7 +44,7 @@ describe('cardLines', () => {
       ['Someone who did nothing', '$9,450'],
       ['Perfect timing', '$17,900'],
     ]);
-    expect(l.perfect).toBe('Perfect timing made $17,900. You made $7,150.');
+    expect(l.perfect).toBe('Perfect timing made $17,900. You finished with $7,150.');
     expect(l.beatMe).toBe('Beat me');
     expect(l.url).toBe('https://example.pages.dev/');
     expect(l.footer).toBe('US stock market · A Still Signal build');

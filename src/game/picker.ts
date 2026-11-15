@@ -2,6 +2,15 @@
 import { RUNS } from '../content/runs';
 import type { RunKind } from '../engine/types';
 
+/**
+ * The daily crash waits for phase 2 (R47): no link, button, menu item or share text offers it while
+ * this is false. The picking code below stays.
+ */
+export const DAILY_ENABLED = false;
+
+/** The first game a player ever plays is one of these real crashes (R46). */
+export const FIRST_GAME_RUNS: readonly string[] = ['c1987', 'c2007', 'c2020', 'c2022'];
+
 /** Daily crash number 1 falls on this UTC date. */
 export const LAUNCH_DATE = '2026-11-21';
 
@@ -10,8 +19,10 @@ const idsOf = (kind: RunKind): string[] => RUNS.filter((r) => r.kind === kind).m
 /**
  * Half of all picks are scares: choose the kind first, then a run of that kind,
  * never the same run three times running. `recent` is most recent first.
+ * `firstEver`: the player has never finished a game (their stored record says so): one of FIRST_GAME_RUNS.
  */
-export function pickMystery(rng: () => number, recent: string[]): string {
+export function pickMystery(rng: () => number, recent: string[], opts: { firstEver?: boolean } = {}): string {
+  if (opts.firstEver) return FIRST_GAME_RUNS[Math.min(FIRST_GAME_RUNS.length - 1, Math.floor(rng() * FIRST_GAME_RUNS.length))];
   const kind: RunKind = rng() < 0.5 ? 'scare' : 'crash';
   const banned = recent.length >= 2 && recent[0] === recent[1] ? recent[0] : null;
   let pool = idsOf(kind).filter((id) => id !== banned);

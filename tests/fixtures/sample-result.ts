@@ -49,7 +49,7 @@ function build(
         ).filter((n) => n.real !== '')
       : undefined,
     pot: { pot: 10000, tonight: 0 },
-    flags: { showCountdown: false, blind: true },
+    flags: { blind: true },
     actions: { onNewMystery: () => {} },
     ...rest,
   };
@@ -61,7 +61,7 @@ export function c2007Sample(): EndModel {
     modeLabel: 'Mystery crash',
     news: ["House rejects the $700 billion bank rescue plan", "Treasury details a plan to buy banks' bad assets"],
     pot: { pot: 13719, tonight: 3719 },
-    flags: { showCountdown: true, blind: true },
+    flags: { blind: true },
   });
   // A winning mystery run, so double or nothing is offered (first win of a streak).
   m.double = { net: m.result.lead, final: m.result.final, wins: 1 };
@@ -73,7 +73,7 @@ export function winningSample(): EndModel {
   const m = build(c2020, ['2020-02-27', '2020-03-23'], {
     modeLabel: 'Mystery crash',
     news: ['US stock market falls into a correction', 'Fed promises to buy as much as needed to steady markets'],
-    flags: { showCountdown: true, blind: true },
+    flags: { blind: true },
   });
   // Second win in a row: the net counts an earlier $1,500 win too (what banking adds to the pot).
   m.double = { net: m.result.lead + 1500, final: m.result.final, wins: 2 };
@@ -92,6 +92,6 @@ export function losingSample(): EndModel {
     news: ['US deepens its rescue of AIG after record loss', ''],
     other: { kind: 'challenger', balances: challenger.balances, final: challenger.final },
     pot: { pot: 7905, tonight: -2095 },
-    flags: { showCountdown: false, blind: true },
+    flags: { blind: true },
   });
 }
