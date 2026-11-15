@@ -82,14 +82,33 @@ setHapticsEnabled(vibrationCell.get() !== false);
 const sfx = createSfx();
 const soundOn = () => soundCell.get() !== false;
 sfx.setMuted(!soundOn());
-for (const ev of ['pointerdown', 'keydown', 'touchend'] as const) {
-  document.addEventListener(ev, () => sfx.unlock(), { capture: true, passive: true });
+/**
+ * R57: building the audio context takes 150-350 ms on a phone, and the first tap is usually Start. So the
+ * first tap only books it: it is built once that tap's click has set the clock going and the next frame is
+ * painted (the tap's user activation still covers it). Every later tap resumes it at once (cheap).
+ */
+let soundBooked = false;
+function bookSound() {
+  if (soundBooked) return;
+  soundBooked = true;
+  const build = () => setTimeout(() => sfx.unlock(), 0);
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(build);
+  else build();
 }
+for (const ev of ['pointerdown', 'keydown', 'touchend'] as const) {
+  document.addEventListener(ev, () => soundBooked && sfx.unlock(), { capture: true, passive: true });
+}
+// Bubble phase: the button's own click (Start) runs first.
+document.addEventListener('click', bookSound, { passive: true });
+document.addEventListener('keyup', bookSound, { passive: true });
 function toggleSound(): boolean {
   const on = !soundOn();
   soundCell.set(on);
   sfx.setMuted(!on);
-  if (on) sfx.unlock();
+  if (on) {
+    soundBooked = true;
+    sfx.unlock();
+  }
   return on;
 }
 
@@ -295,10 +314,10 @@ function showResult(model: EndModel) {
   teardown = () => end.destroy();
 }
 
-/** Back from a menu: the same front page, already revealed. */
+/** Back from a menu: the same front page, already revealed and counted (no second count, no sound). */
 function back() {
   if (!lastEnd) return void newMystery();
-  showResult({ ...lastEnd, flags: { blind: false } });
+  showResult({ ...lastEnd, flags: { blind: false, again: true } });
 }
 
 function bankNow() {
@@ -311,8 +330,9 @@ function bankNow() {
     // Still a win: "Wins in a row" stays, the double-or-nothing buttons go.
     wins: lastEnd.double?.wins ?? lastEnd.wins,
     pot: { pot: p.pot, tonight: p.tonight },
-    flags: { ...lastEnd.flags, blind: false },
-    actions: resultActions(lastGame, false),
+    flags: { blind: false, again: true },
+    // Only the double-or-nothing pair goes: Challenge a friend (and Copy result) stay.
+    actions: { ...resultActions(lastGame, false), onChallenge: lastEnd.actions.onChallenge, onCopyResult: lastEnd.actions.onCopyResult },
   });
 }
 

@@ -50,6 +50,12 @@ function soldEarlyBoughtHigher(result: RunResult, run: RunData): boolean {
   return result.trades.slice(i + 1).some((u) => u.side === 'buy' && run.closes[u.dayIndex] > run.closes[sale.dayIndex]);
 }
 
+/** The first sale came more than 10 trading days before the low: the market went on falling for a long while. */
+function soldLongBeforeLow(result: RunResult, run: RunData): boolean {
+  const sale = result.trades.find((t) => t.side === 'sell');
+  return !!sale && run.lowIndex - sale.dayIndex > 10;
+}
+
 export function verdictFor(result: RunResult, run: RunData): VerdictId {
   if (isWiped(result)) return 'marginCalled';
   // R9: a borrowed run that never traded always ends ahead of the holder; it is still diamond hands.
@@ -91,7 +97,7 @@ export function verdictCopy(
       return {
         title: 'Big Short energy',
         line: 'Out before the fall and back in near the low',
-        headline: 'Local investor dodges the worst of the crash',
+        headline: `Local investor dodges the worst of the ${run.kind === 'scare' ? 'scare' : 'crash'}`,
       };
     case 'nerves':
       return {
@@ -115,7 +121,7 @@ export function verdictCopy(
     case 'shakenOut':
       return {
         title: 'Shaken out',
-        line: 'Sold a dip that bounced straight back',
+        line: soldLongBeforeLow(result, run) ? 'Sold early in a scare the market got over' : 'Sold a dip that bounced straight back',
         headline: 'Local investor flees a crash that never came',
       };
     case 'paper':

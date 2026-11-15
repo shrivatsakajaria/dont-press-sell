@@ -4,7 +4,8 @@ import type { BorrowedResult, RunData, RunResult, Trade } from '../../src/engine
 
 // Worst day: index 3 (80 / 95). Best day: index 5 (120 / 85).
 const closes = [100, 90, 95, 80, 85, 120, 110, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124];
-function runData(lowIndex = 3): RunData {
+// The fall (days shown one by one) runs to index 8 by default, so both days are in it.
+function runData(lowIndex = 3, fallEndIndex = 8): RunData {
   return {
     id: 'x',
     kind: 'crash',
@@ -13,7 +14,7 @@ function runData(lowIndex = 3): RunData {
     dates: closes.map((_, i) => `2000-02-${String(i + 1).padStart(2, '0')}`),
     closes,
     lowIndex,
-    fallEndIndex: lowIndex,
+    fallEndIndex,
   };
 }
 // A run whose lowest close really is at index 14 (for the "before the bottom" window).
@@ -90,6 +91,14 @@ describe('nearMisses', () => {
     expect(joined(res([sell(2), buy(5)]), runData())).not.toContain('best day');
     expect(joined(res([]), runData())).not.toContain('best day');
     expect(nearMisses(res([sell(2)]), runData())).toContain('In cash on day 6, the best day of the run');
+  });
+
+  it('names no day after the fall: the fast-forward samples days, so the player never saw them (r2 review M1)', () => {
+    // fallEndIndex 4: days 0..3 are the fall. The best day (index 5) is in the fast-forward.
+    expect(joined(res([sell(2)]), runData(3, 4))).not.toContain('best day');
+    expect(nearMisses(res([]), runData(3, 4))).toContain('Held through day 4, the worst day of the run');
+    // fallEndIndex 3: the worst day (index 3) is the first forward day. No line: a lesser fall day is not "the worst".
+    expect(joined(res([]), runData(3, 3))).not.toContain('worst day');
   });
 
   it('R49: buying back at the close of the worst day is not holding through it (panel, 2020)', () => {

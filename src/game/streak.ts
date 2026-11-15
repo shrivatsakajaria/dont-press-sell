@@ -16,7 +16,7 @@ export interface StreakState {
 
 export interface AfterRun {
   state: StreakState;
-  /** True when "Double or nothing" and "Bank $N" should be offered. */
+  /** True when "Double or nothing" and "Keep my win" should be offered. */
   offer: boolean;
   /** True when a streak with at least one win has just ended by a level or losing run. */
   ended: boolean;
@@ -60,7 +60,7 @@ export function doubleDown(state: StreakState): StreakState {
   return { wins: state.wins, start: state.final, final: null, net: state.net };
 }
 
-/** "Bank $N": ends the streak; record `bestStreak` and settle the pot with `settle`. */
+/** "Keep my win" (banks the streak): ends it; record `bestStreak` and settle the pot with `settle`. */
 export function bank(state: StreakState): { state: StreakState; bestStreak: number; settle: number } {
   return { state: initialStreak(), bestStreak: state.wins, settle: state.net };
 }
