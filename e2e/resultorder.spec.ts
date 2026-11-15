@@ -13,7 +13,7 @@ async function play(page: Page, buyAfter: number | null) {
   const act = page.locator('button.act');
   await page.clock.runFor(4000);
   await act.click();
-  await expect(act).toHaveText(/^Buy back now/);
+  await expect(act).toHaveText(/^Buy back /);
   if (buyAfter !== null) {
     await page.clock.runFor(buyAfter);
     await act.click();

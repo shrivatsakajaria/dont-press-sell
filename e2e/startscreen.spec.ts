@@ -85,7 +85,8 @@ test('the layout holds two 16-word lines, a 22-word line and a score to beat at 
   // No empty chart band and no "level" on the start screen (audit 5): the chart waits for play.
   expect(m.chartHeight).toBe(0);
   await expect(page.locator('.delta')).toBeHidden();
-  await expect(page.locator('.folio')).toContainText('Price: your nerve');
+  // R39: no "Price: your nerve" in the folio.
+  await expect(page.locator('.folio')).not.toContainText('Price: your nerve');
   await page.screenshot({ path: 'e2e/shots/S/start-660-long-lines.png' });
 });
 

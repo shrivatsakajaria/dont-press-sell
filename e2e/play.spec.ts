@@ -32,9 +32,13 @@ for (const height of [844, 660]) {
       await page.screenshot({ path: `e2e/shots/play-${run}-${height}-holding.png` });
 
       await button.click();
-      await expect(button).toHaveText(/^Buy back now: \$[\d,]+ (ahead|behind)$/);
+      // R38: sold at this close, so buying back now is the same price; one number only (no regret line).
+      await expect(button).toHaveText(/^Buy back (at the same price|\$[\d,]+ (cheaper|dearer))$/);
+      await expect(page.locator('.regret')).toBeHidden();
       await expect(page.getByText(FIRST_SALE)).toBeVisible();
-      await expect(page.locator('.folio')).toContainText(/You are in cash|Time slowed|Fast forward/);
+      await expect(page.locator('.folio')).toContainText(/You are in cash|Fast forward/);
+      await expect(page.locator('.folio')).not.toContainText(/Time slowed|Price: your nerve/);
+      await expect(page.locator('.foot')).not.toContainText('Your pot');
       const after = await page.evaluate(() => ({
         scrollWidth: document.documentElement.scrollWidth,
         clientWidth: document.documentElement.clientWidth,

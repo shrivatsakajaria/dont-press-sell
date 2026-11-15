@@ -59,11 +59,11 @@ describe('nearMisses', () => {
   });
   it('a borrowed run that was not wiped still gets lines', () => {
     const ok: BorrowedResult = { ...res([]), wipedAt: null };
-    expect(nearMisses(ok, runData())).toEqual(['Held through the worst day of the run']);
+    expect(nearMisses(ok, runData())).toEqual(['Held through day 4, the worst day of the run']);
   });
 
   it('a player who did nothing only held through the worst day', () => {
-    expect(nearMisses(res([]), runData())).toEqual(['Held through the worst day of the run']);
+    expect(nearMisses(res([]), runData())).toEqual(['Held through day 4, the worst day of the run']);
   });
 
   it('Sold N days before the bottom, only within 1 to 10 days', () => {
@@ -84,19 +84,28 @@ describe('nearMisses', () => {
     expect(joined(res([sell(1), buy(14)]), r)).not.toContain('Bought back');
   });
 
-  it('In cash for the best day of the run', () => {
-    expect(nearMisses(res([sell(2), buy(6)]), runData())).toContain('In cash for the best day of the run');
+  it('In cash on day 6, the best day of the run', () => {
+    expect(nearMisses(res([sell(2), buy(6)]), runData())).toContain('In cash on day 6, the best day of the run');
     expect(joined(res([sell(5), buy(6)]), runData())).not.toContain('best day');
     expect(joined(res([sell(2), buy(5)]), runData())).not.toContain('best day');
     expect(joined(res([]), runData())).not.toContain('best day');
-    expect(nearMisses(res([sell(2)]), runData())).toContain('In cash for the best day of the run');
+    expect(nearMisses(res([sell(2)]), runData())).toContain('In cash on day 6, the best day of the run');
   });
 
-  it('Held through the worst day of the run', () => {
-    expect(nearMisses(res([sell(5), buy(8)]), runData())).toContain('Held through the worst day of the run');
+  it('R49: buying back at the close of the worst day is not holding through it (panel, 2020)', () => {
+    // Out from day 2 to the close of day 4 (index 3): the fall from 95 to 80 happened while in cash.
+    expect(joined(res([sell(1), buy(3)]), runData())).not.toContain('worst day');
+  });
+
+  it('R49: the line names the day, as the play screen numbered it (Day N = index + 1)', () => {
+    expect(nearMisses(res([]), runData())).toContain('Held through day 4, the worst day of the run');
+  });
+
+  it('Held through day 4, the worst day of the run', () => {
+    expect(nearMisses(res([sell(5), buy(8)]), runData())).toContain('Held through day 4, the worst day of the run');
     expect(joined(res([sell(3), buy(8)]), runData())).not.toContain('worst day');
     expect(joined(res([sell(1), buy(8)]), runData())).not.toContain('worst day');
-    expect(nearMisses(res([sell(1), buy(2)]), runData())).toContain('Held through the worst day of the run');
+    expect(nearMisses(res([sell(1), buy(2)]), runData())).toContain('Held through day 4, the worst day of the run');
   });
 
   it('time out of the market in plain words, from the dates', () => {

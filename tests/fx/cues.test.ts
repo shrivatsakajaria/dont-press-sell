@@ -45,6 +45,20 @@ describe('playCues', () => {
     playCues(f.sfx, f.buzz, { ...base, phase: 'forward', forwardProgress: 0.5 });
     expect(f.sfx.rise).toHaveBeenCalledWith(0.5);
   });
+  test('a cheaper buy-back (R41) rings the till, plays the win and buzzes a little longer', () => {
+    const f = fake();
+    playCues(f.sfx, f.buzz, { ...base, newStep: false, trade: 'buy', win: true });
+    expect(f.sfx.till).toHaveBeenCalled();
+    expect(f.sfx.payout).toHaveBeenCalledWith(true);
+    expect(f.buzz).toHaveBeenCalledWith([40, 60, 40]);
+  });
+  test('a dearer buy-back is a plain trade: no win', () => {
+    const f = fake();
+    playCues(f.sfx, f.buzz, { ...base, newStep: false, trade: 'buy', win: false });
+    expect(f.sfx.till).toHaveBeenCalled();
+    expect(f.sfx.payout).not.toHaveBeenCalled();
+    expect(f.buzz).toHaveBeenCalledWith(40);
+  });
   test('a repaint of the same step with no trade is silent', () => {
     const f = fake();
     playCues(f.sfx, f.buzz, { ...base, newStep: false });

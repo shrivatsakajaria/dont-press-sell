@@ -4,6 +4,8 @@ import type { Sfx } from './sound';
 export interface CueInput {
   newStep: boolean;
   trade: 'sell' | 'buy' | null;
+  /** R41: the trade was a buy-back cheaper than the sale (a win). */
+  win?: boolean;
   holdMs: number;
   worst: boolean;
   invested: boolean;
@@ -21,7 +23,10 @@ const counterLevel = (lead: number, start: number) => Math.min(1, Math.max(0, (l
 export function playCues(sfx: Sfx, buzz: (p: number | number[]) => void, c: CueInput): void {
   if (c.trade) {
     sfx.till();
-    buzz(40);
+    if (c.win) {
+      sfx.payout(true);
+      buzz([40, 60, 40]);
+    } else buzz(40);
     return;
   }
   if (!c.newStep) return;

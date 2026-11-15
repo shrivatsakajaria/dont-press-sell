@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Step } from '../../src/game/schedule';
-import { startPlay } from '../../src/ui/screen';
+import { END_HOLD_MS, startPlay } from '../../src/ui/screen';
 
 const closes = [100, 101, 99, 100, 90, 92, 95, 100, 104, 108];
 const dates = closes.map((_, i) => `2007-11-${String(10 + i).padStart(2, '0')}`);
@@ -17,12 +17,14 @@ it('renders the play screen, sells on a tap, pauses, and ends', async () => {
   const btn = root.querySelector('button.act') as HTMLButtonElement;
   expect(btn.textContent).toBe('Sell for $10,000');
   expect(root.querySelector('h1')?.textContent).toBe('Headline for day 1');
-  expect(root.querySelector('.folio')?.textContent).toContain('Price: your nerve');
+  // R39: no "Price: your nerve" in the folio.
+  expect(root.querySelector('.folio')?.textContent).toBe('Mystery crashDay 1');
 
   vi.advanceTimersByTime(100); // day 2
   expect(btn.textContent).toBe('Sell for $10,100');
   btn.click();
-  expect(btn.textContent).toMatch(/^Buy back now: \$[\d,]+ (ahead|behind)$/);
+  // R38: sold at this close, so buying back now is the same price.
+  expect(btn.textContent).toBe('Buy back at the same price');
   expect(root.querySelector('.standfirst')?.textContent).toBe('You are out. To win, buy back in for less than you sold.');
 
   const pause = root.querySelector('button.pause') as HTMLButtonElement;
@@ -55,12 +57,17 @@ it('borrowed money: its opening line, the counter against the unborrowed market,
   vi.advanceTimersByTime(100); // day 2: 3 x 10,000 x 0.95 - 20,000 = 8,500
   expect(btn.textContent).toBe('Sell for $8,500');
   btn.click();
-  // In cash with 8,500 while someone who did nothing (unborrowed) has 9,500.
-  expect(btn.textContent).toBe('Buy back now: $1,000 behind');
+  // In cash with 8,500, sold at this close: the same price (R38).
+  expect(btn.textContent).toBe('Buy back at the same price');
   vi.advanceTimersByTime(100); // day 3: buy back at 90, borrowing twice the balance
+  // 8,500 x (1 - 90 / 95) = 447 cheaper.
+  expect(btn.textContent).toBe('Buy back $447 cheaper');
   btn.click();
   expect(onEnd).not.toHaveBeenCalled();
   vi.advanceTimersByTime(100); // day 4: 3 x 8,500 x 60 / 90 - 17,000 = 0, wiped out
+  // The run is over at once (the clock stops); the result follows after the final hold (R49).
+  expect(btn.getAttribute('aria-disabled')).toBe('true');
+  vi.advanceTimersByTime(END_HOLD_MS);
   expect(onEnd).toHaveBeenCalledTimes(1);
   expect(onEnd.mock.calls[0][0].wipedAt).toBe(3);
   vi.advanceTimersByTime(5000);
@@ -88,7 +95,8 @@ it('a tap is pinned to the step that was painted when the finger went down', () 
   btn.click();
   // Sold at day 2's close, the amount the player saw.
   expect(root.querySelector('.balance')?.textContent).toBe('$10,100');
-  expect(btn.textContent).toMatch(/^Buy back now: /);
+  // Sold at day 2's close (101), day 3 closes at 99: 10,100 x (1 - 99 / 101) = 200 cheaper.
+  expect(btn.textContent).toBe('Buy back $200 cheaper');
   play.teardown();
 });
 
@@ -170,7 +178,7 @@ it('tells the caller about each new step and each trade (for sound and vibration
   vi.useFakeTimers({ toFake: [...FAKE] });
   const root = document.createElement('div');
   document.body.appendChild(root);
-  const frames: { step: number; newStep: boolean; trade: string | null; holdMs: number }[] = [];
+  const frames: { step: number; newStep: boolean; trade: string | null; win: boolean; holdMs: number }[] = [];
   let on = false;
   const play = startPlay(root, run, steps, {
     runLabel: 'Mystery crash', onEnd: () => {}, soundOn: false,
@@ -183,9 +191,9 @@ it('tells the caller about each new step and each trade (for sound and vibration
   expect(sound.textContent).toBe('Sound on');
   vi.advanceTimersByTime(116);
   (root.querySelector('button.act') as HTMLButtonElement).click();
-  expect(frames[0]).toEqual({ step: 0, newStep: true, trade: null, holdMs: 100 });
-  expect(frames[1]).toEqual({ step: 1, newStep: true, trade: null, holdMs: 100 });
-  expect(frames[frames.length - 1]).toEqual({ step: 1, newStep: false, trade: 'sell', holdMs: 100 });
+  expect(frames[0]).toEqual({ step: 0, newStep: true, trade: null, win: false, holdMs: 100 });
+  expect(frames[1]).toEqual({ step: 1, newStep: true, trade: null, win: false, holdMs: 100 });
+  expect(frames[frames.length - 1]).toEqual({ step: 1, newStep: false, trade: 'sell', win: false, holdMs: 100 });
   play.teardown();
 });
 
@@ -258,7 +266,7 @@ it('start screen with borrowed money: the three lines, then the borrowed line in
   vi.useRealTimers();
 });
 
-it('start screen on a slow, red day 1: calm paper, "Price: your nerve", no "level" and no chart band before play', () => {
+it('start screen on a slow, red day 1: calm paper, an empty status (R39), no "level" and no chart band before play', () => {
   vi.useFakeTimers({ toFake: [...FAKE] });
   document.body.innerHTML = '';
   const root = document.createElement('div');
@@ -267,8 +275,7 @@ it('start screen on a slow, red day 1: calm paper, "Price: your nerve", no "leve
   const play = startPlay(root, { ...run, preCloses: [110] }, slow0, { runLabel: 'Mystery crash', onEnd: vi.fn(), gate: { lines: ['a', 'b', 'c'] } });
   const page = root.querySelector('.play')!;
   const folio = root.querySelector('.folio')!.textContent!;
-  expect(folio).toContain('Price: your nerve');
-  expect(folio).not.toContain('Time slowed');
+  expect(folio).toBe('Mystery crashDay 1');
   expect(page.classList.contains('is-worst')).toBe(false);
   expect(page.classList.contains('is-big')).toBe(false);
   expect(root.querySelector('.delta')!.textContent).toBe('');
@@ -276,7 +283,7 @@ it('start screen on a slow, red day 1: calm paper, "Price: your nerve", no "leve
   // Start: day 1 is a red day at once.
   (root.querySelector('button.act') as HTMLButtonElement).click();
   expect(page.classList.contains('is-worst')).toBe(true);
-  expect(root.querySelector('.folio')!.textContent).toContain('Time slowed');
+  expect(root.querySelector('.folio')!.textContent).not.toContain('Time slowed');
   play.teardown();
   vi.useRealTimers();
 });
@@ -294,7 +301,7 @@ it('a press capture is cleared when the finger is cancelled or leaves the button
   vi.advanceTimersByTime(100); // day 2, painted
   vi.advanceTimersByTime(16);
   btn.click(); // a keyboard or late click: trades on the day on screen, not the cancelled capture's day 1
-  expect(btn.textContent).toMatch(/^Buy back now/);
+  expect(btn.textContent).toBe('Buy back at the same price');
   const sold = play.view();
   expect(sold.dayIndex).toBe(1);
   expect(sold.invested).toBe(false);

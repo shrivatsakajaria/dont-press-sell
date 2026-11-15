@@ -2,8 +2,8 @@
 // screenModel() turns the session's view into what the page shows (pure, tested);
 // mountScreen() draws it; startPlay() runs one session on it.
 import {
-  FIRST_SALE_LINE, FOOTER_PLAY, MASTHEAD, OPENING_LINE, SOLD_LAST_TIME, START_LABEL, buyBackLabel, dollars, potLine,
-  scoreToBeatLine, sellLabel, sellingAtTopLine,
+  FIRST_SALE_LINE, FOOTER_PLAY, MASTHEAD, OPENING_LINE, SOLD_LAST_TIME, START_LABEL, boughtStamp, buyBackLabel, dollars, potLine,
+  scoreToBeatLine, sellLabel, sellingAtTopLine, soldStamp,
 } from '../content/copy';
 import type { RunData, RunResult, Trade } from '../engine/types';
 import type { Step } from '../game/schedule';
@@ -19,7 +19,7 @@ export {
   STATUS_DEFAULT, STATUS_SLOW, STATUS_CASH, STATUS_FORWARD, STATUS_PAUSED, MYSTERY_LABEL, PAUSE, RESUME, SOUND_ON, SOUND_OFF, IN_CASH, LEVEL, dayLabel, yearLabel, youHadLine, regretMadeLine, regretCostLine, upLabel, downLabel, placeholderHeadline, placeholderStandfirst, chartLabel, soldAnnouncement, boughtAnnouncement,
 } from '../content/copy';
 import {
-  STATUS_DEFAULT, STATUS_SLOW, STATUS_CASH, STATUS_FORWARD, STATUS_PAUSED, PAUSE, RESUME, SOUND_ON, SOUND_OFF, IN_CASH, LEVEL, dayLabel, yearLabel, youHadLine, regretMadeLine, regretCostLine, upLabel, downLabel, placeholderHeadline, placeholderStandfirst, chartLabel, soldAnnouncement, boughtAnnouncement,
+  STATUS_CASH, STATUS_FORWARD, STATUS_PAUSED, PAUSE, RESUME, SOUND_ON, SOUND_OFF, IN_CASH, LEVEL, dayLabel, yearLabel, youHadLine, upLabel, downLabel, placeholderHeadline, placeholderStandfirst, chartLabel,
 } from '../content/copy';
 
 /** How long the opening line stays up, and the first-sale line after a first sale (clock time). */
@@ -36,6 +36,24 @@ const SEEN_FIRST_SALE = 'seenFirstSale';
 const HEADLINE_STEPS = [1, 0.82, 0.68, 0.6, 0.52];
 const MAX_HEADLINE_LINES = 3;
 const MIN_CHART = 120;
+/** R40: the pot is hidden on the play screen; the code stays for when it comes back. */
+const SHOW_POT = false;
+/** R41: the day clock holds this long on each press, and the stamp is gone by the end of it. */
+export const PRESS_HOLD_MS = 500;
+/** R49: the last day (the final balance, as the result will print it) stays on screen this long before the result. */
+export const END_HOLD_MS = 1200;
+/** R39: the folio's status slot stays empty on ordinary and slow days (no "Price: your nerve", no "Time slowed"). */
+const QUIET_STATUS = '';
+
+/**
+ * R38: what buying back today saves against the most recent sale, in whole dollars:
+ * round(cash x (1 - today's close / the close on the day of that sale)). Positive is cheaper.
+ */
+export function buyBackSaving(cash: number, todayClose: number, saleClose: number): number {
+  if (!(saleClose > 0) || !Number.isFinite(todayClose) || !Number.isFinite(cash)) return 0;
+  const n = Math.round(cash * (1 - todayClose / saleClose));
+  return n === 0 ? 0 : n;
+}
 
 export interface ScreenModel {
   runLabel: string;
@@ -53,6 +71,8 @@ export interface ScreenModel {
   /** "up $340", "down $3,588", "level" or "in cash". */
   deltaLabel: string;
   buttonLabel: string;
+  /** R38: in cash and buying back today is cheaper than the latest sale (the button turns green and pulses). */
+  cheaper: boolean;
   /** A buy-back label: set at 20px (ruling R26); sell labels stay 24px. */
   longLabel: boolean;
   underButton: string;
@@ -117,11 +137,9 @@ export function screenModel(s: PlayState): ScreenModel {
     ? STATUS_PAUSED
     : forward
       ? STATUS_FORWARD
-      : v.slow
-        ? STATUS_SLOW
-        : inCash
-          ? STATUS_CASH
-          : STATUS_DEFAULT;
+      : inCash
+        ? STATUS_CASH
+        : QUIET_STATUS;
 
   const day = forward
     ? yearLabel(yearsSince(run.dates[0], run.dates[d]) + 1)
@@ -152,25 +170,18 @@ export function screenModel(s: PlayState): ScreenModel {
     else if (!worst && v.peakBalance - v.balance >= TOP_GAP) underButton = sellingAtTopLine(v.peakBalance - v.balance);
   }
 
-  // Regret while in cash: what the cash would have made (or lost) on today's move alone, had it
-  // stayed in. Today only, even when a quiet step covers several days; none in the fast-forward.
+  // R38: one number while in cash, the one on the button. No regret line, no score to beat.
   const lastSell = [...s.trades].reverse().find((t) => t.side === 'sell');
   let regret: ScreenModel['regret'] = null;
-  if (inCash && !forward && d >= 1 && lastSell && lastSell.dayIndex < d) {
-    const amount = v.balance * (closes[d] / closes[d - 1] - 1);
-    if (Math.round(Math.abs(amount)) >= 1) {
-      regret = amount > 0 ? { text: regretMadeLine(amount), rose: true } : { text: regretCostLine(amount), rose: false };
-    }
-  }
-
-  if (!regret && s.scoreToBeat != null) regret = { text: scoreToBeatLine(s.scoreToBeat), rose: false };
+  if (!inCash && s.scoreToBeat != null) regret = { text: scoreToBeatLine(s.scoreToBeat), rose: false };
+  const saving = inCash && lastSell ? buyBackSaving(v.balance, closes[d], closes[lastSell.dayIndex]) : 0;
 
   const delta = v.balance - start;
   const roundedDelta = Math.round(delta);
   const deltaLabel = inCash ? IN_CASH : roundedDelta > 0 ? upLabel(delta) : roundedDelta < 0 ? downLabel(delta) : LEVEL;
 
   const lossFrac = Math.max(0, (start - v.balance) / start);
-  const buttonLabel = v.invested ? sellLabel(v.balance) : buyBackLabel(v.leadNow);
+  const buttonLabel = v.invested ? sellLabel(v.balance) : buyBackLabel(saving);
 
   return {
     runLabel: s.runLabel,
@@ -185,6 +196,7 @@ export function screenModel(s: PlayState): ScreenModel {
     delta,
     deltaLabel,
     buttonLabel,
+    cheaper: inCash && saving > 0,
     // Ruling R26: every buy-back label is 20px, so the size only changes on a trade.
     longLabel: !v.invested,
     underButton,
@@ -192,7 +204,7 @@ export function screenModel(s: PlayState): ScreenModel {
     paper: paperFor({ lossFrac, inCash, worstDay: worst }),
     chart: chartModel(s, worst, inCash),
     paused: s.paused,
-    pot: potLine(s.pot),
+    pot: SHOW_POT ? potLine(s.pot) : '',
   };
 }
 
@@ -251,6 +263,10 @@ export interface Screen {
    */
   setGate(g: { lines: string[]; extra?: string | null; note?: string | null } | null): void;
   setSound(on: boolean): void;
+  /** R41: a short stamp over the paper for `ms` ("Sold at $9,750"); `win` styles a cheaper buy-back as a win. */
+  stamp(text: string, win: boolean, ms: number): void;
+  /** The run is over: the button no longer takes presses (the last day stays on screen). */
+  freeze(): void;
   /** Disconnects the resize watcher and clears the page colours on <html>. */
   destroy(): void;
 }
@@ -267,6 +283,38 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: st
   if (cls) e.className = cls;
   if (text !== undefined) e.textContent = text;
   return e;
+}
+
+/**
+ * Round 2 play-screen styles (lane C). index.html is lead-only, so the screen brings these itself,
+ * once, after the page's own sheet so they win on equal specificity.
+ * - .act.cheaper: R38's green buy-back (white on #1d6b3a is 6.5:1; a slow, gentle pulse, none with reduced motion).
+ * - .stamp: R41's press stamp over the chart, out of the flow (no layout jump).
+ * - .pot: R40 hides the pot.
+ * - R48: the folio, the line under the button and the footer at 14px.
+ */
+const STYLE_ID = 'play-r2-c';
+const STYLE = `
+.chart{position:relative}
+.stamp{position:absolute;left:0;right:0;top:50%;margin:-24px 0 0;padding:0 24px;text-align:center;pointer-events:none;
+  font-family:var(--sans);font-weight:700;font-size:28px;line-height:48px;letter-spacing:-0.01em;font-variant-numeric:tabular-nums;color:var(--ink)}
+.stamp>span{display:inline-block;padding:0 12px;background:var(--bg);border-top:2px solid currentColor;border-bottom:2px solid currentColor}
+.stamp.win{color:#1d6b3a}
+.is-worst .stamp.win{color:var(--ink)}
+.stamp[hidden]{display:none}
+.act.cheaper{background:#1d6b3a;color:#ffffff;animation:dps-pulse 1600ms var(--ease) infinite}
+@keyframes dps-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.025)}}
+@media (prefers-reduced-motion:reduce){.act.cheaper{animation:none}}
+.pot:empty{display:none}
+.folio,.foot{font-size:14px}
+.under{font-size:14px;line-height:18px;height:36px}
+`;
+function ensureStyle(): void {
+  if (typeof document === 'undefined' || document.getElementById(STYLE_ID)) return;
+  const el = document.createElement('style');
+  el.id = STYLE_ID;
+  el.textContent = STYLE;
+  document.head.append(el);
 }
 
 function reducedMotion(): boolean {
@@ -296,7 +344,12 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   const intro = h('div', 'intro');
   const chartWrap = h('div', 'chart');
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  chartWrap.append(svg);
+  // R41: the press stamp sits over the chart, out of the flow, so nothing moves when it shows.
+  const stampEl = h('p', 'stamp');
+  stampEl.hidden = true;
+  stampEl.setAttribute('aria-hidden', 'true');
+  chartWrap.append(svg, stampEl);
+  ensureStyle();
   const figures = h('div', 'figures');
   const balance = h('div', 'balance');
   const delta = h('div', 'delta');
@@ -338,6 +391,8 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
   sound.addEventListener('click', () => handlers.onSoundToggle?.());
 
   let last: ScreenModel | null = null;
+  let frozen = false;
+  let stampTimer: ReturnType<typeof setTimeout> | undefined;
   let paintFrame = 0;
   let snapFrame = 0;
   let observer: ResizeObserver | null = null;
@@ -457,7 +512,8 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       actRoll.set(fig);
       actPost.textContent = post;
       act.classList.toggle('long', m.longLabel);
-      act.setAttribute('aria-disabled', String(m.paused));
+      act.classList.toggle('cheaper', m.cheaper);
+      act.setAttribute('aria-disabled', String(m.paused || frozen));
       under.textContent = m.underButton;
       pot.textContent = m.pot;
       pause.textContent = m.paused ? RESUME : PAUSE;
@@ -485,7 +541,35 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       sound.textContent = on ? SOUND_ON : SOUND_OFF;
       sound.setAttribute('aria-pressed', String(on));
     },
+    stamp(text, win, ms) {
+      clearTimeout(stampTimer);
+      stampEl.getAnimations?.().forEach((a) => a.cancel());
+      stampEl.replaceChildren(h('span', '', text));
+      stampEl.classList.toggle('win', win);
+      stampEl.hidden = false;
+      if (!reducedMotion() && typeof stampEl.animate === 'function') {
+        // In quickly, a small lift for a win, then fade out by the end of the hold.
+        const lift = win ? 'translateY(-6px)' : 'none';
+        stampEl.animate(
+          [
+            { opacity: 0, transform: 'translateY(6px)' },
+            { opacity: 1, transform: lift, offset: 0.24 },
+            { opacity: 1, transform: lift, offset: 0.7 },
+            { opacity: 0, transform: lift },
+          ],
+          { duration: ms, easing: EASE, fill: 'forwards' },
+        );
+      }
+      stampTimer = setTimeout(() => {
+        stampEl.hidden = true;
+      }, ms);
+    },
+    freeze() {
+      frozen = true;
+      act.setAttribute('aria-disabled', 'true');
+    },
     destroy() {
+      clearTimeout(stampTimer);
       observer?.disconnect();
       observer = null;
       cancelRaf(paintFrame);
@@ -527,7 +611,7 @@ export interface PlayOpts {
   soundOn?: boolean;
   onSoundToggle?(): boolean;
   /** After every render: whether it is a new step, the trade just made, and the step's hold (for sound and vibration). */
-  onFrame?(v: SessionView, m: ScreenModel, e: { newStep: boolean; trade: Trade['side'] | null; holdMs: number }): void;
+  onFrame?(v: SessionView, m: ScreenModel, e: { newStep: boolean; trade: Trade['side'] | null; win: boolean; holdMs: number }): void;
   /** The clock paused (Pause button or the page hidden): stop sound here. */
   onPause?(): void;
   onResume?(): void;
@@ -601,10 +685,16 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
   screen.setSound(soundOn);
 
   let ended = false;
+  let endTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * R49: the last day stays on screen (its balance is the result's final) for END_HOLD_MS before the
+   * result, so the last live number the player reads is the number the result prints.
+   */
   const end = (r: RunResult) => {
     if (ended) return;
     ended = true;
-    opts.onEnd(r);
+    screen.freeze();
+    endTimer = setTimeout(() => opts.onEnd(r), END_HOLD_MS);
   };
 
   function draw(raw: SessionView) {
@@ -614,9 +704,17 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
     rendered = v;
     history.set(v.dayIndex, { balance: v.balance, invested: v.invested });
     let traded: Trade['side'] | null = null;
+    let stamp: { text: string; win: boolean } | null = null;
     if (v.invested !== lastInvested) {
       const at = pendingStep !== null ? steps[pendingStep].dayIndex : v.dayIndex;
       const side: Trade['side'] = v.invested ? 'buy' : 'sell';
+      if (side === 'sell') stamp = { text: soldStamp(v.balance), win: false };
+      else {
+        const sale = [...trades].reverse().find((t) => t.side === 'sell');
+        // The cash bought the shares at this close: the balance now is that cash.
+        const saving = sale ? buyBackSaving(v.balance, run.closes[at], run.closes[sale.dayIndex]) : 0;
+        stamp = { text: boughtStamp(saving), win: saving > 0 };
+      }
       trades.push({ dayIndex: at, side });
       traded = side;
       lastInvested = v.invested;
@@ -624,7 +722,7 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
         firstSaleStep = v.stepIndex;
         save(SEEN_FIRST_SALE, true);
       }
-      announce(side === 'sell' ? soldAnnouncement(v.balance) : boughtAnnouncement(v.balance));
+      announce(stamp.text);
     }
     pendingStep = null;
     if (opts.narrate && v.stepIndex !== wordsStep) {
@@ -638,10 +736,15 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       soldLastTime: opts.soldLastTime, scoreToBeat: opts.scoreToBeat, other: opts.other, opening: opts.opening,
     });
     screen.render(m);
+    if (stamp) {
+      screen.stamp(stamp.text, stamp.win, PRESS_HOLD_MS);
+      // C1: the day clock holds on each press (lane A's session; absent, the stamp still shows).
+      (session as Session & { holdFor?(ms: number): void }).holdFor?.(PRESS_HOLD_MS);
+    }
     const newStep = v.stepIndex !== lastFrameStep;
     lastFrameStep = v.stepIndex;
     try {
-      opts.onFrame?.(v, m, { newStep, trade: traded, holdMs: steps[v.stepIndex]?.holdMs ?? 0 });
+      opts.onFrame?.(v, m, { newStep, trade: traded, win: !!stamp?.win, holdMs: steps[v.stepIndex]?.holdMs ?? 0 });
     } catch {
       /* sound and vibration are optional */
     }
@@ -687,7 +790,7 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
     // Nothing has happened yet: calm paper and the default status even when day 1 is a slow or red day,
     // no "level" beside the balance, and (CSS) no chart band.
     screen.render({
-      ...m, status: STATUS_DEFAULT, big: false, worst: false, paper: paperFor({ lossFrac: 0, inCash: false, worstDay: false }),
+      ...m, status: QUIET_STATUS, big: false, worst: false, paper: paperFor({ lossFrac: 0, inCash: false, worstDay: false }),
       chart: { ...m.chart, worst: false }, deltaLabel: '',
       buttonLabel: START_LABEL, longLabel: false, regret: null, underButton: FOOTER_PLAY,
     });
@@ -696,6 +799,8 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
   return {
     ...session,
     teardown() {
+      clearTimeout(endTimer);
+      ended = true;
       session.destroy();
       screen.destroy();
     },
