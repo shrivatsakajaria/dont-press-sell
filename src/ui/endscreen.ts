@@ -338,6 +338,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     secret.push(e);
     return e;
   };
+  let doubleBlock: HTMLElement | null = null;
   const table = h('div', 'es-table');
   const row = (label: string, value: number, cls = '', key?: 'solid' | 'dash') => {
     const r = h('div', 'es-row ' + cls);
@@ -376,7 +377,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     const d = model.double;
     const block = h('section', 'es-double');
     block.appendChild(h('h2', '', DOUBLE_OR_NOTHING));
-    block.appendChild(hideUntilReveal(h('p', 'es-stake', doubleStakeLine(d.net, d.final))));
+    block.appendChild(h('p', 'es-stake', doubleStakeLine(d.net, d.final)));
     const lad = ladder(d.wins);
     block.appendChild(h('p', 'es-ladder-label', WINS_IN_A_ROW));
     const ul = h('ul', 'es-ladder');
@@ -396,7 +397,9 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     pair.appendChild(button('es-dbl', DOUBLE_OR_NOTHING, actions.onDouble));
     pair.appendChild(button('es-out', bankLabel(d.net), actions.onBank));
     block.appendChild(pair);
-    page.appendChild(block);
+    // The whole block (a win, its size, "Bank $N") waits for the reveal in its own space, then slides in.
+    page.appendChild(hideUntilReveal(block));
+    doubleBlock = block;
   }
 
   const pair = h('div', 'es-pair');
@@ -421,13 +424,14 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   if (model.holderNote) page.appendChild(h('p', 'es-note', HOLDER_NOTE));
   if (model.nearMisses.length) {
     const ul = h('ul', 'es-misses');
-    for (const m of model.nearMisses) ul.appendChild(h('li', '', m));
+    // A near miss with a figure in it ("perfect timing made $N") gives the score away: it waits too.
+    for (const m of model.nearMisses) ul.appendChild(m.includes('$') ? hideUntilReveal(h('li', '', m)) : h('li', '', m));
     page.appendChild(ul);
   }
 
   page.appendChild(h('div', 'es-grow'));
 
-  page.appendChild(h('p', 'es-pot', potResultLine(model.pot.pot, model.pot.tonight)));
+  page.appendChild(hideUntilReveal(h('p', 'es-pot', potResultLine(model.pot.pot, model.pot.tonight))));
 
   const links = h('div', 'es-foot');
   const foot = h('div', 'es-foot');
@@ -542,6 +546,12 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     printNews();
     score.hidden = false;
     for (const e of secret) e.style.visibility = '';
+    // Visibility keeps the space, so the block slides in over its own place; nothing below it moves.
+    if (doubleBlock && animate && !reducedMotion() && typeof doubleBlock.animate === 'function') {
+      doubleBlock.animate([{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], {
+        duration: 320, easing: EASE,
+      });
+    }
     // The score pushes the buttons down: for a moment a tap meant for where a button was does nothing.
     if (animate) {
       page.setAttribute('data-settling', '');

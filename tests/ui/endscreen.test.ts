@@ -284,11 +284,30 @@ describe('the front page', () => {
     mount(m);
     const money = Array.from(root.querySelectorAll('.es-row span:last-child')) as HTMLElement[];
     expect(money.length).toBe(3);
-    const stake = root.querySelector('.es-stake') as HTMLElement;
+    const stake = root.querySelector('.es-stake')!.closest('.es-double') as HTMLElement; // held with its block
     for (const e of [...money, stake]) expect(e.style.visibility).toBe('hidden');
     expect(money[0].textContent).toMatch(/^\$[\d,]+$/); // the text is there, so nothing moves at the reveal
     revealButton()!.click();
     for (const e of [...money, stake]) expect(e.style.visibility).toBe('');
+  });
+
+  test('before the reveal the double block (with "Bank $N"), the pot line and money near misses keep their space, hidden', () => {
+    const m = winningSample();
+    m.nearMisses = [...m.nearMisses, 'One trade from perfect: perfect timing made $15,160'];
+    m.actions = { ...m.actions, onDouble: () => {}, onBank: () => {} };
+    mount(m);
+    const block = root.querySelector('.es-double') as HTMLElement;
+    const pot = root.querySelector('.es-pot') as HTMLElement;
+    const money = Array.from(root.querySelectorAll('.es-misses li')).filter((li) => li.textContent!.includes('$')) as HTMLElement[];
+    expect(money.length).toBeGreaterThan(0);
+    expect(block.querySelector('.es-out')!.textContent).toMatch(/^Bank \$/);
+    const held = [block, pot, ...money];
+    for (const e of held) expect(e.style.visibility).toBe('hidden');
+    // Plain near misses (no figure) show at once.
+    const plain = Array.from(root.querySelectorAll('.es-misses li')).filter((li) => !li.textContent!.includes('$')) as HTMLElement[];
+    for (const e of plain) expect(e.style.visibility).toBe('');
+    revealButton()!.click();
+    for (const e of held) expect(e.style.visibility).toBe('');
   });
 
   test('the count-up never shows "$0" for a frame', () => {
