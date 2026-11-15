@@ -73,10 +73,12 @@ export function nearMisses(result: RunResult, run: RunData): string[] {
     }
   }
   if (bestDay > 0 && !investedAt(result, bestDay - 1) && !investedAt(result, bestDay)) {
-    out.push('In cash for the best day of the run');
+    out.push(`In cash on day ${bestDay + 1}, the best day of the run`);
   }
   if (worstDay > 0 && investedAt(result, worstDay - 1) && investedAt(result, worstDay)) {
-    out.push('Held through the worst day of the run');
+    // R49: named by its play-screen number, so the player can check it against what they saw (a headline
+    // calling an earlier day "the worst in a generation" is not the run's worst close-to-close day).
+    out.push(`Held through day ${worstDay + 1}, the worst day of the run`);
   }
 
   // Calendar time out of the market, from the dates: each sale to its buy-back, or to the last day (R28).

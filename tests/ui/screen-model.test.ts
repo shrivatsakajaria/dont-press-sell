@@ -51,14 +51,16 @@ describe('screenModel', () => {
     const m = screenModel(state(view(0)));
     expect(m.buttonLabel).toBe('Sell for $10,000');
     expect(m.standfirst).toBe(OPENING_LINE);
-    expect(m.status).toBe('Price: your nerve');
+    // R39: no "Price: your nerve".
+    expect(m.status).toBe('');
     expect(m.dayLabel).toBe('Day 1');
     expect(m.runLabel).toBe('Mystery crash');
     expect(m.headline).toBe('Headline for day 1');
     expect(m.underButton).toBe(FOOTER_PLAY);
     expect(m.regret).toBeNull();
     expect(m.paper).toEqual(paperFor({ lossFrac: 0, inCash: false, worstDay: false }));
-    expect(m.pot).toBe('Your pot: $10,000');
+    // R40: the pot is hidden on the play screen.
+    expect(m.pot).toBe('');
     expect(m.deltaLabel).toBe('level');
   });
 
@@ -83,11 +85,11 @@ describe('screenModel', () => {
     expect(screenModel(state(view(4), { steps: slow })).standfirst).not.toBe(OPENING_LINE);
   });
 
-  it('a slow falling day is the worst day: red paper, time slowed, you had $N yesterday', () => {
+  it('a slow falling day is the worst day: red paper, you had $N yesterday (no "Time slowed", R39)', () => {
     const m = screenModel(state(view(4, { peakBalance: 10100 })));
     expect(m.worst).toBe(true);
     expect(m.big).toBe(true);
-    expect(m.status).toBe('Time slowed');
+    expect(m.status).toBe('');
     expect(m.paper.bg).toBe('#b3142a');
     expect(m.underButton).toBe('You had $10,000 yesterday');
     expect(m.deltaLabel).toBe('down $1,000');
@@ -97,7 +99,7 @@ describe('screenModel', () => {
     const m = screenModel(state(view(5)));
     expect(m.big).toBe(true);
     expect(m.worst).toBe(false);
-    expect(m.status).toBe('Time slowed');
+    expect(m.status).toBe('');
   });
 
   it('selling at the top line once the gap from the peak is 500 or more', () => {
@@ -112,19 +114,20 @@ describe('screenModel', () => {
     expect(m.paper).toEqual(paperFor({ lossFrac: 0.05, inCash: false, worstDay: false }));
   });
 
-  it('in cash: buy-back label from leadNow, grey paper, status, first-sale line, regret', () => {
+  it('in cash: buy-back label against the sale close, grey paper, status, first-sale line, no regret (R38)', () => {
     // Sold at the close of day 4 (balance 9,000); now day 5, market up 92/90.
     const v = view(5, { invested: false, balance: 9000, leadNow: 9000 - 9200, slow: false });
     const trades: Trade[] = [{ dayIndex: 4, side: 'sell' }];
     const s = state(v, { trades, firstSaleStep: 4 });
     s.history.set(4, { balance: 9000, invested: false });
     const m = screenModel(s);
-    expect(m.buttonLabel).toBe('Buy back now: $200 behind');
+    // 9,000 x (1 - 92 / 90) = -200
+    expect(m.buttonLabel).toBe('Buy back $200 dearer');
     expect(m.inCash).toBe(true);
     expect(m.status).toBe('You are in cash');
     expect(m.paper.bg).toBe('#ebe4d6');
     expect(m.standfirst).toBe(FIRST_SALE_LINE);
-    expect(m.regret).toEqual({ text: 'Holding today would have made you $200', rose: true });
+    expect(m.regret).toBeNull();
     expect(m.deltaLabel).toBe('in cash');
     // The dashed market line runs from the sale.
     const ghost = m.chart.points.filter((p) => p.ghost !== null);
@@ -132,12 +135,14 @@ describe('screenModel', () => {
     expect(ghost[1].ghost).toBeCloseTo(9200);
   });
 
-  it('regret on a falling day is the cost line, and none on the sale day itself', () => {
+  it('no regret line in cash on a falling day or on the sale day (R38: one number only)', () => {
     const v = view(2, { invested: false, balance: 10100 });
     const s = state(v, { trades: [{ dayIndex: 1, side: 'sell' }] });
-    expect(screenModel(s).regret).toEqual({ text: 'Holding today would have cost you $200', rose: false });
+    expect(screenModel(s).regret).toBeNull();
+    expect(screenModel(s).buttonLabel).toBe('Buy back $200 cheaper');
     const sameDay = state(view(1, { invested: false }), { trades: [{ dayIndex: 1, side: 'sell' }] });
     expect(screenModel(sameDay).regret).toBeNull();
+    expect(screenModel(sameDay).buttonLabel).toBe('Buy back at the same price');
   });
 
   it('first-sale line lasts about four seconds from the sale', () => {
@@ -149,18 +154,18 @@ describe('screenModel', () => {
   });
 
   it('every buy-back label is set at the long size and every sell label at full size (R26)', () => {
-    const v = view(5, { invested: false, balance: 9000, leadNow: -12345 });
+    const v = view(5, { invested: false, balance: 900000, leadNow: -12345 });
     const m = screenModel(state(v, { trades: [{ dayIndex: 4, side: 'sell' }] }));
-    expect(m.buttonLabel).toBe('Buy back now: $12,345 behind');
+    expect(m.buttonLabel).toBe('Buy back $20,000 dearer');
     expect(m.longLabel).toBe(true);
-    const short = screenModel(state(view(5, { invested: false, balance: 9000, leadNow: 0 }), { trades: [{ dayIndex: 4, side: 'sell' }] }));
-    expect(short.buttonLabel).toBe('Buy back now: $0 ahead');
+    const short = screenModel(state(view(5, { invested: false, balance: 9000, leadNow: 0 }), { trades: [{ dayIndex: 5, side: 'sell' }] }));
+    expect(short.buttonLabel).toBe('Buy back at the same price');
     expect(short.longLabel).toBe(true);
     expect(screenModel(state(view(0))).longLabel).toBe(false);
     expect(screenModel(state(view(0, { balance: 123456 }))).longLabel).toBe(false);
   });
 
-  it('regret uses today\'s move only, even when the step covers several days', () => {
+  it('the buy-back saving compares with the sale close, even when the step covers several days', () => {
     // One quiet step covers days 2 and 3; the previous step showed day 1.
     const grouped: Step[] = [
       { dayIndex: 0, holdMs: 300, phase: 'fall', slow: false },
@@ -172,8 +177,10 @@ describe('screenModel', () => {
       peakBalance: 10100, leadNow: 100, phase: 'fall', slow: false, stepMs: 300,
     };
     const s = state(v, { steps: grouped, trades: [{ dayIndex: 1, side: 'sell' }] });
-    // closes[3] / closes[2] = 100 / 99: today's move is up about 1%, so $102 (not the $100 cost since day 1).
-    expect(screenModel(s).regret).toEqual({ text: 'Holding today would have made you $102', rose: true });
+    // Sold at 101 (day 1), today 100: 10,100 x (1 - 100 / 101) = 100 cheaper; no regret line.
+    expect(screenModel(s).regret).toBeNull();
+    expect(screenModel(s).buttonLabel).toBe('Buy back $100 cheaper');
+    expect(screenModel(s).cheaper).toBe(true);
   });
 
   it('no regret line in the fast-forward', () => {
@@ -200,7 +207,7 @@ describe('screenModel', () => {
     expect(screenModel(state(view(6), { ...words, steps: slow })).standfirst).toBe('Down two days in a row.');
   });
 
-  it('a rematch: "This is the day you sold last time." on that day, and the score to beat under the balance', () => {
+  it('a rematch: "This is the day you sold last time." on that day, and the score to beat under the balance while invested', () => {
     const slow = steps.map((x) => ({ ...x, holdMs: 1000 }));
     const words = { commentary: 'Commentary.', soldLastTime: 5, scoreToBeat: 7150, other: [10000, 9000] };
     expect(screenModel(state(view(4), { ...words, steps: slow })).standfirst).toBe('Commentary.');

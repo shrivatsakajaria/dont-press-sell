@@ -12,8 +12,13 @@ export const MASTHEAD = "Don't Press Sell";
 export const OPENING_LINE = 'You have $10,000 of play money in the stock market. Hold your nerve or bail.';
 export const FIRST_SALE_LINE = 'You are out. To win, buy back in for less than you sold.';
 export const sellLabel = (n: number) => `Sell for ${dollars(n)}`;
-export const buyBackLabel = (lead: number) =>
-  lead >= 0 ? `Buy back now: ${dollars(lead)} ahead` : `Buy back now: ${dollars(lead)} behind`;
+// Round 2, lane C (R38, R41): the buy-back button names one number, the saving against the latest
+// sale's close (positive is cheaper, 0 is the same price); the press stamps.
+const cheaperWords = (n: number) =>
+  Math.round(n) === 0 ? 'at the same price' : `${dollars(n)} ${n > 0 ? 'cheaper' : 'dearer'}`;
+export const buyBackLabel = (saving: number) => `Buy back ${cheaperWords(saving)}`;
+export const soldStamp = (n: number) => `Sold at ${dollars(n)}`;
+export const boughtStamp = (saving: number) => `Bought back ${cheaperWords(saving)}`;
 export const TAP_TO_REVEAL = 'Tap to see what that was';
 export const nextMysteryLine = (n: number) => `Next mystery crash in ${n}. Tap to stop.`;
 export const WINS_IN_A_ROW = 'Wins in a row';
