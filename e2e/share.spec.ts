@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { pressStart } from './start';
 
 test('with sharing unavailable, Challenge a friend shows the card full screen with the fallback, crash name hidden', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -8,6 +9,7 @@ test('with sharing unavailable, Challenge a friend shows the card full screen wi
   });
   await page.clock.install();
   await page.goto('/?run=s2018');
+  await pressStart(page);
   await page.clock.runFor(119_000); // R27: s2018 runs about 118 s
   await expect(page.getByText('Late edition')).toBeVisible();
   // Before the reveal: the name is covered.

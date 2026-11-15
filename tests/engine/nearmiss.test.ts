@@ -99,10 +99,20 @@ describe('nearMisses', () => {
     expect(nearMisses(res([sell(1), buy(2)]), runData())).toContain('Held through the worst day of the run');
   });
 
-  it('N days in cash, singular and plural, absent at zero', () => {
-    expect(nearMisses(res([sell(5), buy(8)], { daysInCash: 62 }), runData())).toContain('62 days in cash');
-    expect(nearMisses(res([sell(5), buy(6)], { daysInCash: 1 }), runData())).toContain('1 day in cash');
-    expect(joined(res([sell(5), buy(6)], { daysInCash: 0 }), runData())).not.toContain('in cash');
+  it('time out of the market in plain words, from the dates', () => {
+    // runData dates: 2000-02-01 onwards, one calendar day per index.
+    expect(nearMisses(res([sell(5), buy(8)], { daysInCash: 3 }), runData())).toContain('Out of the market for three days');
+    expect(nearMisses(res([sell(5), buy(6)], { daysInCash: 1 }), runData())).toContain('Out of the market for one day');
+    expect(nearMisses(res([sell(1), buy(10)], { daysInCash: 9 }), runData())).toContain('Out of the market for one week and two days');
+    // Two spells add up.
+    expect(nearMisses(res([sell(1), buy(4), sell(10), buy(14)], { daysInCash: 7 }), runData())).toContain(
+      'Out of the market for one week',
+    );
+    // Never bought back: to the last day of the run (index 21).
+    expect(nearMisses(res([sell(7)], { daysInCash: 15 }), runData())).toContain('Out of the market for two weeks');
+    expect(joined(res([sell(5), buy(6)], { daysInCash: 0 }), runData())).not.toContain('Out of the market');
+    expect(joined(res([]), runData())).not.toContain('Out of the market');
+    expect(joined(res([sell(5), buy(8)], { daysInCash: 3 }), runData())).not.toContain('in cash');
   });
 
   it('One trade from perfect: exactly one sale and one buy, and behind perfect', () => {
@@ -119,7 +129,7 @@ describe('nearMisses', () => {
     expect(out).toEqual([
       'Sold 2 days before the bottom',
       'Bought back 2 days after the bottom',
-      '4 days in cash',
+      'Out of the market for four days',
       'One trade from perfect: perfect timing made $17,900',
     ]);
   });

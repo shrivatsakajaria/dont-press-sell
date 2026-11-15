@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pressStart } from './start';
 
 const OPENING = 'You have $10,000 of play money in the stock market. Hold your nerve or bail.';
 const S2018 = 9; // index in RUN_IDS
@@ -21,6 +22,7 @@ test('a challenge link plays that run blind with the score to beat, and the resu
   const errors = watchErrors(page);
   await page.clock.install();
   await page.goto(`/#c=${code(S2018, 11341, [10, 30])}`);
+  await pressStart(page);
   await expect(page.locator('.folio')).toContainText('Mystery crash');
   await expect(page.locator('.regret')).toHaveText('Score to beat: $11,341');
   await expect(page.locator('.standfirst')).toHaveText(OPENING);
@@ -45,6 +47,7 @@ for (const [name, hash] of [
   test(`a broken link (${name}) starts a fresh mystery with no error`, async ({ page }) => {
     const errors = watchErrors(page);
     await page.goto(`/${hash}`);
+    await pressStart(page);
     await expect(page.locator('.standfirst')).toHaveText(OPENING);
     await expect(page.locator('.regret')).not.toContainText('Score to beat');
     await expect(page.locator('body')).not.toContainText(/error|invalid/i);

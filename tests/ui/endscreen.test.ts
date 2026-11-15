@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { announce } from '../../src/ui/a11y';
 import { keep } from '../../src/ui/endchart';
-import { mountEndScreen, type EndModel } from '../../src/ui/endscreen';
+import { holderNoteDue, mountEndScreen, type EndModel } from '../../src/ui/endscreen';
 import { c2007Sample, losingSample, winningSample } from '../fixtures/sample-result';
 
 vi.mock('../../src/ui/a11y', () => ({ announce: vi.fn(), initAnnouncer: vi.fn() }));
@@ -394,3 +394,52 @@ describe('the front page', () => {
   });
 });
 
+
+describe('plain words (R28)', () => {
+  const NOTE = 'Someone who did nothing kept all their money in the market the whole time.';
+
+  test('the holder note prints under the table when asked, and not otherwise', () => {
+    mount({ ...c2007Sample(), holderNote: true });
+    const note = Array.from(root.querySelectorAll('p')).find((p) => p.textContent === NOTE);
+    expect(note).toBeTruthy();
+    expect(note!.previousElementSibling?.classList.contains('es-table')).toBe(true);
+    handle!.destroy();
+    mount(c2007Sample());
+    expect(root.textContent).not.toContain(NOTE);
+  });
+
+  test('the holder note is due the first time only, and every time when storage fails', () => {
+    localStorage.clear();
+    expect(holderNoteDue()).toBe(true);
+    expect(holderNoteDue()).toBe(false);
+    const blocked = () => {
+      throw new Error('blocked');
+    };
+    vi.stubGlobal('localStorage', { getItem: blocked, setItem: blocked, removeItem: blocked });
+    try {
+      expect(holderNoteDue()).toBe(true);
+      expect(holderNoteDue()).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('result page order (R28)', () => {
+  test('score first, then the buttons, then the table, its note and the near misses; the countdown under the score', () => {
+    const m = { ...c2007Sample(), holderNote: true, flags: { showCountdown: true, blind: false } };
+    mount(m);
+    vi.advanceTimersByTime(2000);
+    const order = Array.from(root.querySelector('main.es')!.children).map((e) => e.className.split(' ')[0]);
+    const at = (c: string) => order.indexOf(c);
+    expect(at('es-lead')).toBeGreaterThan(at('es-h1'));
+    expect(at('es-count')).toBe(at('es-perfect') + 1);
+    // The main actions: the double block when offered, else the button pair.
+    const actions = at('es-double') >= 0 ? at('es-double') : at('es-pair');
+    expect(actions).toBeGreaterThan(at('es-count'));
+    expect(at('es-table')).toBeGreaterThan(at('es-link'));
+    expect(at('es-note')).toBe(at('es-table') + 1);
+    expect(at('es-misses')).toBeGreaterThan(at('es-note'));
+    expect(at('es-pot')).toBeGreaterThan(at('es-misses'));
+  });
+});

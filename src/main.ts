@@ -1,7 +1,7 @@
 // Boot and flow (spec 6): straight into a mystery run, then the result front page, from which
 // every other mode starts. Rules live in the modules; this file only joins them.
 import {
-  BORROWED_LABEL, BORROWED_OPENING, BUST_HEADLINE, ISLAND_HEADLINE, REMATCH_LABEL, dailyLabel,
+  BORROWED_LABEL, BORROWED_OPENING, BUST_HEADLINE, ISLAND_HEADLINE, REMATCH_LABEL, dailyLabel, scoreToBeatLine, START_LINES,
 } from './content/copy';
 import { loadHeadlines } from './content/headlines';
 import { RUNS, RUN_IDS, loadRun, runMeta } from './content/runs';
@@ -28,7 +28,7 @@ import { decodeChallenge, type Challenge } from './share/link';
 import { challengeLink, resultCard } from './share/result';
 import { copyText, shareResult } from './share/share';
 import { cell, save } from './store/store';
-import { mountEndScreen, type EndModel } from './ui/endscreen';
+import { holderNoteDue, mountEndScreen, type EndModel } from './ui/endscreen';
 import { mountCollection, mountPickCrash } from './ui/menus';
 import { paperFor } from './ui/paper';
 import { MYSTERY_LABEL, startPlay, type Play } from './ui/screen';
@@ -119,7 +119,11 @@ async function load(runId: string): Promise<{ run: RunFile; headlines: Headline[
 /** Pot shown on the play footer: a running double-or-nothing streak counts its wins so far. */
 const potNow = () => getPot().pot + currentStreak().net;
 
-async function play(game: Game, opts: { double?: boolean } = {}) {
+/**
+ * opts.gate: the start screen (R28). Only the first game of a fresh page load gets it; rematch, double
+ * or nothing, the countdown's next game and a challenge link opened again in the visit start at once.
+ */
+async function play(game: Game, opts: { double?: boolean; gate?: boolean } = {}) {
   const mine = ++ticket;
   // Starting anything but the double banks a win that was waiting for a choice (spec 6.8).
   if (!opts.double) bankPending();
@@ -142,6 +146,13 @@ async function play(game: Game, opts: { double?: boolean } = {}) {
     borrowed,
     simulateFn: borrowed ? simulateBorrowed : undefined,
     opening: borrowed ? BORROWED_OPENING : undefined,
+    gate: opts.gate
+      ? {
+        lines: START_LINES,
+        extra: borrowed ? BORROWED_OPENING : null,
+        note: game.challenge ? scoreToBeatLine(game.challenge.final) : null,
+      }
+      : undefined,
     start: game.start,
     pot: potNow(),
     narrate: (d, prevDay, balance, trades) => narrator.step(d, prevDay, balance, trades),
@@ -201,6 +212,7 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
     headlineOverride: s.bust ? BUST_HEADLINE : s.island ? ISLAND_HEADLINE : undefined,
     blackBorder: s.island,
     extraLines: days ? [days] : undefined,
+    holderNote: holderNoteDue(),
     sound: { on: soundOn() },
     sfx,
     vibration: { on: vibrationCell.get() !== false },
@@ -283,7 +295,7 @@ function bankNow() {
   });
 }
 
-function newMystery(start = START, opts: { double?: boolean } = {}) {
+function newMystery(start = START, opts: { double?: boolean; gate?: boolean } = {}) {
   const recent = Array.isArray(recentCell.get()) ? recentCell.get() : [];
   const runId = pickMystery(Math.random, recent);
   recentCell.set([runId, ...recent].slice(0, RECENT_KEEP));
@@ -353,18 +365,32 @@ function collection() {
  */
 async function challenge(code: string) {
   history.replaceState(null, '', location.pathname + location.search);
+  const gate = !challengeSeen(code);
   const c = decodeChallenge(code);
   if (c) {
     try {
       const run = await loadRun(c.runId);
       if (challengeFits(c, run.closes.length)) {
-        return play({ mode: 'challenge', runId: c.runId, label: MYSTERY_LABEL, start: START, real: false, challenge: c });
+        return play({ mode: 'challenge', runId: c.runId, label: MYSTERY_LABEL, start: START, real: false, challenge: c }, { gate });
       }
     } catch {
       /* fall through to a mystery */
     }
   }
-  return newMystery();
+  return newMystery(START, { gate });
+}
+
+/** Whether this challenge link was already opened in this visit (and remember it now). Unknown counts as new. */
+function challengeSeen(code: string): boolean {
+  try {
+    const key = 'dps:challenges';
+    const seen: string[] = JSON.parse(sessionStorage.getItem(key) ?? '[]');
+    if (seen.includes(code)) return true;
+    sessionStorage.setItem(key, JSON.stringify([...seen, code].slice(-20)));
+  } catch {
+    /* no session storage: show the start screen */
+  }
+  return false;
 }
 
 function boot() {
@@ -372,8 +398,8 @@ function boot() {
   if (hash) return challenge(hash[1]);
   // ?run=<id> opens that run as a mystery (testing and screenshots).
   const asked = new URLSearchParams(location.search).get('run') ?? '';
-  if (RUN_IDS.includes(asked)) return play(mysteryGame(asked, START, borrowedOn()));
-  return newMystery();
+  if (RUN_IDS.includes(asked)) return play(mysteryGame(asked, START, borrowedOn()), { gate: true });
+  return newMystery(START, { gate: true });
 }
 
 void boot();
