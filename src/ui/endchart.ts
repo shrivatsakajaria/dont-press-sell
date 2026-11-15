@@ -32,6 +32,11 @@ export interface EndChartInput {
   closes?: number[];
 }
 
+/** The drawing height that gives the price line `line` px of height (R58: the room above and below is for the words). */
+export function endChartHeight(line: number): number {
+  return Math.round(line) + TOP + BOTTOM;
+}
+
 /** Least vertical range, as a share of day 1's close, either side of it. */
 const MIN_RANGE = 0.02;
 
@@ -237,6 +242,11 @@ export function endChart(input: EndChartInput): SVGSVGElement {
       spots.push({ x: cx, y: cy + dy, anchor: 'middle' }, { x: cx - 4, y: cy + dy, anchor: 'end' }, { x: cx + 4, y: cy + dy, anchor: 'start' });
     }
     for (const dy of [4, -4, 12]) spots.push({ x: cx - 10, y: cy + dy, anchor: 'end' }, { x: cx + 10, y: cy + dy, anchor: 'start' });
+    // Taller charts have steeper lines: a little further out, still beside its own dot.
+    for (const dy of [-32, 42, -42, 52]) {
+      spots.push({ x: cx, y: cy + dy, anchor: 'middle' }, { x: cx - 4, y: cy + dy, anchor: 'end' }, { x: cx + 4, y: cy + dy, anchor: 'start' });
+    }
+    for (const dy of [-12, 20, -20]) spots.push({ x: cx - 12, y: cy + dy, anchor: 'end' }, { x: cx + 12, y: cy + dy, anchor: 'start' });
     const boxAt = (sp: (typeof spots)[number]): Box => {
       const x0 = sp.anchor === 'end' ? sp.x - w : sp.anchor === 'middle' ? sp.x - w / 2 : sp.x;
       return { x0, x1: x0 + w, y0: sp.y - 13, y1: sp.y + 3 };

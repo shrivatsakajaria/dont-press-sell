@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { simulate } from '../../src/engine/simulate';
 import type { Trade } from '../../src/engine/types';
-import { CHART_W, endChart, marketInCash, priceFromPlay } from '../../src/ui/endchart';
+import { CHART_W, endChart, endChartHeight, marketInCash, priceFromPlay } from '../../src/ui/endchart';
 import { c2007, c2020 } from '../fixtures/sample-result';
 
 const pts = (d: string): [number, number][] =>
@@ -119,7 +119,7 @@ describe('result chart labels and range', () => {
     }
   }
   for (const [name, closes, trades] of cases) {
-    for (const height of [104, 76, 68, 52]) {
+    for (const height of [300, 200, 140, 104, 100, 76, 68, 52]) {
       it(`${name} (${height}px): "Sold" and "Bought" cross no line and stay inside`, () => {
         const other = closes.map((c) => (10000 * c) / closes[0] * 0.97);
         const { svg } = draw(closes, trades, other, height);
@@ -142,6 +142,30 @@ describe('result chart labels and range', () => {
       });
     }
   }
+
+  // R58 (lane FD gives the result chart at least 100 px of line): from 100 px up it names its dots.
+  it('from 100 px up, "Sold" and "Bought" find a clear spot nearly every time', () => {
+    for (const height of [100, 140, 200, 300]) {
+      let want = 0;
+      let got = 0;
+      for (const [, closes, trades] of cases) {
+        const { svg } = draw(closes, trades, undefined, height);
+        want += trades.length;
+        got += svg.querySelectorAll('text').length;
+      }
+      expect(got / want, `${height}px`).toBeGreaterThanOrEqual(0.97);
+    }
+  });
+
+  it('endChartHeight gives a drawing height whose line has the asked-for room', () => {
+    for (const line of [100, 140]) {
+      const height = endChartHeight(line);
+      const { svg } = draw([100, 80, 60, 90, 120], [], undefined, height);
+      const ys = pts(svg.querySelector('[data-line="price"]')!.getAttribute('d')!).map((p) => p[1]);
+      expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThanOrEqual(line - 0.5);
+      expect(svg.getAttribute('viewBox')).toBe(`0 0 ${CHART_W} ${height}`);
+    }
+  });
 
   it('tiny moves never fill the height: the range spans 2% either side of the start', () => {
     const closes = [100, 100.5, 101, 100.8, 101.3];

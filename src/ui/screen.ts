@@ -10,7 +10,7 @@ import type { Step } from '../game/schedule';
 import { createSession, type Session, type SessionView, type SimulateFn } from '../game/session';
 import { load, save } from '../store/store';
 import { announce, initAnnouncer } from './a11y';
-import { drawChart, type ChartModel } from './chart';
+import { drawChart, extendChart, type ChartModel } from './chart';
 import { createRoll } from './digits';
 import { paperFor, type Paper } from './paper';
 
@@ -252,6 +252,8 @@ export interface Screen {
   setSound(on: boolean): void;
   /** R41: a short stamp over the paper for `ms` ("Sold at $9,750"); `win` styles a cheaper buy-back as a win. */
   stamp(text: string, win: boolean, ms: number): void;
+  /** K2: the day clock was held `ms` longer (a press): the chart's running growth stretches over it. */
+  holdChart(ms: number): void;
   /** The run is over: the button no longer takes presses (the last day stays on screen). */
   freeze(): void;
   /** Disconnects the resize watcher and clears the page colours on <html>. */
@@ -452,7 +454,8 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
     const { w, h: hgt } = chartBox!;
     const px = `${hgt}px`;
     if (svg.style.height !== px) svg.style.height = px;
-    drawChart(svg, m.chart, m.paper, w, hgt, { animateMs: reducedMotion() ? 0 : m.chart.growMs ?? 0 });
+    // K2/R57: the new day grows across the whole step; Pause holds it where it is.
+    drawChart(svg, m.chart, m.paper, w, hgt, { animateMs: reducedMotion() ? 0 : m.chart.growMs ?? 0, paused: m.paused });
   }
 
   // Redraw the chart when the column changes size (rotation, browser bars, the headline's size).
@@ -583,6 +586,9 @@ export function mountScreen(root: HTMLElement, handlers: ScreenHandlers = {}): S
       stampTimer = setTimeout(() => {
         stampEl.hidden = true;
       }, ms);
+    },
+    holdChart(ms) {
+      extendChart(svg, ms);
     },
     freeze() {
       frozen = true;
@@ -762,6 +768,7 @@ export function startPlay(root: HTMLElement, run: RunData, steps: Step[], opts: 
       screen.stamp(stamp.text, stamp.win, PRESS_HOLD_MS);
       // C1: the day clock holds on each press (lane A's session; absent, the stamp still shows).
       (session as Session & { holdFor?(ms: number): void }).holdFor?.(PRESS_HOLD_MS);
+      screen.holdChart(PRESS_HOLD_MS); // K2: the chart's growth stretches over the same hold
     }
     const newStep = v.stepIndex !== lastFrameStep;
     lastFrameStep = v.stepIndex;

@@ -4,8 +4,8 @@
 // the latest sale close ("Sold at"), so a price under it reads as cheaper at a glance. No money
 // anywhere: money is only the big number. No grid, no axis, no price scale, no dates.
 //
-// R43 (smoothness): the chart is built once per <svg> and updated in place. A new day's segment grows
-// over the step (animateMs), the scale easing along with it, so the line moves rather than jumps.
+// R43/R57 (smoothness): the chart is built once per <svg> and updated in place. A new day's segment grows
+// at an even pace over the whole step (animateMs), so the line never stops while the clock runs.
 import type { Trade } from '../engine/types';
 import type { Paper } from './paper';
 import { BOUGHT, SOLD, SOLD_AT } from '../content/copy';
@@ -41,8 +41,13 @@ export interface ChartGeometry {
 }
 
 export interface DrawOpts {
-  /** Grow the new day's segment over this long (the step's length); 0 or absent draws at once. */
+  /**
+   * K2: how long today's step is on screen. The new day's segment grows at an even pace across all of
+   * it (R57); a redraw of the same day with a longer step (a hold) stretches the growth. 0 or absent draws at once.
+   */
   animateMs?: number;
+  /** The clock is paused: the growth holds where it is, and carries on when a draw comes without it. */
+  paused?: boolean;
 }
 
 /** The fewest days the x-axis ever spans, so day 2 does not fill the width. */
@@ -55,10 +60,6 @@ const PAD_BOTTOM = 24;
 const PAD_RIGHT = 8;
 /** Least vertical range, as a share of day 1's close, either side of it. */
 export const MIN_RANGE = 0.02;
-/** The longest a new day takes to draw: a slow day's line arrives well inside its hold. */
-const MAX_ANIM_MS = 900;
-/** Shorter steps than this run back to back, so their segments move at an even pace (no ease). */
-const LINEAR_BELOW_MS = 400;
 
 /** Worst-day fill beneath the cream line (mock-up 2). */
 const WORST_FILL = '#96102a';
@@ -113,7 +114,8 @@ export function chartGeometry(m: ChartModel, w: number, h: number, at?: number):
   let days: number[];
   if (n <= maxPts) days = Array.from({ length: n }, (_, i) => i);
   else {
-    const stride = Math.ceil(n / maxPts);
+    // A power of two, so the days kept change only when the stride doubles (the line does not shimmer).
+    const stride = 2 ** Math.ceil(Math.log2(n / maxPts));
     const keep = new Set<number>([loI, hiI, full]);
     for (const tr of m.trades) if (tr.dayIndex <= full) keep.add(tr.dayIndex);
     days = [];
@@ -155,18 +157,32 @@ function set(e: Element, attrs: Record<string, string | number>) {
 }
 
 // --- The chart on one <svg>, kept between days -------------------------------
+//
+// R57: the layout is worked out once per day (and on a press, a pause or a resize): the whole line to
+// the last whole day in pixels, at today's scale, with the dots, the levels and the words. Each frame in
+// between only grows the tip, and moves the scale with it through one transform on the plot (the span
+// widens and a new low or high stretches the range as the tip gets there; at the end of the step the
+// transform is gone). Today's dot, the trade dots and the words follow by their x and y, so they never
+// stretch. The tip grows at an even pace across the whole step.
 
 interface Els {
+  /** The line, the tip, the fill and the levels; carries the scale's motion as one transform. */
+  plot: SVGElement;
   fill: SVGElement;
+  /** Clips the worst-day fill to the tip, so it grows with the line. */
+  clip: SVGElement;
   start: SVGElement;
   level: SVGElement;
   line: SVGElement;
-  /** The part of today's segment drawn so far (mid-growth), in data units like the line. */
+  /** The part of the line grown since the last whole day drawn, to the tip. */
   tip: SVGElement;
   today: SVGElement;
   marks: SVGElement;
   labels: SVGElement;
 }
+
+/** From data (day, close) to the chart: x = sx * day, y = sy * close + ty. */
+type MapXY = ChartGeometry['map'];
 
 interface State {
   els: Els;
@@ -180,15 +196,31 @@ interface State {
   target: number;
   t0: number;
   dur: number;
-  /** Bumped on every draw, so a stale animation frame stops. */
-  token: number;
-  /** Each label's last spot, tried first so words do not hop between frames. */
+  /** The step's length the growth was given (animateMs plus any extendChart), to spot a hold in a redraw. */
+  stepMs: number;
+  /** When the clock paused (null while running). */
+  pausedAt: number | null;
+  /** A frame is booked. */
+  ticking: boolean;
+  /** The scale the layout is drawn in (today's, with the line to today). */
+  map: MapXY;
+  /** The last whole day in the drawn line: the tip runs from it. */
+  base: number;
+  /** Lowest and highest close from day 1 to each day of this step (index d - base), with the floor of the range. */
+  lows: number[];
+  highs: number[];
+  /** Dots and words in today's scale, moved with the scale each frame. */
+  marks: { x: number; y: number }[];
+  words: { x: number; y: number }[];
+  /** Each label's last spot, tried first so words do not hop between days. */
   spots: Map<string, number>;
-  /** What the line's points were last written from, so they are rewritten only when a day is added. */
-  lineKey: string;
 }
 
+/** The growth ends this long after the step, so a day that arrives a frame late never finds the line still. */
+const TRAIL_MS = 34;
+
 const states = new WeakMap<Element, State>();
+let clipIds = 0;
 
 function reducedMotion(): boolean {
   try {
@@ -201,17 +233,32 @@ function reducedMotion(): boolean {
 const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 function build(svg: SVGSVGElement | SVGElement): Els {
+  const id = `dps-grow-${++clipIds}`;
+  const clip = el('rect', { x: -40, y: -10000, width: 0, height: 20000 });
+  const clipPath = el('clipPath', { id });
+  clipPath.append(clip);
+  const defs = el('defs', {});
+  defs.append(clipPath);
+  // The strokes keep their width while the scale moves.
+  const keepWidth = { 'vector-effect': 'non-scaling-stroke' };
   const els: Els = {
-    fill: el('polygon', { fill: WORST_FILL, display: 'none' }),
-    start: el('line', { 'stroke-width': 1, 'stroke-dasharray': '1 4' }),
-    level: el('line', { 'data-level': '', 'stroke-width': 1.5, 'stroke-dasharray': '2 4', 'stroke-linecap': 'round', display: 'none' }),
-    line: el('polyline', { fill: 'none', 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' }),
-    tip: el('line', { 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' }),
+    plot: el('g', { 'data-plot': '' }),
+    fill: el('polygon', { fill: WORST_FILL, display: 'none', 'clip-path': `url(#${id})` }),
+    clip,
+    start: el('line', { 'stroke-width': 1, 'stroke-dasharray': '1 4', ...keepWidth }),
+    level: el('line', { 'data-level': '', 'stroke-width': 1.5, 'stroke-dasharray': '2 4', 'stroke-linecap': 'round', display: 'none', ...keepWidth }),
+    line: el('polyline', { fill: 'none', 'stroke-linejoin': 'round', 'stroke-linecap': 'round', ...keepWidth }),
+    tip: el('path', { 'data-tip': '', fill: 'none', 'stroke-linejoin': 'round', 'stroke-linecap': 'round', ...keepWidth }),
     today: el('circle', {}),
     marks: el('g', {}),
     labels: el('g', {}),
   };
-  svg.replaceChildren(els.fill, els.start, els.level, els.line, els.tip, els.today, els.marks, els.labels);
+  els.plot.append(els.fill, els.start, els.level, els.line, els.tip);
+  // Today's dot first: the trade dots sit above it, so a trade made today stays visible.
+  svg.replaceChildren(defs, els.plot, els.today, els.marks, els.labels);
+  // Its own layer: the growing tip repaints the chart, not the page around it.
+  const st = (svg as SVGElement).style;
+  if (st) st.willChange = 'transform';
   return els;
 }
 
@@ -219,63 +266,137 @@ export function drawChart(
   svg: SVGSVGElement | SVGElement, m: ChartModel, paper: Paper, w: number, h: number, opts: DrawOpts = {},
 ): void {
   set(svg, { viewBox: `0 0 ${w} ${h}`, role: 'img', 'aria-label': m.label });
+  if (!m.closes.length) m = { ...m, closes: [1] };
   let s = states.get(svg);
-  if (!s || s.els.line.parentNode !== svg) {
+  const fresh = !s || s.els.plot.parentNode !== svg;
+  if (!s || fresh) {
     s = {
-      els: build(svg), m, paper, w, h, at: 0, from: 0, target: 0, t0: 0, dur: 0, token: 0, spots: new Map(), lineKey: '',
+      els: build(svg), m, paper, w, h, at: 0, from: 0, target: 0, t0: 0, dur: 0, stepMs: 0, pausedAt: null, ticking: false,
+      map: { sx: 1, sy: 1, ty: 0 }, base: 0, lows: [], highs: [], marks: [], words: [], spots: new Map(),
     };
     states.set(svg, s);
   }
+  const now = nowMs();
   const target = Math.max(0, m.closes.length - 1);
-  const shown = s.at;
-  if (shown < s.target && target === s.target) {
-    // The same day redrawn mid-growth (a press, a pause, a resize): the running growth carries on.
-    s.m = m;
-    s.paper = paper;
-    s.w = w;
-    s.h = h;
-    paint(s);
-    return;
-  }
-  const animate = (opts.animateMs ?? 0) > 0 && !reducedMotion() && s.m.closes.length > 0 && target > shown &&
-    typeof requestAnimationFrame === 'function';
+  const ms = opts.animateMs ?? 0;
   s.m = m;
   s.paper = paper;
   s.w = w;
   s.h = h;
-  const token = ++s.token;
-  if (!animate) {
-    s.at = target;
-    s.target = target;
-    paint(s);
+  const pauseNow = !!opts.paused;
+
+  if (!fresh && target === s.target) {
+    // The same day redrawn (a press, a pause, a resize): the running growth carries on, stretched if
+    // the step grew (a hold), frozen while paused.
+    if (pauseNow && s.pausedAt === null) s.pausedAt = now;
+    if (!pauseNow && s.pausedAt !== null) {
+      s.t0 += now - s.pausedAt;
+      s.pausedAt = null;
+    }
+    if (ms > s.stepMs) {
+      if (s.at < s.target) stretch(s, ms - s.stepMs, now);
+      s.stepMs = ms;
+    }
+    layout(s);
+    frame(s, s.pausedAt ?? now);
+    loop(s);
     return;
   }
-  s.from = shown;
+
+  const animate = !fresh && ms > 0 && !reducedMotion() && target > s.at && typeof requestAnimationFrame === 'function';
+  s.pausedAt = null;
+  if (!animate) {
+    s.at = target;
+    s.from = target;
+    s.target = target;
+    s.stepMs = 0;
+    s.dur = 0;
+    layout(s);
+    frame(s, now);
+    return;
+  }
+  s.from = s.at;
   s.target = target;
-  s.t0 = nowMs();
-  s.dur = Math.min(opts.animateMs!, MAX_ANIM_MS);
-  paint(s);
-  const st = s;
-  const tick = () => {
-    if (st.token !== token) return;
-    const p = Math.min(1, (nowMs() - st.t0) / st.dur);
-    const e = st.dur < LINEAR_BELOW_MS ? p : 1 - (1 - p) ** 3;
-    st.at = p >= 1 ? st.target : st.from + (st.target - st.from) * e;
-    paint(st);
-    if (p < 1) requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+  s.t0 = now;
+  s.dur = ms + TRAIL_MS;
+  s.stepMs = ms;
+  if (pauseNow) s.pausedAt = now;
+  layout(s);
+  frame(s, now);
+  loop(s);
 }
 
-/** Draws the chart with the line up to s.at, updating the kept elements in place. */
-function paint(s: State) {
-  const { m, paper, w, h, els } = s;
-  const g = chartGeometry(m, w, h, s.at);
-  const ink = paper.ink;
+/**
+ * K2: the step on screen was held `ms` longer (a press): the running growth stretches over it, from
+ * where the tip is now, so the hold reads as slow motion rather than a stop.
+ */
+export function extendChart(svg: SVGSVGElement | SVGElement, ms: number): void {
+  const s = states.get(svg);
+  if (!s || !(ms > 0)) return;
+  if (s.at < s.target) stretch(s, ms, nowMs());
+  s.stepMs += ms;
+}
 
-  if (m.worst) {
-    set(els.fill, { display: 'inline', points: fmt([...g.line, [g.today[0], h], [g.line[0][0], h]]) });
-  } else set(els.fill, { display: 'none' });
+/** K2, the name lane FC's press handler calls: the same as extendChart. */
+export function extend(svg: SVGSVGElement | SVGElement, ms: number): void {
+  extendChart(svg, ms);
+}
+
+function stretch(s: State, ms: number, now: number) {
+  const ref = s.pausedAt ?? now;
+  const end = s.t0 + s.dur;
+  s.from = s.at;
+  s.t0 = ref;
+  s.dur = Math.max(1, end - ref) + ms;
+}
+
+function loop(s: State) {
+  if (s.ticking || s.pausedAt !== null || s.at >= s.target || typeof requestAnimationFrame !== 'function') return;
+  s.ticking = true;
+  requestAnimationFrame(() => {
+    s.ticking = false;
+    if (s.pausedAt !== null) return;
+    frame(s, nowMs());
+    loop(s);
+  });
+}
+
+/** Once per day (and on a press, a pause or a resize): the line to the last whole day, dots, levels, words. */
+function layout(s: State) {
+  const { m, paper, w, h, els } = s;
+  const g = chartGeometry(m, w, h, s.target);
+  s.map = g.map;
+  const ink = paper.ink;
+  const closes = m.closes;
+  const full = Math.floor(s.at + 1e-9);
+  const { sx, sy, ty } = g.map;
+  const px = (d: number) => `${(sx * d).toFixed(1)},${(sy * closes[d] + ty).toFixed(1)}`;
+  let k = g.days.length;
+  while (k > 1 && g.days[k - 1] > full) k--;
+  s.base = g.days[k - 1] ?? 0;
+  const width = m.worst ? 3 : 2.5;
+  set(els.line, { points: g.days.slice(0, k).map(px).join(' '), stroke: ink, 'stroke-width': width });
+  set(els.tip, { stroke: ink, 'stroke-width': width });
+
+  // The range from day 1 to each day of this step, so a frame finds its scale without a loop over the run.
+  const b = closes[0] ?? 1;
+  let lo = Math.min(b * (1 - MIN_RANGE), m.soldAt ?? Infinity);
+  let hi = Math.max(b * (1 + MIN_RANGE), m.soldAt ?? -Infinity);
+  for (let d = 0; d <= s.base; d++) {
+    lo = Math.min(lo, closes[d]);
+    hi = Math.max(hi, closes[d]);
+  }
+  s.lows = [];
+  s.highs = [];
+  for (let d = s.base; d <= s.target; d++) {
+    lo = Math.min(lo, closes[d]);
+    hi = Math.max(hi, closes[d]);
+    s.lows.push(lo);
+    s.highs.push(hi);
+  }
+
+  if (m.worst) set(els.fill, { display: 'inline', points: fmt([...g.line, [g.today[0], h], [g.line[0][0], h]]) });
+  else set(els.fill, { display: 'none' });
   set(els.start, { x1: 0, y1: g.startY.toFixed(1), x2: w, y2: g.startY.toFixed(1), stroke: ink });
   if (g.soldAt) {
     set(els.level, {
@@ -283,24 +404,9 @@ function paint(s: State) {
       stroke: paper.secondary,
     });
   } else set(els.level, { display: 'none' });
-  // R43: the line is written in data units (day, close) once per new day; each frame of growth only
-  // moves the tip and the transform that maps data to the chart.
-  const days = g.days;
-  const key = `${m.closes.length}|${days.length}|${days[days.length - 1]}|${days[1] ?? 0}|${m.closes[0]}`;
-  if (key !== s.lineKey) {
-    s.lineKey = key;
-    els.line.setAttribute('points', days.map((d) => `${d},${m.closes[d]}`).join(' '));
-  }
-  const { sx, sy, ty } = g.map;
-  const transform = `matrix(${sx} 0 0 ${sy} 0 ${ty})`;
-  const width = m.worst ? 3 : 2.5;
-  set(els.line, { transform, stroke: ink, 'stroke-width': width });
-  if (g.tip) {
-    set(els.tip, { display: 'inline', transform, stroke: ink, 'stroke-width': width, x1: g.tip[0], y1: g.tip[1], x2: g.tip[2], y2: g.tip[3] });
-  } else set(els.tip, { display: 'none' });
-  set(els.today, { cx: g.today[0].toFixed(1), cy: g.today[1].toFixed(1), r: m.worst ? 8 : 6, fill: ink });
+  set(els.today, { r: m.worst ? 8 : 6, fill: ink });
 
-  // Sale and buy dots sit above today's dot, so a trade made today stays visible.
+  // A trade made today shows at once, at today's close, and the line grows into it.
   const kids = els.marks.children;
   while (kids.length > g.marks.length) kids[kids.length - 1].remove();
   g.marks.forEach((mk, i) => {
@@ -309,12 +415,56 @@ function paint(s: State) {
       c = el('circle', {});
       els.marks.append(c);
     }
-    const at = { cx: mk.x.toFixed(1), cy: mk.y.toFixed(1) };
-    if (mk.side === 'sell') set(c, { ...at, r: 6, fill: paper.accent, stroke: 'none', 'stroke-width': 0 });
-    else set(c, { ...at, r: 5, fill: paper.bg, stroke: ink, 'stroke-width': 2 });
+    if (mk.side === 'sell') set(c, { r: 6, fill: paper.accent, stroke: 'none', 'stroke-width': 0 });
+    else set(c, { r: 5, fill: paper.bg, stroke: ink, 'stroke-width': 2 });
   });
+  s.marks = g.marks.map((mk) => ({ x: mk.x, y: mk.y }));
+  s.words = placeLabels(s, g);
+}
 
-  placeLabels(s, g);
+/** One frame: the tip at the time `now`, the scale it brings, and the dots and words moved with it. */
+function frame(s: State, now: number) {
+  const { m, els, w, h } = s;
+  const p = s.dur > 0 ? Math.max(0, Math.min(1, (now - s.t0) / s.dur)) : 1;
+  s.at = p >= 1 ? s.target : s.from + (s.target - s.from) * p;
+  const { sx, sy, ty } = s.map;
+  const closes = m.closes;
+  const full = Math.min(s.target, Math.floor(s.at + 1e-9));
+  const frac = s.at - full;
+  const tipV = frac > 1e-6 && full + 1 < closes.length ? closes[full] + (closes[full + 1] - closes[full]) * frac : closes[full];
+  let d = `M${(sx * s.base).toFixed(1)} ${(sy * closes[s.base] + ty).toFixed(1)}`;
+  for (let i = s.base + 1; i <= full; i++) d += `L${(sx * i).toFixed(1)} ${(sy * closes[i] + ty).toFixed(1)}`;
+  const tx = sx * s.at;
+  const tyv = sy * tipV + ty;
+  if (frac > 1e-6) d += `L${tx.toFixed(2)} ${tyv.toFixed(2)}`;
+  set(els.tip, { d: full > s.base || frac > 1e-6 ? d : '' });
+  if (m.worst) set(els.clip, { width: (tx + 40).toFixed(1) });
+
+  // The scale on screen is the one the line has to the tip (as chartGeometry would draw it at s.at):
+  // in the layout's scale, a transform that is gone once the tip reaches today.
+  const k = Math.max(0, Math.min(s.lows.length - 1, full - s.base));
+  const lo = Math.min(s.lows[k] ?? tipV, tipV);
+  const hi = Math.max(s.highs[k] ?? tipV, tipV);
+  const usableW = w - PAD_RIGHT;
+  const innerH = h - PAD_TOP - PAD_BOTTOM;
+  const curSx = usableW / Math.max(MIN_SPAN_DAYS, s.at / TODAY_AT);
+  const curSy = -innerH / (hi - lo);
+  const curTy = PAD_TOP + (hi * innerH) / (hi - lo);
+  const kx = curSx / sx;
+  const ky = curSy / sy;
+  const f = curTy - ky * ty;
+  const still = Math.abs(kx - 1) < 1e-5 && Math.abs(ky - 1) < 1e-5 && Math.abs(f) < 0.01;
+  if (still) {
+    if (els.plot.hasAttribute('transform')) els.plot.removeAttribute('transform');
+  } else set(els.plot, { transform: `matrix(${kx.toFixed(5)} 0 0 ${ky.toFixed(5)} 0 ${f.toFixed(2)})` });
+  const X = (x: number) => (still ? x : kx * x).toFixed(1);
+  const Y = (y: number) => (still ? y : ky * y + f).toFixed(1);
+
+  set(els.today, { cx: X(tx), cy: Y(tyv) });
+  const dots = els.marks.children;
+  s.marks.forEach((mk, i) => dots[i] && set(dots[i], { cx: X(mk.x), cy: Y(mk.y) }));
+  const texts = els.labels.children;
+  s.words.forEach((wd, i) => texts[i] && set(texts[i], { x: X(wd.x), y: Y(wd.y) }));
 }
 
 // --- Labels -------------------------------------------------------------------
@@ -328,6 +478,11 @@ const CHAR_W = 8.4;
 const INSET = 12;
 /** Space kept between two labels. */
 const GAP = 4;
+/** The press stamp's band about the chart's middle (44px line, 2px rules, margin -22px; 2px spare). */
+const STAMP_UP = 24;
+const STAMP_DOWN = 28;
+/** "Sold at" moved off the stamp's band stays at most this far from its level. */
+const NEAR_LEVEL = 40;
 
 function boxOf(s: Spot, text: string): Box {
   const wd = text.length * CHAR_W;
@@ -401,7 +556,7 @@ function lineY(pl: [number, number][], x: number): number | null {
  * chart (12px from its sides), clear of the other words, the dots, every line and, on a red day, the
  * fill under the line. A word with no such spot is left out. Order: "Sold at", "Sold", "Bought".
  */
-function placeLabels(s: State, g: ChartGeometry): void {
+function placeLabels(s: State, g: ChartGeometry): { x: number; y: number }[] {
   const { m, paper, w, h, els } = s;
   const lines: [number, number][][] = [g.line, [[0, g.startY], [w, g.startY]]];
   if (g.soldAt) lines.push([[g.soldAt.x0, g.soldAt.y], [w, g.soldAt.y]]);
@@ -419,14 +574,25 @@ function placeLabels(s: State, g: ChartGeometry): void {
   };
   const placed: { text: string; spot: Spot; fill: string; weight: number }[] = [];
 
+  // The press stamp (screen.ts .stamp) sits across the middle of the chart: words keep out of that band
+  // when they can, so "Sold at" never pokes out from behind "Sold at $9,750".
+  const band = { y0: h / 2 - STAMP_UP, y1: h / 2 + STAMP_DOWN };
+  const clearOfStamp = (b: Box) => b.y1 <= band.y0 || b.y0 >= band.y1;
+
   function place(key: string, text: string, spots: Spot[], fill: string, weight: number) {
+    let strict = true;
     const ok = (sp: Spot) => {
       const b = boxOf(sp, text);
-      return inside(b) && !taken.some((t) => overlaps(t, b, GAP)) && !dots.some((d) => overlaps(d, b)) &&
-        !lines.some((pl) => crossesLine(b, pl)) && !inFill(b);
+      return inside(b) && (!strict || clearOfStamp(b)) && !taken.some((t) => overlaps(t, b, GAP)) &&
+        !dots.some((d) => overlaps(d, b)) && !lines.some((pl) => crossesLine(b, pl)) && !inFill(b);
     };
     const prev = s.spots.get(key);
-    let i = prev !== undefined && prev < spots.length && ok(spots[prev]) ? prev : spots.findIndex(ok);
+    const pick = () => (prev !== undefined && prev < spots.length && ok(spots[prev]) ? prev : spots.findIndex(ok));
+    let i = pick();
+    if (i < 0) {
+      strict = false;
+      i = pick();
+    }
     if (i < 0) {
       s.spots.delete(key);
       return;
@@ -455,6 +621,12 @@ function placeLabels(s: State, g: ChartGeometry): void {
       spots.push({ x: right, y: ly - 7, anchor: 'end' }, { x: right, y: ly + 17, anchor: 'end' });
     }
     for (const dy of [4, -6, 14]) spots.push({ x: x0 - 10, y: ly + dy, anchor: 'end' });
+    // A level inside the stamp's band: the words step just above or below the band.
+    // Only spots that still read as the level's own words (box centre within NEAR_LEVEL of it).
+    const near = [band.y0 - 3, band.y1 + 13].filter((y) => Math.abs(y - 5 - ly) <= NEAR_LEVEL);
+    for (const y of near) {
+      for (let right = w - INSET; right - wd >= x0 + 8; right -= 12) spots.push({ x: right, y, anchor: 'end' });
+    }
     place('soldAt', SOLD_AT, spots, paper.secondary, 500);
     levelNamed = s.spots.has('soldAt');
   }
@@ -474,6 +646,7 @@ function placeLabels(s: State, g: ChartGeometry): void {
       els.labels.append(t);
     }
     if (t.textContent !== p.text) t.textContent = p.text;
-    set(t, { x: p.spot.x.toFixed(1), y: p.spot.y.toFixed(1), 'text-anchor': p.spot.anchor, fill: p.fill, 'font-weight': p.weight });
+    set(t, { 'text-anchor': p.spot.anchor, fill: p.fill, 'font-weight': p.weight });
   });
+  return placed.map((p) => ({ x: p.spot.x, y: p.spot.y }));
 }
