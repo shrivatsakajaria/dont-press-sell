@@ -37,3 +37,4 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - R25. With reduced motion, the tap-to-reveal cover stays; only the count-up and the wipe become instant.
 - R26. Buy-back labels are always 20px (the 24px label cannot hold 'Buy back now: $12,345 behind' in a phone-width button); 'Sell for $N' stays 24px, so the size changes only on a trade.
 - Checkpoint 3 (SK): headlines approved as shown; mystery-run guessability accepted.
+- Checkpoint 2 feedback (SK): (1) add a start card explaining the game, "OK, let's go", then the still front page with a "Start" button before the chart moves; (2) game far too fast, make it about 3 minutes so people can read headlines and decide. SK asked for a 10-person persona panel on the current game and on these changes before building. Panel running.
