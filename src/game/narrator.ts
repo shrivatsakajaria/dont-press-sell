@@ -7,7 +7,7 @@
 // the game) until the next real one. R37: the line under it changes only on a slow day, after a
 // trade, or once it has been up LINE_MIN_MS; it never repeats, and it is chosen for every day it
 // will be on screen (the prices and the schedule are known ahead) and never against the headline.
-import { BEFORE_NEWS } from '../content/copy';
+import { BEFORE_NEWS, FIRST_SALE_LINE, boughtLines, soldLastTimeLine, soldLines } from '../content/copy';
 import {
   lineCandidates,
   marketState,
@@ -20,6 +20,7 @@ import {
 } from '../content/commentary';
 import { dayHeadlines, realHeadlineDir, stillTrue, type DayHeadline } from '../content/dayheadlines';
 import type { Headline, RunData, Trade } from '../engine/types';
+import { load } from '../store/store';
 import { hashString, mulberry32 } from './rng';
 import { buildSchedule, stepHold, type Step } from './schedule';
 
@@ -66,12 +67,22 @@ export interface StepWords {
   commentary: string;
 }
 
+/** The store key set at this phone's first sale (the play screen writes it). */
+export const SEEN_FIRST_SALE = 'seenFirstSale';
+
 export interface Narrator {
   /**
    * The words for a new step showing `dayIndex`. Called once per step, in order. `prevDay` is the day
    * the step before showed (null on the first step), so news on days the step skipped still counts.
+   * Called again for the step already shown with a longer `trades` (a press), it acts as trade().
    */
   step(dayIndex: number, prevDay: number | null, balance: number, trades: Trade[]): StepWords;
+  /**
+   * K1, R52: the words at the moment of a press on the step showing `dayIndex`. `trades` includes the new
+   * trade; `balance` is the balance after it. The line under the headline changes at once to a true line
+   * about the trade and stays at least LINE_MIN_MS from the press, slow days included.
+   */
+  trade(dayIndex: number, trades: Trade[], balance: number): { headline: string; commentary: string };
 }
 
 interface HeadState {
@@ -86,7 +97,16 @@ interface HeadState {
 export function createNarrator(
   run: NarratorRun,
   headlines: Headline[],
-  opts: { real: boolean; rng: () => number; start: number; steps?: Step[] },
+  opts: {
+    real: boolean;
+    rng: () => number;
+    start: number;
+    steps?: Step[];
+    /** This phone has never sold before: its first sale shows FIRST_SALE_LINE. Default: read from the store. */
+    firstSale?: boolean;
+    /** Rematch: the day the player sold last time; its line goes up on or after that day (R51). */
+    soldLastTime?: number | null;
+  },
 ): Narrator {
   const sorted = headlines.slice().sort((a, b) => a.dayIndex - b.dayIndex);
   const high = run.high ?? run.closes[0];
@@ -186,61 +206,147 @@ export function createNarrator(
   let head: HeadState | null = null;
   let line = '';
   let lineShownMs = 0;
+  /** R52: the line was set at a press; it stays until it has been up LINE_MIN_MS, slow days included. */
+  let locked = false;
+  /** The line was set at a press on the step before: count only the press hold for it (the press may have come last). */
+  let fromPress = false;
   let lastIndex = -1;
   let lastHold = 0;
-  let lastTrades = 0;
+  let seenTrades = 0;
+  /** Press holds (TRADE_HOLD_MS each) on the step shown last. */
+  let pressMs = 0;
   let sombrePrev = false;
+  let firstSale = opts.firstSale ?? !load(SEEN_FIRST_SALE, false);
+  const soldDay = opts.soldLastTime ?? null;
+  let soldShown = soldDay === null;
 
-  return {
-    step(dayIndex, prevDay, balance, trades) {
-      let i = stepOfDay.get(dayIndex);
-      if (i === undefined || i <= lastIndex) {
-        // Not a step of the schedule (a caller without one): the next step on or after the day.
-        i = steps.findIndex((s, k) => k > lastIndex && s.dayIndex >= dayIndex);
-        if (i < 0) i = steps.length - 1;
+  const blank: LineCandidate = { text: '', key: '', dir: null, plain: true, must: false, event: false, fallback: false, w: 0, max: 0 };
+
+  function setLine(text: string, key: string) {
+    if (text === line) return;
+    line = text;
+    lineShownMs = 0;
+    if (text) {
+      usedLines.add(text);
+      usedKeys.set(key, (usedKeys.get(key) ?? 0) + 1);
+    }
+  }
+
+  /** The words for the trade just made (the last of `trades`); null when every wording is used. */
+  function tradeLine(trades: Trade[], balance: number): string | null {
+    const t = trades[trades.length - 1];
+    if (t.side === 'sell') {
+      if (firstSale) {
+        firstSale = false;
+        if (!usedLines.has(FIRST_SALE_LINE)) return FIRST_SALE_LINE;
       }
-      const holding = !trades.length || trades[trades.length - 1].side === 'buy';
+      return soldLines(balance).find((x) => !usedLines.has(x)) ?? null;
+    }
+    const sale = trades.slice(0, -1).reverse().find((x) => x.side === 'sell');
+    const saleClose = sale ? run.closes[sale.dayIndex] : run.closes[t.dayIndex];
+    // R38: the same number as the button and the stamp (the cash against the sale's close).
+    const saving = Math.round(balance * (1 - run.closes[t.dayIndex] / saleClose));
+    return boughtLines(saving).find((x) => !usedLines.has(x)) ?? null;
+  }
+
+  function onTrade(i: number, trades: Trade[], balance: number) {
+    const holding = trades[trades.length - 1].side === 'buy';
+    const text = tradeLine(trades, balance);
+    if (text !== null) setLine(text, 'trade');
+    else {
+      // Every trade wording is used: a line true for the rest of this step and LINE_MIN_MS after it, slow
+      // days included (the lock holds it through them).
       const holds = (j: number) => stepHold(steps[j], holding);
-      const traded = trades.length !== lastTrades;
-      const elapsed = lastIndex < 0 ? 0 : lastHold + TRADE_HOLD_MS * Math.max(0, trades.length - lastTrades);
-      lastTrades = trades.length;
+      const next = chooseLine(i, holds, holding, balance, trades, { minMs: holds(i) + LINE_MIN_MS, throughSlow: true });
+      setLine(next.text, next.key);
+    }
+    lineShownMs = 0;
+    locked = true;
+    fromPress = true;
+  }
 
-      // Headline.
-      if (head) head = { ...head, shownMs: head.shownMs + elapsed };
-      head = headlineStep(lastIndex < 0 ? null : head, i, holds, usedHeadlines, prevDay);
-      lineShownMs += elapsed;
+  function trade(dayIndex: number, trades: Trade[], balance: number): { headline: string; commentary: string } {
+    if (lastIndex < 0) {
+      const w = step(dayIndex, null, balance, trades);
+      return { headline: w.headline, commentary: w.commentary };
+    }
+    const fresh = trades.length - seenTrades;
+    if (fresh > 0) {
+      seenTrades = trades.length;
+      pressMs += TRADE_HOLD_MS * fresh;
+      onTrade(lastIndex, trades, balance);
+    }
+    return { headline: head ? head.text : BEFORE_NEWS, commentary: line };
+  }
 
-      // Line: a new one only on the first step, a slow day, after a trade, or after LINE_MIN_MS.
-      const change = lastIndex < 0 || steps[i].slow || traded || lineShownMs >= LINE_MIN_MS;
+  function step(dayIndex: number, prevDay: number | null, balance: number, trades: Trade[]): StepWords {
+    // The old wiring: the step already shown, called again after a press.
+    if (lastIndex >= 0 && trades.length > seenTrades && steps[lastIndex].dayIndex === dayIndex) {
+      const w = trade(dayIndex, trades, balance);
+      return { ...w, sombre: sombrePrev };
+    }
+    let i = stepOfDay.get(dayIndex);
+    if (i === undefined || i <= lastIndex) {
+      // Not a step of the schedule (a caller without one): the next step on or after the day.
+      i = steps.findIndex((s, k) => k > lastIndex && s.dayIndex >= dayIndex);
+      if (i < 0) i = steps.length - 1;
+    }
+    const holding = !trades.length || trades[trades.length - 1].side === 'buy';
+    const holds = (j: number) => stepHold(steps[j], holding);
+    // A trade this narrator was not told about at its press (it hears of it now).
+    const missed = trades.length > seenTrades;
+    if (missed) pressMs += TRADE_HOLD_MS * (trades.length - seenTrades);
+    seenTrades = trades.length;
+    const elapsed = lastIndex < 0 ? 0 : lastHold + pressMs;
+
+    // Headline.
+    if (head) head = { ...head, shownMs: head.shownMs + elapsed };
+    head = headlineStep(lastIndex < 0 ? null : head, i, holds, usedHeadlines, prevDay);
+    lineShownMs += fromPress ? pressMs : elapsed;
+    fromPress = false;
+    pressMs = 0;
+    if (locked && lineShownMs >= LINE_MIN_MS) locked = false;
+    const first = lastIndex < 0;
+    lastIndex = i;
+    lastHold = holds(i);
+
+    if (missed) onTrade(i, trades, balance);
+    else if (!locked) {
+      // Line: a new one only on the first step, a slow day, after LINE_MIN_MS, or to fill a blank (R37, R51).
+      const change = first || steps[i].slow || lineShownMs >= LINE_MIN_MS || line === '';
       if (change) {
-        const next = chooseLine(i, holds, holding, balance, trades);
-        if (next !== null) {
-          if (next.text !== line) {
-            line = next.text;
-            lineShownMs = 0;
-            if (next.text) {
-              usedLines.add(next.text);
-              usedKeys.set(next.key, (usedKeys.get(next.key) ?? 0) + 1);
-            }
-          }
+        // Rematch (R51): the day sold last time, as soon as the line may change on or after it (fall days only:
+        // the fast-forward shows years, not day numbers).
+        if (!soldShown && soldDay !== null && steps[i].dayIndex >= soldDay && steps[i].phase === 'fall') {
+          soldShown = true;
+          setLine(soldLastTimeLine(soldDay), 'sold-last-time');
+          lineShownMs = 0;
+        } else {
+          const next = chooseLine(i, holds, holding, balance, trades);
+          setLine(next.text, next.key);
+          // A kept line goes on counting; a new one starts from zero (setLine).
         }
       }
-      lastIndex = i;
-      lastHold = holds(i);
-      const sombre = sombreOn(i, prevDay) || sombrePrev;
-      sombrePrev = sombreOn(i, prevDay);
-      return { headline: head.text, sombre, commentary: line };
-    },
-  };
+    }
+    const sombre = sombreOn(i, prevDay) || sombrePrev;
+    sombrePrev = sombreOn(i, prevDay);
+    return { headline: head.text, sombre, commentary: line };
+  }
+
+  return { step, trade };
 
   /**
    * The line for the window from step i: until the next slow day or LINE_MIN_MS, whichever comes first.
-   * Keeps the current line when nothing new fits and it is still true; otherwise blank.
+   * A fresh line first (on a slow day, the day's own news first); else the current line while still true;
+   * else a fresh fallback (R51); blank only when nothing at all fits.
    */
-  function chooseLine(i: number, holds: (j: number) => number, holding: boolean, balance: number, trades: Trade[]): LineCandidate | null {
+  function chooseLine(
+    i: number, holds: (j: number) => number, holding: boolean, balance: number, trades: Trade[],
+    window: { minMs: number; throughSlow: boolean } = { minMs: LINE_MIN_MS, throughSlow: false },
+  ): LineCandidate {
     let end = i + 1;
     let t = holds(i);
-    while (end < steps.length && !steps[end].slow && t < LINE_MIN_MS) {
+    while (end < steps.length && (window.throughSlow || !steps[end].slow) && t < window.minMs) {
       t += holds(end);
       end++;
     }
@@ -265,13 +371,15 @@ export function createNarrator(
       (!sombre || c.plain) && !dirs.some((x) => x !== null && c.dir !== null && x !== c.dir);
     const all = lineCandidates(states, { exactMoney: states.length === 1 || !holding }).filter(fits);
     const fresh = all.filter((c) => !usedLines.has(c.text) && (usedKeys.get(c.key) ?? 0) < c.max);
+    const main = fresh.filter((c) => !c.fallback);
     // On a slow (big) day, the day's own news comes first.
-    const events = steps[i].slow ? fresh.filter((c) => c.event) : [];
+    const events = steps[i].slow ? main.filter((c) => c.event) : [];
     if (events.length) return pickLine(events, rng);
-    if (fresh.length) return pickLine(fresh, rng);
+    if (main.length) return pickLine(main, rng);
     const keep = all.find((c) => c.text === line);
     if (keep) return keep;
-    return { text: '', key: '', dir: null, plain: true, must: false, event: false, w: 0, max: 0 };
+    if (fresh.length) return pickLine(fresh, rng);
+    return blank;
   }
 }
 

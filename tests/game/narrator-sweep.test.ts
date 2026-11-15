@@ -28,7 +28,7 @@ function headlinesFor(run: RunData): Headline[] {
 }
 
 // ---------- The sweep ----------
-type Pattern = { name: string; at: (steps: Step[]) => number[] };
+type Pattern = { name: string; at: (steps: Step[]) => number[]; soldLastTime?: (steps: Step[]) => number };
 const slowIdx = (steps: Step[]) => steps.map((s, i) => (s.slow ? i : -1)).filter((i) => i >= 0);
 const PATTERNS: Pattern[] = [
   { name: 'never sells', at: () => [] },
@@ -36,8 +36,11 @@ const PATTERNS: Pattern[] = [
   { name: 'sells on the first slow day, buys on the third', at: (s) => slowIdx(s).filter((_, k) => k === 0 || k === 2) },
   { name: 'sells and never buys', at: (s) => [Math.min(5, s.length - 1)] },
   { name: 'several round trips', at: (s) => s.map((_, i) => i).filter((i) => i > 0 && i % 23 === 0) },
+  { name: 'sells just before each slow day', at: (s) => slowIdx(s).map((i) => i - 1).filter((i) => i > 0) },
+  { name: 'a rematch that sold on day 20 last time', at: (s) => [Math.min(40, s.length - 1)], soldLastTime: (s) => s[Math.min(20, s.length - 1)].dayIndex },
 ];
 
+/** One stretch of screen time: a step until its press (or its end), or the time from a press to the step's end. */
 interface Shown {
   step: number;
   day: number;
@@ -46,53 +49,70 @@ interface Shown {
   headline: string;
   commentary: string;
   sombre: boolean;
-  tradedBefore: boolean; // a trade happened on the step before this one
+  /** This stretch begins at a press (narrator.trade). */
+  press: boolean;
   held: boolean;
+  inNow: boolean;
   bal: number;
   neverSold: boolean;
+  buyVsSale: 'lower' | 'higher' | 'same' | null;
 }
 
-function play(run: RunFile, headlines: Headline[], real: boolean, trades0: number[]): { steps: Step[]; shown: Shown[] } {
+/**
+ * Plays the run through the narrator as the play screen does. A press comes at the very end of its step
+ * (the shortest real time from the press: only the 500 ms press hold before the next day), through trade().
+ */
+function play(run: RunFile, headlines: Headline[], real: boolean, trades0: number[], soldLastTime: number | null) {
   const steps = buildSchedule(run, headlines);
-  const n = createNarrator(run, headlines, { real, rng: mulberry32(7), start: 10_000, steps });
+  const n = createNarrator(run, headlines, { real, rng: mulberry32(7), start: 10_000, steps, firstSale: true, soldLastTime });
   const trades: Trade[] = [];
   const at = new Set(trades0);
   const shown: Shown[] = [];
   let t = 0;
-  let tradedBefore = false;
+  let buyVsSale: Shown['buyVsSale'] = null;
+  let saleCash = 0;
   for (let i = 0; i < steps.length; i++) {
     const d = steps[i].dayIndex;
     const invested = !trades.length || trades[trades.length - 1].side === 'buy';
     const bal = simulate(run.closes, trades, 10_000).balances[d];
     const w = n.step(d, i ? steps[i - 1].dayIndex : null, bal, trades);
-    const held = !trades.filter((x) => x.dayIndex < d).length || trades.filter((x) => x.dayIndex < d).slice(-1)[0].side === 'buy';
-    let ms = stepHold(steps[i], invested);
-    shown.push({
-      step: i, day: d, start: t, ms, headline: w.headline, commentary: w.commentary, sombre: w.sombre, tradedBefore,
-      held: held && d > 0, bal, neverSold: !trades.some((x) => x.side === 'sell'),
-    });
-    tradedBefore = false;
+    const prior = trades.filter((x) => x.dayIndex < d);
+    const held = (!prior.length || prior[prior.length - 1].side === 'buy') && d > 0;
+    const ms = stepHold(steps[i], invested);
+    const base = { step: i, day: d, held, bal, sombre: w.sombre, buyVsSale };
+    shown.push({ ...base, start: t, ms, headline: w.headline, commentary: w.commentary, press: false, inNow: invested, neverSold: !trades.some((x) => x.side === 'sell') });
+    t += ms;
     if (at.has(i)) {
       trades.push({ dayIndex: d, side: invested ? 'sell' : 'buy' });
-      ms += TRADE_HOLD_MS;
-      shown[shown.length - 1].ms = ms;
-      tradedBefore = true;
+      if (invested) saleCash = bal;
+      else {
+        const sale = trades[trades.length - 2];
+        const saving = Math.round(saleCash * (1 - run.closes[d] / run.closes[sale.dayIndex]));
+        buyVsSale = saving > 0 ? 'lower' : saving < 0 ? 'higher' : 'same';
+      }
+      const after = simulate(run.closes, trades, 10_000).balances[d];
+      const p = n.trade(d, trades, after);
+      shown.push({
+        ...base, buyVsSale, start: t, ms: TRADE_HOLD_MS, headline: p.headline, commentary: p.commentary, press: true, inNow: !invested,
+        bal: after, neverSold: !trades.some((x) => x.side === 'sell'),
+      });
+      t += TRADE_HOLD_MS;
     }
-    t += ms;
   }
   return { steps, shown };
 }
 
 /** Runs of consecutive steps showing the same text. */
 function groups(shown: Shown[], key: 'headline' | 'commentary') {
+  // from / to are indexes into `shown`.
   const out: { text: string; from: number; to: number; ms: number }[] = [];
-  for (const s of shown) {
+  shown.forEach((s, k) => {
     const g = out[out.length - 1];
-    if (g && g.text === s[key] && g.to === s.step - 1) {
-      g.to = s.step;
+    if (g && g.text === s[key]) {
+      g.to = k;
       g.ms += s.ms;
-    } else out.push({ text: s[key], from: s.step, to: s.step, ms: s.ms });
-  }
+    } else out.push({ text: s[key], from: k, to: k, ms: s.ms });
+  });
   return out;
 }
 
@@ -110,7 +130,9 @@ describe('R36 and R37 sweep: every run, both name modes, five ways to play', () 
       for (const real of [false, true]) {
         it(`${run.id}, ${pattern.name}, ${real ? 'real' : 'anonymous'} headlines`, { timeout: 60_000 }, () => {
           const steps0 = buildSchedule(run, headlines);
-          const { steps, shown } = play(run, headlines, real, pattern.at(steps0));
+          const sold = pattern.soldLastTime ? pattern.soldLastTime(steps0) : null;
+          const { steps, shown } = play(run, headlines, real, pattern.at(steps0), sold);
+          const slowAt = (k: number) => !shown[k].press && steps[shown[k].step].slow;
 
           // R36: no headline text on screen more than 8 s.
           const hg = groups(shown, 'headline');
@@ -136,21 +158,29 @@ describe('R36 and R37 sweep: every run, both name modes, five ways to play', () 
             }
             expect(FILLER).not.toContain(g.text);
             if (/bear market/.test(g.text)) bear++;
-            // Holds at least 4 s unless the next line comes on a slow day, after a trade, or the game ends.
-            if (next) {
-              const why = steps[next.from].slow || shown[next.from].tradedBefore;
-              if (!why) expect(g.ms, `"${g.text}" from step ${g.from}`).toBeGreaterThanOrEqual(4_000);
+            // R37, R52: a line holds at least 4 s, unless the next comes at a press, or on a slow day when the
+            // line was not itself set at a press, or the game ends. A blank may be filled at once (R51).
+            if (next && g.text) {
+              const why = shown[next.from].press || (slowAt(next.from) && !shown[g.from].press);
+              if (!why) expect(g.ms, `"${g.text}" from step ${shown[g.from].step}`).toBeGreaterThanOrEqual(4_000);
             }
-            // A new line only on a slow day, after a trade, or after 4 s.
+            // A new line only at a press, on a slow day, after 4 s, or in place of a blank.
             if (k > 0) {
               const prev = cg[k - 1];
-              expect(steps[g.from].slow || shown[g.from].tradedBefore || prev.ms >= 4_000, `line change at step ${g.from}`).toBe(true);
+              const ok = shown[g.from].press || slowAt(g.from) || prev.ms >= 4_000 || !prev.text;
+              expect(ok, `line change at step ${shown[g.from].step}`).toBe(true);
             }
+            // R52: a press changes the line at once.
+            if (shown[g.from].press && k > 0) expect(g.text).not.toBe(cg[k - 1].text);
+            // R51: never blank for more than one step.
+            if (!g.text) expect(new Set(shown.slice(g.from, g.to + 1).map((x) => x.step)).size, `blank from step ${shown[g.from].step}`).toBeLessThanOrEqual(1);
             if (!g.text) return;
             const first = F(shown[g.from].day);
             for (let i = g.from; i <= g.to; i++) {
               const s = shown[i];
-              checkLine(g.text, F(s.day), first, { bal: s.bal, start: 10_000, held: s.held, neverSold: s.neverSold });
+              checkLine(g.text, F(s.day), first, {
+                bal: s.bal, start: 10_000, held: s.held, neverSold: s.neverSold, inNow: s.inNow, buyVsSale: s.buyVsSale, soldLastTime: sold,
+              });
               // Never against the headline above it.
               const hd = headlineDir(s.headline);
               const ld = lineDir(g.text);
@@ -163,7 +193,10 @@ describe('R36 and R37 sweep: every run, both name modes, five ways to play', () 
           // Blank lines are a last resort.
           const blank = cg.filter((g) => !g.text).reduce((a, g) => a + g.ms, 0);
           const total = shown.reduce((a, s) => a + s.ms, 0);
-          expect(blank / total, 'share of time with no line').toBeLessThan(0.15);
+          expect(blank / total, 'share of time with no line').toBeLessThan(0.01);
+          // Every press shows its trade line (R52); a rematch names the day sold last time, once (R51).
+          for (const s of shown) if (s.press) expect(s.commentary, `press at step ${s.step}`).not.toBe('');
+          if (sold !== null && run.fallEndIndex > sold) expect(cg.filter((g) => /^Last time, you sold/.test(g.text)).length).toBe(1);
         });
       }
     }

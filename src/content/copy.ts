@@ -9,7 +9,6 @@ export function dollars(n: number): string {
 }
 
 export const MASTHEAD = "Don't Press Sell";
-export const OPENING_LINE = 'You have $10,000 of play money in the stock market. Hold your nerve or bail.';
 export const FIRST_SALE_LINE = 'You are out. To win, buy back in for less than you sold.';
 export const sellLabel = (n: number) => `Sell for ${dollars(n)}`;
 // Round 2, lane C (R38, R41): the buy-back button names one number, the saving against the latest
@@ -100,8 +99,29 @@ export const FOOTER_RESULT = 'US stock market · A Still Signal build';
 export const BEFORE_NEWS = 'Shares are down from their recent high';
 
 // Rematch and challenge (spec 6.7).
-export const SOLD_LAST_TIME = 'This is the day you sold last time.';
 export const scoreToBeatLine = (n: number) => `Score to beat: ${dollars(n)}`;
+
+// Round 2 fix lane FA (R51, R52, R53): lines under the headline that the narrator shows at a press and
+// in a rematch. No opening line any more (the Start screen says it). Each stays true for as long as it
+// can be on screen: a sale line while the player stays in cash, a buy line for good (it is about the
+// price paid), the rematch line for good (it names the day, as the folio shows it: index + 1).
+export const soldLastTimeLine = (dayIndex: number) => `Last time, you sold on day ${dayIndex + 1}.`;
+/** At a sale (after this phone's first, which shows FIRST_SALE_LINE); `cash` is the balance now in cash. */
+export const soldLines = (cash: number): string[] => [
+  `You sold. Your ${dollars(cash)} is in cash now.`,
+  `Out of the market, with ${dollars(cash)} in cash.`,
+  `${dollars(cash)} in cash. Prices can move without you now.`,
+];
+/** At a buy back; `saving` as on the button (R38): positive is cheaper than the latest sale. */
+export const boughtLines = (saving: number): string[] => {
+  const how = Math.round(saving) > 0 ? 'at a lower price than' : Math.round(saving) < 0 ? 'at a higher price than' : 'at the same price as';
+  const short = Math.round(saving) > 0 ? 'for less than' : Math.round(saving) < 0 ? 'for more than' : 'at the price';
+  return [
+    `You bought back in ${how} you sold.`,
+    `Back in the market, ${short} you sold.`,
+    `In again, ${how} you sold.`,
+  ];
+};
 
 // Run labels in the folio (spec 6.2) and special front pages (6.8, 6.12).
 export const REMATCH_LABEL = 'Rematch';

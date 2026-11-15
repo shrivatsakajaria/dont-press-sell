@@ -171,7 +171,18 @@ const fmt = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
  * about that day), `bal` the player's balance that day, `held` whether the player held through the
  * day's move, `neverSold` whether no sale has happened.
  */
-export function checkLine(t: string, f: Facts, first: Facts, ctx: { bal: number; start: number; held: boolean; neverSold: boolean }) {
+export function checkLine(
+  t: string, f: Facts, first: Facts,
+  ctx: {
+    bal: number; start: number; held: boolean; neverSold: boolean;
+    /** In the market now (after any press on this step); defaults to `held`. */
+    inNow?: boolean;
+    /** The latest buy against the latest sale before it, by the R38 number: 'lower' is cheaper. */
+    buyVsSale?: 'lower' | 'higher' | 'same' | null;
+    /** Rematch: the day index sold last time. */
+    soldLastTime?: number | null;
+  },
+) {
   const fail = (why: string) => {
     throw new Error(`line "${t}" false on day ${f.day} (shown from day ${first.day}): ${why}`);
   };
@@ -264,6 +275,40 @@ export function checkLine(t: string, f: Facts, first: Facts, ctx: { bal: number;
   if (/^You are back in the market/.test(t)) need(ctx.held && !ctx.neverSold && f.day > 0, 'back in');
   if ((r = t.match(/^Your (\$[\d,]+) is sitting in cash/))) need(!ctx.held && r[1] === fmt(ctx.bal), 'cash');
   if (!ctx.held && f.day > 0) need(!/on your money|is now \$|where you started/.test(t), 'in cash, money lines say the cash is not moving');
+
+  // R51, R52: the trade lines, the rematch line and the fallbacks.
+  const inNow = ctx.inNow ?? ctx.held;
+  if (/^You are out\. To win, buy back in/.test(t)) need(!inNow, 'out now');
+  if ((r = t.match(/^(?:You sold\. Your (\$[\d,]+) is in cash now|Out of the market, with (\$[\d,]+) in cash|(\$[\d,]+) in cash\. Prices can move without you)/))) {
+    need(!inNow && (r[1] ?? r[2] ?? r[3]) === fmt(ctx.bal), 'sold, cash now');
+  }
+  if ((r = t.match(/^(?:You bought back in|Back in the market|In again)(?: with (\$[\d,]+))?,? (?:at|for) (a lower price than|a higher price than|the same price as|less than|more than|the price) you sold/))) {
+    need(inNow, 'in now');
+    const said = /lower|less/.test(r[2]) ? 'lower' : /higher|more/.test(r[2]) ? 'higher' : 'same';
+    need(said === ctx.buyVsSale, `bought back ${said}, but it was ${ctx.buyVsSale}`);
+  } else if (/^(You bought back in|Back in the market,|In again,)/.test(t)) fail('unknown buy line');
+  if (/^On day one the market closed/.test(t)) {
+    need(first.day === 0, 'day one line put up after day one');
+    if ((r = t.match(/more than (\d+)% below the peak/))) need(first.dd > Number(r[1]), 'day one below peak');
+    if (/at its peak/.test(t)) need(first.dd <= 0, 'day one at peak');
+    if (/within one percent/.test(t)) need(first.dd < 1, 'day one within one');
+  }
+  if ((r = t.match(/^Last time, you sold on day (\d+)\.$/))) need(ctx.soldLastTime === Number(r[1]) - 1 && f.day >= ctx.soldLastTime, 'sold last time');
+  if ((r = t.match(/^No new high for at least (\w+) (days|weeks)\.$/))) {
+    const n = r[2] === 'weeks' ? num(r[1]) * 5 : num(r[1]);
+    need(n <= f.day + 1, 'no new high: longer than the run so far');
+    let best = f.high;
+    const rc = f.closes;
+    for (let k = 0; k < rc.length; k++) {
+      if (rc[k] >= best) need(f.day - k >= n, `no new high: day ${k + 1} was one`);
+      best = Math.max(best, rc[k]);
+    }
+  }
+  if ((r = t.match(/^No new low for at least (\d+) (days|weeks)\.$/))) {
+    const rc = f.closes;
+    const n = r[2] === 'weeks' ? Number(r[1]) * 5 : Number(r[1]);
+    need(f.day - rc.lastIndexOf(Math.min(...rc)) >= n, 'no new low (digits)');
+  }
 }
 
 export const FILLER = [

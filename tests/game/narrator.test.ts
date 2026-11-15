@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { BEFORE_NEWS } from '../../src/content/copy';
+import { BEFORE_NEWS, FIRST_SALE_LINE, soldLastTimeLine } from '../../src/content/copy';
 import { NEUTRAL_LINES } from '../../src/content/commentary';
 import type { Headline, Trade } from '../../src/engine/types';
 import { createNarrator, headlineOn, investedDuring, tradeNews } from '../../src/game/narrator';
@@ -72,6 +72,74 @@ describe('createNarrator', () => {
       expect(commentary).not.toMatch(/!|\b(19|20)\d\d\b/);
       prev = commentary;
     }
+  });
+});
+
+describe('K1 / R51 / R52: the narrator owns every line, and a press changes it at once', () => {
+  // A 60-day fall, one step a day of 300 ms, with slow days on 10 and 12.
+  const steps = closes.map((_, d) => ({ dayIndex: d, holdMs: d === 10 || d === 12 ? 3000 : 300, phase: 'fall' as const, slow: d === 10 || d === 12 }));
+  const make = (extra: { firstSale?: boolean; soldLastTime?: number | null } = {}) =>
+    createNarrator(run, [], { real: false, rng: mulberry32(4), start: 10000, steps, firstSale: false, ...extra });
+  const bal = (d: number) => 10000 * (closes[d] / closes[0]);
+
+  test('step 0 already has a line (no separate opening line, never "play money")', () => {
+    const w = make().step(0, null, 10000, []);
+    expect(w.commentary).not.toBe('');
+    expect(w.commentary).not.toMatch(/play money/);
+  });
+
+  test('a sale changes the line at the press to a true line about it, and a buy back does too', () => {
+    const n = make();
+    for (let d = 0; d <= 8; d++) n.step(d, d ? d - 1 : null, bal(d), []);
+    const trades: Trade[] = [{ dayIndex: 8, side: 'sell' }];
+    const sold = n.trade(8, trades, bal(8));
+    expect(sold.commentary).toMatch(/cash/);
+    expect(sold.headline).toBeTruthy();
+    for (let d = 9; d <= 20; d++) n.step(d, d - 1, bal(8), trades);
+    trades.push({ dayIndex: 20, side: 'buy' });
+    // Day 20 closes below day 8: buying back is cheaper than the sale.
+    const back = n.trade(20, trades, bal(8));
+    expect(back.commentary).toMatch(/lower price than you sold|less than you sold/);
+  });
+
+  test("this phone's first sale says how to win, through the narrator", () => {
+    const n = make({ firstSale: true });
+    n.step(0, null, 10000, []);
+    n.step(1, 0, bal(1), []);
+    expect(n.trade(1, [{ dayIndex: 1, side: 'sell' }], bal(1)).commentary).toBe(FIRST_SALE_LINE);
+  });
+
+  test('the line set at a press stays at least 4 s from the press, even over a slow day', () => {
+    const n = make();
+    for (let d = 0; d <= 8; d++) n.step(d, d ? d - 1 : null, bal(d), []);
+    const trades: Trade[] = [{ dayIndex: 8, side: 'sell' }];
+    const line = n.trade(8, trades, bal(8)).commentary;
+    // Counted from a press at the very end of day 8: the 500 ms hold, then 300 ms days and the 3 s slow day 10.
+    let t = 500;
+    for (let d = 9; d <= 30; d++) {
+      const w = n.step(d, d - 1, bal(8), trades);
+      if (t < 4000) expect(w.commentary, `day ${d}, ${t} ms after the press`).toBe(line);
+      t += steps[d].holdMs;
+    }
+  });
+
+  test('called again for the same step with a new trade (the old wiring), step() acts as trade()', () => {
+    const n = make();
+    for (let d = 0; d <= 7; d++) n.step(d, d ? d - 1 : null, bal(d), []);
+    const before = n.step(8, 7, bal(8), []).commentary;
+    const after = n.step(8, 7, bal(8), [{ dayIndex: 8, side: 'sell' }]).commentary;
+    expect(after).not.toBe(before);
+    expect(after).toMatch(/cash/);
+  });
+
+  test('a rematch names the day sold last time, on or after that day, never before (and it stays true)', () => {
+    const n = make({ soldLastTime: 15 });
+    const seen: { d: number; c: string }[] = [];
+    for (let d = 0; d < 40; d++) seen.push({ d, c: n.step(d, d ? d - 1 : null, bal(d), []).commentary });
+    const first = seen.find((x) => x.c === soldLastTimeLine(15));
+    expect(first).toBeDefined();
+    expect(first!.d).toBeGreaterThanOrEqual(15);
+    expect(first!.d).toBeLessThanOrEqual(15 + 14); // within one 4 s line of the day
   });
 });
 
