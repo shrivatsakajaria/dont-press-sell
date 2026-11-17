@@ -90,3 +90,10 @@ Kept up to date at the end of every task so a new session can carry on. Plan: `d
 - Live: https://dont-press-sell.shrivatsakajaria.workers.dev (Cloudflare Workers static assets via wrangler.jsonc; every push to claude/confident-pasteur-hxs729 deploys in about 2 minutes; link previews use the absolute workers.dev address). Sound now starts inside the Start tap on WebKit (iPhone, iPad, Safari). Open for SK: phone check with sound; iPhone check of red-day text and the trade dot; Web Analytics switch-on.
 - Domain: https://dontpresssell.com (Cloudflare Registrar, custom domain on the Worker); link previews use it. www.dontpresssell.com to be added as a second custom domain.
 - www.dontpresssell.com added as a second custom domain through wrangler.jsonc routes (the dashboard dialog said 'No zones match'); both addresses serve the game.
+
+## Analytics (SK chose Umami Cloud, free Hobby plan: 1 site, 100K events/month, cookieless), rulings R66-R70
+- R66. Umami script on the live site only (data-domains dontpresssell.com,www.dontpresssell.com); website id c3cd112a-c8b9-4391-9b80-5d5f5c446b8b (public, not a secret). Never counted from tests, preview or localhost.
+- R67. About 3-4 custom events per game plus the page view (budget ~15-20K games/month): game start, game end (outcome and how it was played), after-result action, share, and an exit mid-game (where they were). No personal data, no IDs, no cookies; counts kept on the phone are sent as buckets only.
+- R68. Every event carries context so groups can be compared: game number this visit, games ever (bucket), days since first play (bucket), entry (new, rematch, double, challenge link, picked), crash or false alarm and the run, in-app browser or not, sound on.
+- R69. One question, once, after the third game: "Play again tomorrow?" Yes / No. The result screen still fits one screen.
+- R70. docs/analytics.md: event dictionary and click-by-click steps to read it in Umami.
