@@ -1,6 +1,7 @@
 // Boot and flow (spec 6): straight into a mystery run, then the result front page, from which
 // every other mode starts. Rules live in the modules; this file only joins them.
-import { BORROWED_LABEL, BUST_HEADLINE, ISLAND_HEADLINE, REMATCH_LABEL, dailyLabel } from './content/copy';
+import { createAnalytics, watchExit, type Entry, type GameTrack, type ResultAction } from './analytics/analytics';
+import { BORROWED_LABEL, BUST_HEADLINE, COPY_LINK, ISLAND_HEADLINE, REMATCH_LABEL, dailyLabel } from './content/copy';
 import { loadHeadlines } from './content/headlines';
 import { RUNS, RUN_IDS, loadRun, runMeta } from './content/runs';
 import { simulateBorrowed } from './engine/borrowed';
@@ -77,6 +78,33 @@ let ticket = 0;
 let fullStartShown = false;
 
 setHapticsEnabled(vibrationCell.get() !== false);
+
+// Analytics (R66-R69): Umami's script (index.html) counts only on the live domains; nothing here waits on it.
+const an = createAnalytics({
+  umami: () => (window as unknown as { umami?: { track(n: string, d?: object): unknown } }).umami,
+  ua: typeof navigator === 'object' ? navigator.userAgent : '',
+  now: () => performance.now(),
+  today: () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  },
+  sound: () => soundCell.get() !== false,
+});
+watchExit(an, document, window);
+window.addEventListener('load', () => an.flush());
+// The reveal cover is the endscreen's; a tap on it is all analytics needs to know.
+root.addEventListener('click', (e) => {
+  if ((e.target as Element | null)?.closest?.('.es-cover')) an.revealed();
+}, { capture: true, passive: true });
+// The share fallback's own Copy link button (src/share/share.ts marks its dialog data-share-fallback).
+document.addEventListener('click', (e) => {
+  const b = (e.target as Element | null)?.closest?.('[data-share-fallback] button');
+  if (b && b.textContent === COPY_LINK) an.share('copy');
+}, { capture: true, passive: true });
+const acted = (a: ResultAction, fn: () => void) => () => {
+  an.action(a);
+  fn();
+};
 
 // Sound and vibration are on by default; phones allow them only after a tap, so the first tap anywhere unlocks them.
 const sfx = createSfx();
@@ -164,6 +192,7 @@ async function play(game: Game, opts: { double?: boolean; full?: boolean; retry?
     // I6: no dead page and no unhandled rejection; a tap tries the same game again. Some browsers keep a
     // failed module load for the page's life, so when the retry fails too the page reloads instead.
     if (mine !== ticket) return;
+    an.loadError(game.runId);
     if (opts.retry) {
       // Same game after the reload: mode, run, start, and the challenge code (read once on boot).
       saveResume({
@@ -194,6 +223,18 @@ async function play(game: Game, opts: { double?: boolean; full?: boolean; retry?
   const forwardSteps = firstForward < 0 ? 0 : steps.length - firstForward;
   const full = opts.full ?? !fullStartShown;
   fullStartShown = true;
+  // R68: the planned share of the game before each step (the progress line's own measure).
+  const planned: number[] = [];
+  let sum = 0;
+  for (const st of steps) {
+    planned.push(sum);
+    sum += st.holdMs;
+  }
+  const entry: Entry = opts.double ? 'double' : game.mode === 'rematch' || game.mode === 'picked' || game.mode === 'challenge' ? game.mode : 'new';
+  const track = an.game({
+    entry, kind: runMeta(game.runId)!.kind, run: game.runId, double: !!opts.double,
+    progress: (i) => (sum > 0 ? ((planned[i] ?? sum) / sum) * 100 : 0),
+  });
   session = startPlay(root, run, steps, {
     runLabel: game.label,
     borrowed,
@@ -212,23 +253,32 @@ async function play(game: Game, opts: { double?: boolean; full?: boolean; retry?
     soldLastTime: prev?.trades.find((t) => t.side === 'sell')?.dayIndex ?? null,
     scoreToBeat: prev ? prev.final : game.challenge ? game.challenge.final : null,
     other: prev ? prev.balances : null,
-    onEnd: (r) => finish(game, run, headlines, r),
+    onEnd: (r) => finish(game, run, headlines, r, track),
     soundOn: soundOn(),
     onSoundToggle: toggleSound,
     // A paused clock (Pause, or the page hidden) is silent.
-    onPause: () => sfx.setMuted(true),
-    onResume: () => sfx.setMuted(!soundOn()),
-    onFrame: (v, m, e) =>
+    onPause: () => {
+      track.pause();
+      sfx.setMuted(true);
+    },
+    onResume: () => {
+      track.resume();
+      sfx.setMuted(!soundOn());
+    },
+    onFrame: (v, m, e) => {
+      track.frame({ stepIndex: v.stepIndex, invested: v.invested, forward: v.phase === 'forward', red: m.worst, trade: e.trade });
       playCues(sfx, buzz, {
         ...e, worst: m.worst, invested: v.invested, phase: v.phase, leadNow: v.leadNow, start: game.start,
         forwardProgress: forwardSteps ? (v.stepIndex - firstForward + 1) / forwardSteps : 0,
-      }),
+      });
+    },
   });
 }
 
-function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
+function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult, track: GameTrack) {
   const meta = runMeta(run.id)!;
   const verdictId = verdictFor(r, run);
+  track.end({ lead: r.lead, trades: r.trades.length, bust: verdictId === 'marginCalled' });
   const s = settle({
     mode: game.mode, runId: run.id, result: r, verdict: verdictId, lowIndex: run.lowIndex,
     date: game.date, start: game.start, borrowed: !!game.borrowed,
@@ -238,11 +288,14 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
   const actions = resultActions(game, !!s.double);
   // Challenge a friend: never from borrowed money (spec 6.13), nor from a run with nothing left to beat.
   if (!game.borrowed && r.final >= 1) {
-    actions.onChallenge = () => void challengeFriend(game, run, r, verdict, s.double?.wins);
+    actions.onChallenge = acted('challenge', () => void challengeFriend(game, run, r, verdict, s.double?.wins));
   }
   if (DAILY_ENABLED && game.mode === 'daily' && s.blind && game.dailyNumber !== undefined) {
     const n = game.dailyNumber;
-    actions.onCopyResult = () => copyText(dailyText(n, verdict.title, r.lead, r.balances, siteBase(), s.daysInRow ?? 1));
+    actions.onCopyResult = () => {
+      an.share('copy');
+      return copyText(dailyText(n, verdict.title, r.lead, r.balances, siteBase(), s.daysInRow ?? 1));
+    };
   }
   showResult({
     run: { pickName: meta.pickName, revealLine: meta.revealLine, kind: meta.kind },
@@ -272,7 +325,14 @@ function finish(game: Game, run: RunFile, headlines: Headline[], r: RunResult) {
     sound: { on: soundOn() },
     sfx,
     actions,
+    ask: an.feedbackDue() ? answerFeedback : undefined,
   });
+}
+
+/** R69: the answer goes out, and the question does not come back on this result page. */
+function answerFeedback(yes: boolean) {
+  an.feedback(yes);
+  if (lastEnd) lastEnd = { ...lastEnd, ask: undefined };
 }
 
 /** The address the page is served from, read at the time (spec 10): never hard-coded. */
@@ -294,18 +354,27 @@ async function challengeFriend(
   } catch {
     /* no canvas here: share the line and the link alone */
   }
-  await shareResult({ text: shareLine(card), url, image });
+  // A card goes with the share sheet when the phone can share the file (share.ts makes the same check).
+  let withCard = false;
+  try {
+    withCard = !!image && typeof navigator.canShare === 'function' &&
+      navigator.canShare({ files: [new File([image], 'dont-press-sell.png', { type: image.type || 'image/png' })] });
+  } catch {
+    /* text and link only */
+  }
+  const how = await shareResult({ text: shareLine(card), url, image });
+  an.share(how === 'shared' ? (withCard ? 'card' : 'native') : 'fallback');
 }
 
 function resultActions(game: Game, offered: boolean): EndModel['actions'] {
   return {
-    onNewMystery: () => void newMystery(),
-    onRematch: () => void rematch(game),
-    onDouble: offered ? () => void double() : undefined,
-    onBank: offered ? bankNow : undefined,
-    onDaily: DAILY_ENABLED ? () => void daily() : undefined,
-    onPick: pickCrash,
-    onCollection: collection,
+    onNewMystery: acted('new', () => void newMystery()),
+    onRematch: acted('rematch', () => void rematch(game)),
+    onDouble: offered ? acted('double', () => void double()) : undefined,
+    onBank: offered ? acted('keep', bankNow) : undefined,
+    onDaily: DAILY_ENABLED ? acted('new', () => void daily()) : undefined,
+    onPick: acted('pick', pickCrash),
+    onCollection: acted('collection', collection),
     onToggleSound: toggleSound,
   };
 }
@@ -325,7 +394,7 @@ function showResult(model: EndModel) {
 /** Back from a menu: the same front page, already revealed and counted (no second count, no sound). */
 function back() {
   if (!lastEnd) return void newMystery();
-  showResult({ ...lastEnd, flags: { blind: false, again: true } });
+  showResult({ ...lastEnd, ask: undefined, flags: { blind: false, again: true } });
 }
 
 function bankNow() {
@@ -432,6 +501,7 @@ async function challenge(code: string, retry = false) {
     } catch {
       // I6: the run would not load. Say so and try again; a second failure reloads into the same challenge.
       if (mine !== ticket) return;
+      an.loadError(c.runId);
       if (retry) {
         saveResume({ mode: 'challenge', runId: c.runId, start: START, code });
         return location.reload();

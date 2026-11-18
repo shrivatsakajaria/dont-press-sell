@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { pressStart } from './start';
 
 // R36 and R37 in the real app: no headline stays more than 8 s, and no line under it comes back

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { pressStart } from './start';
 
 test('a run that does not load says so on the paper and a tap tries again (I6)', async ({ page }) => {

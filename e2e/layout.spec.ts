@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { pressStart } from './start';
 
 // R30: the play screen's layout is stable. Through a whole run (selling on the first red day, then

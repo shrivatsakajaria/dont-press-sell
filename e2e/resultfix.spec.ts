@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import { pressStart } from './start';
 
 // Round 2 fix wave, lane FD (R58 and the sound part of R57): the result page and its flow.

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import { pressStart } from './start';
 
 /** R51: no opening line on the play screen (the Start screen says it); the narrator's own line from day 1. */

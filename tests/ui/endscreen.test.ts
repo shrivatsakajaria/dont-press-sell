@@ -782,3 +782,23 @@ describe('round 2 fixes (R58)', () => {
   });
 });
 
+
+describe('one question after the third game (R69)', () => {
+  test('one line with Yes and No; the answer is passed on and the line goes', () => {
+    const answers: boolean[] = [];
+    mount({ ...c2007Sample(), ask: (yes) => answers.push(yes) });
+    const line = root.querySelector('.es-ask')!;
+    expect(line.textContent).toContain('Play again tomorrow?');
+    expect(line.hasAttribute('data-trimmable')).toBe(false);
+    const [yes, no] = Array.from(line.querySelectorAll('button'));
+    expect([yes.textContent, no.textContent]).toEqual(['Yes', 'No']);
+    no.click();
+    expect(answers).toEqual([false]);
+    expect(root.querySelector('.es-ask')).toBeNull();
+  });
+
+  test('no question without ask', () => {
+    mount(c2007Sample());
+    expect(root.querySelector('.es-ask')).toBeNull();
+  });
+});

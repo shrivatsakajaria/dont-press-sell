@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
 // R46: the first game a player ever plays is a real crash: 1987, 2008, 2020 or 2022.
 // The stored record decides "ever". A challenge link still opens its own run.

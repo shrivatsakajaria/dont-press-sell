@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import { pressStart } from './start';
 
 // R44: the result page, buttons included, fits one screen (390 x 660 and 390 x 844) with no scrolling,

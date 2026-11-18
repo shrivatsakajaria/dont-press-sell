@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { pressStart } from './start';
 
 test('with sharing unavailable, Challenge a friend shows the card full screen with the fallback, crash name hidden', async ({ page, context }) => {

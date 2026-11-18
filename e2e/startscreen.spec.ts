@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
 // The start screen (ruling R28): a fresh page load stands still until Start is pressed.
 const LINES = [
