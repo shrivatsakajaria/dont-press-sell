@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import { pressStart } from './start';
 
 // R65 (SK): the Sold dot sits on the tip of the line at the moment of the press and a frame later, for presses

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import { pressStart } from './start';
 
 // Round 3, lane S: the progress line (R60), "Game over" (R61) and "more expensive" on one line (R63).

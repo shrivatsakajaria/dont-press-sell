@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -50,7 +50,10 @@ test('first load stays under 300 KB with no third-party requests but the analyti
 
   const origin = new URL(page.url()).origin;
   const foreign = urls.filter((u) => !u.startsWith(origin) && !u.startsWith('data:') && !u.startsWith('blob:'));
-  const bad = foreign.filter((u) => new URL(u).hostname !== 'static.cloudflareinsights.com');
+  // R66: the one outside script is Umami's, asked for and answered here by the fixture with an empty script (never reached in tests).
+  const umami = foreign.filter((u) => new URL(u).hostname === 'cloud.umami.is');
+  expect(umami).toEqual(['https://cloud.umami.is/script.js']);
+  const bad = foreign.filter((u) => !['static.cloudflareinsights.com', 'cloud.umami.is'].includes(new URL(u).hostname));
   expect(bad).toEqual([]);
   expect(urls.filter((u) => /fonts\.(googleapis|gstatic)\.com|cdn/i.test(u) && !/cloudflareinsights/.test(u))).toEqual([]);
 });

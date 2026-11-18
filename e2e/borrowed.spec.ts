@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import { pressStart } from './start';
 
 async function unlockBorrowed(page: Page) {

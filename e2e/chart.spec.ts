@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { pressStart } from './start';
 
 // R42: the play chart is the market price only, one unbroken line through a sale and a buy-back,

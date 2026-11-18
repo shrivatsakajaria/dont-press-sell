@@ -20,6 +20,9 @@ import {
   TAP_TO_REVEAL,
   aheadBehindLine,
   winsInRowLine,
+  ASK_NO,
+  ASK_TOMORROW,
+  ASK_YES,
 } from '../content/copy';
 import type { RunKind, RunResult, VerdictId } from '../engine/types';
 import type { Sfx } from '../fx/sound';
@@ -80,6 +83,8 @@ export interface EndModel {
   /** The black-bordered front page for the eighth win in a row (6.8). */
   blackBorder?: boolean;
   sound?: { on: boolean };
+  /** R69: one line, "Play again tomorrow?" with Yes and No; called with the answer, and the line goes. */
+  ask?: (yes: boolean) => void;
   sfx?: Pick<Sfx, 'rise' | 'thud' | 'payout'>;
   actions: {
     onNewMystery: () => void;
@@ -161,6 +166,9 @@ function css(p: ReturnType<typeof paperFor>): string {
 .es-misses{list-style:none;padding:0;margin-top:12px;border-top:1px solid var(--soft)}
 .es-misses li{padding:8px 0;border-bottom:1px solid var(--soft);font-family:${SANS};font-weight:500;font-size:14px;line-height:1.3}
 .es-grow{flex-grow:1;min-height:8px}
+.es-ask{display:flex;align-items:center;gap:16px;font-family:${SANS};font-weight:500;font-size:14px;line-height:1.3;color:var(--sec)}
+.es-ask span{margin-right:auto}
+.es-ask button{min-width:44px;min-height:44px;font-weight:700;color:var(--ink);text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
 .es-pot{margin-top:8px;padding-top:8px;border-top:1px solid var(--ink);font-family:${SANS};font-weight:700;font-size:14px;line-height:1.35}
 .es-foot{display:flex;flex-wrap:wrap;column-gap:20px;border-top:1px solid var(--ink)}
 .es-foot button{min-height:44px;font-family:${SANS};font-weight:500;font-size:14px;color:var(--sec);text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
@@ -463,6 +471,22 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
   // comes back once the win is banked. On a blind page it stays until the reveal (no tell).
   const newLink = button('es-link', NEW_MYSTERY, actions.onNewMystery);
   page.appendChild(newLink);
+  // R69: never left out to fit (it is asked once); answered, it goes and the page refits.
+  if (model.ask) {
+    const answer = model.ask;
+    const ask = h('div', 'es-ask');
+    ask.appendChild(h('span', '', ASK_TOMORROW));
+    for (const [label, yes] of [[ASK_YES, true], [ASK_NO, false]] as const) {
+      ask.appendChild(
+        button('', label, () => {
+          ask.remove();
+          answer(yes);
+          refit();
+        }),
+      );
+    }
+    page.appendChild(ask);
+  }
 
   // R28: the table and the near misses come after the buttons; on a short screen they are left out.
   page.appendChild(table);
@@ -519,16 +543,22 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
     const scale = w > 0 ? w / CHART_W : 1;
     let least = chartMin;
     chartEl.style.height = `${least * scale}px`;
-    trim();
+    let over = trim();
     if (links.hasAttribute('data-trim') && links.childElementCount) {
       least = chartFloor();
       chartEl.style.height = `${least * scale}px`;
-      trim();
+      over = trim();
       if (links.hasAttribute('data-trim')) {
         least = chartMin;
         chartEl.style.height = `${least * scale}px`;
-        trim();
+        over = trim();
       }
+    }
+    // Still over with every extra out (R69's question takes a line it never gives up): the chart comes down to its floor.
+    if (over) {
+      least = chartFloor();
+      chartEl.style.height = `${least * scale}px`;
+      trim();
     }
     const spare = Math.max(0, grow.getBoundingClientRect().height - (parseFloat(getComputedStyle(grow).minHeight) || 0));
     const H = Math.min(CHART_MAX, Math.max(least, Math.floor(least + spare / scale)));
@@ -548,7 +578,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       document.documentElement.scrollHeight > window.innerHeight + 0.5 ||
       (least > 0 && page.getBoundingClientRect().height > least + 0.5);
     for (const e of trimmable) e.removeAttribute('data-trim');
-    if (!over()) return;
+    if (!over()) return false;
     const ranked = trimmable
       .slice()
       .sort((a, b) => Number(b.getAttribute('data-trimmable')) - Number(a.getAttribute('data-trimmable')));
@@ -557,6 +587,7 @@ export function mountEndScreen(root: HTMLElement, model: EndModel): { destroy():
       e.removeAttribute('data-trim');
       if (over()) e.setAttribute('data-trim', '');
     }
+    return over();
   };
   /**
    * The name's height in the moment, measured off to the side (a focused cover keeps its focus). Before

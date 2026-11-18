@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import { pressStart } from './start';
 
 // R48: every tap target at least 44 px each way; small text at least 14 px. Result page and menus.

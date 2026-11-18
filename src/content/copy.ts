@@ -271,3 +271,8 @@ export const CLOSE = 'Close';
 
 // A run whose data did not load (I6).
 export const LOAD_FAILED = 'This run did not load. Tap to try again.';
+
+// Analytics lane (R69): one question, once, after the third finished game.
+export const ASK_TOMORROW = 'Play again tomorrow?';
+export const ASK_YES = 'Yes';
+export const ASK_NO = 'No';
